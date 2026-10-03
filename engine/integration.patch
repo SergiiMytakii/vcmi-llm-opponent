@@ -1,0 +1,51 @@
+--- a/AI/CMakeLists.txt
++++ b/AI/CMakeLists.txt
+@@ -17,6 +17,7 @@
+ 
+ # Adventure AI's
+ add_subdirectory(EmptyAI)
++add_subdirectory(ExternalAI)
+ 
+ if(ENABLE_NULLKILLER2_AI)
+ 	add_subdirectory(Nullkiller2)
+--- a/libFacade/CMakeLists.txt
++++ b/libFacade/CMakeLists.txt
+@@ -32,7 +32,7 @@
+ 	target_link_libraries(vcmi PRIVATE vcmiLua)
+ 
+ 	if(ENABLE_CLIENT OR ENABLE_TEST)
+-		target_link_libraries(vcmi PRIVATE EmptyAI)
++		target_link_libraries(vcmi PRIVATE EmptyAI ExternalAI)
+ 
+ 		if(ENABLE_NULLKILLER2_AI)
+ 			target_link_libraries(vcmi PRIVATE Nullkiller2)
+--- a/lib/callback/AIFactory.cpp
++++ b/lib/callback/AIFactory.cpp
+@@ -25,10 +25,18 @@
+ #  include "../../AI/MMAI/MMAI.h"
+ #endif
+ #include "../../AI/EmptyAI/CEmptyAI.h"
++#include "../../AI/ExternalAI/ExternalAI.h"
+ 
+ std::shared_ptr<CGlobalAI> AIFactory::createAdventureAI(const std::string & name)
+ {
+ 	logGlobal->info("Creating adventure AI %s", name);
++
++	if(name == "ExternalAI")
++	{
++		auto ret = std::make_shared<ExternalAI>();
++		ret->dllName = name;
++		return ret;
++	}
+ 
+ 	if(name == "Nullkiller2")
+ 	{
+@@ -76,7 +84,7 @@
+ 
+ bool AIFactory::isAvailableAdventureAI(const std::string & name)
+ {
+-	if(name == "EmptyAI")
++	if(name == "EmptyAI" || name == "ExternalAI")
+ 		return true;
+ #ifdef ENABLE_NULLKILLER2_AI
+ 	if(name == "Nullkiller2")

@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/vcmi/vcmi.git",
+  "revision": "6a1ca68e00f540087f35579c62ffaf037f5be269",
+  "dependencies_revision": "f61de7b5e1cbfc3d916a600b7468b5d9c2492995",
+  "dependencies_release": "2026-09-01",
+  "macos_dependencies_sha256": "45ce5c2e00b4fe63270cdb5612af9804c3605d5a312f2b57f736202148b83dfd"
+}

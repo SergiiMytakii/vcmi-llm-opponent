@@ -1,0 +1,2 @@
+# Unified diff context prefixes are part of the patch format.
+engine/integration.patch -whitespace

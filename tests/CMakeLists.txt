@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.21)
+project(ExternalAITransportTests LANGUAGES CXX)
+find_package(Boost REQUIRED COMPONENTS filesystem)
+add_executable(exchange-driver exchange_driver.cpp ../engine/ExternalAI/ProcessExchange.cpp)
+target_compile_features(exchange-driver PRIVATE cxx_std_20)
+target_include_directories(exchange-driver PRIVATE ../engine/ExternalAI)
+target_link_libraries(exchange-driver PRIVATE Boost::filesystem)
