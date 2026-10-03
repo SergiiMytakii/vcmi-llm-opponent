@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "case_id": "land-duel-01",
+  "purpose": "training",
+  "engine": "/ABSOLUTE/PATH/.build/VCMI-ExternalAI.app/Contents/MacOS/vcmiclient",
+  "engine_sources": [
+    "/ABSOLUTE/PATH/.build/mac/bin/libvcmi.dylib",
+    "/ABSOLUTE/PATH/.build/VCMI-ExternalAI.app/Contents/MacOS/vcmiserver"
+  ],
+  "profile_template": "/ABSOLUTE/PATH/.build/fixtures/duel-home",
+  "map_resource": "Maps/LandDuel.h3m",
+  "controller": [
+    "/ABSOLUTE/PATH/python3",
+    "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/main.py"
+  ],
+  "controller_sources": [],
+  "references": {
+    "prompt": "strategy.md",
+    "knowledge": "knowledge.md"
+  },
+  "players": {"red": "ExternalAI", "blue": "Nullkiller2"},
+  "seed": 42,
+  "difficulty": "normal",
+  "max_seconds": 1800,
+  "decision_timeout_seconds": 18,
+  "headless": false,
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "medium"
+}
