@@ -13,7 +13,11 @@
     "/ABSOLUTE/PATH/python3",
     "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/main.py"
   ],
-  "controller_sources": [],
+  "controller_sources": [
+    "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/codex.py",
+    "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/instructions.txt",
+    "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/model.json"
+  ],
   "references": {
     "prompt": "strategy.md",
     "knowledge": "knowledge.md"
