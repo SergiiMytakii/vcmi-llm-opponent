@@ -57,6 +57,7 @@ def main():
         reply.pop('learning', None)
     if experience_error:
         metadata['experience_error'] = experience_error
+    metadata['request_bytes'] = len(raw)
     metadata.update(request_id=request['request_id'], action_id=reply['action_id'] if reply else None)
     print(json.dumps(metadata), file=sys.stderr)
     decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')

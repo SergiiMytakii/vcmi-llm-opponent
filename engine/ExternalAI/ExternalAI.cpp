@@ -7,6 +7,7 @@
 #include "RouteForecast.h"
 #include "SkillChoice.h"
 #include "TurnBatch.h"
+#include "TransportJSON.h"
 
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/callback/Calendar.h"
@@ -278,7 +279,7 @@ void ExternalAI::gameOver(PlayerColor player, const EVictoryLossCheckResult & re
 	request["actions"].Vector().push_back(end);
 	// A bounded final reflection runs before this callback returns. Its reply
 	// never executes a game command or changes a saved operational plan.
-	auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(70), stopping);
+	auto response = externalai::exchange(executable, {script}, externalai::transportJSON(request.toCompactString()), std::chrono::seconds(70), stopping);
 	logAi->info("ExternalAI final experience review player=%d outcome=%s delivered=%d", playerID.getNum(),
 		result.victory() ? "win" : "loss", response.error.empty());
 }
@@ -1001,7 +1002,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 	const auto script = environmentValue("VCMI_EXTERNAL_AI_SCRIPT");
 	if(!fromBatch && !executable.empty() && !script.empty())
 	{
-		auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(70), stopping);
+		auto response = externalai::exchange(executable, {script}, externalai::transportJSON(request.toCompactString()), std::chrono::seconds(70), stopping);
 		if(response.error.empty())
 		{
 			try

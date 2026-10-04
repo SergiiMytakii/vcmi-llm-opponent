@@ -30,12 +30,15 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))
 
 def restore_request(encoded):
     """Independent reader of the model-facing shared JSON format."""
-    if set(encoded) != {'reference_key', 'shared', 'request'}:
+    if not {'reference_key', 'shared', 'request'} <= set(encoded):
         return encoded
     marker, definitions = encoded['reference_key'], encoded['shared']
 
     def expand(value):
         if isinstance(value, dict):
+            if list(value) == [encoded.get('object_key')]:
+                shape, *cells = value[encoded['object_key']]
+                return {key:expand(cell) for key,cell in zip(encoded['fields'][shape], cells)}
             if list(value) == [marker]:
                 return expand(definitions[value[marker]])
             return {key:expand(item) for key,item in value.items()}
@@ -72,7 +75,7 @@ class PromptContextTest(unittest.TestCase):
             raw = capture.read_text(encoding='utf-8')
             self.assertEqual((decision/'codex-request.json').read_text(encoding='utf-8'), raw)
             schema = json.loads((decision/'codex-schema.json').read_text())
-            self.assertEqual(schema['properties']['action_id']['enum'], ['end','build'])
+            self.assertEqual(schema['properties']['action_id']['enum'], [a['id'] for a in request['actions']])
             self.assertEqual(info['input_encoding']['sent_bytes'], len(raw.encode('utf-8')))
             return raw, info
 
@@ -84,6 +87,65 @@ class PromptContextTest(unittest.TestCase):
         self.assertNotIn(': ', raw)
         self.assertNotIn(', ', raw)
         self.assertEqual(json.loads(raw), request)
+
+    def test_varied_routes_share_field_names_without_dropping_actions_or_facts(self):
+        request = self.request()
+        request['observation']['routes'] = [
+            {'hero':n % 3, 'target_ref':'object:' + str(n), 'travel_turns':n / 10,
+             'owner':n % 4, 'resource_type':'wood' if n % 2 else 'ore',
+             'resource_amount':None, 'stale':bool(n % 2), 'last_seen_day':n,
+             'unseen_threats':'unknown', 'guard_strength_minimum':n * 100,
+             'guard_strength_maximum':n * 200} for n in range(60)]
+        request['actions'] += [{'id':'move-' + str(n), 'kind':'visit', **route}
+                               for n,route in enumerate(request['observation']['routes'])]
+        original = copy.deepcopy(request)
+        raw, info = self.call(request)
+        encoded = json.loads(raw)
+        self.assertIn('fields', encoded)
+        self.assertEqual(restore_request(encoded), original)
+        self.assertEqual(request, original)
+        self.assertLess(len(raw.encode()), len(json.dumps(original, ensure_ascii=False).encode()) * .7)
+        self.assertIn('parts', info['input_encoding'])
+
+    def test_history_budget_keeps_current_choices_plan_threats_and_uncertainty(self):
+        request = self.request()
+        request['observation']['player'] = 0
+        request['observation']['day'] = 20
+        threat = {'id':900, 'ref':'object:900', 'kind':'hero', 'owner':1,
+                  'stale':True, 'last_seen_day':1, 'position':[7,8,0],
+                  'army':{'quantity':None, 'note':'Old uncertain enemy army' * 10}}
+        target = {'id':901, 'ref':'object:901', 'kind':'mine', 'owner':-1,
+                  'resource_type':'wood', 'stale':True, 'last_seen_day':1}
+        request['memory'] = {'plan':None, 'experience_id':'test-game',
+            'known_objects':[{'id':n,'ref':'object:' + str(n),'kind':'frontier',
+                              'last_seen_day':0,'stale':True,'note':'old frontier ' * 100}
+                             for n in range(100)] + [threat,target],
+            'recent_results':[{'sequence':1,'day':1,'outcome':'unconfirmed',
+                               'action':{'id':'pending','kind':'attack','target_ref':'object:900'}}]}
+        original = copy.deepcopy(request)
+        raw, info = self.call(request)
+        model = restore_request(json.loads(raw))
+        self.assertEqual(request, original)
+        self.assertEqual(model['observation'], original['observation'])
+        self.assertEqual(model['actions'], original['actions'])
+        self.assertEqual(model['memory']['plan'], original['memory']['plan'])
+        self.assertIn(threat, model['memory']['known_objects'])
+        self.assertIn(target, model['memory']['known_objects'])
+        self.assertEqual(model['memory']['recent_results'], original['memory']['recent_results'])
+        self.assertLessEqual(len(json.dumps(model['memory'], ensure_ascii=False, separators=(',', ':')).encode()), 32768)
+        self.assertTrue(info['input_encoding']['history']['applied'])
+
+    def test_protected_history_can_exceed_budget_without_hiding_threats(self):
+        request = self.request()
+        request['observation'].update(player=0, day=20)
+        request['memory'] = {'plan':None, 'known_objects':[
+            {'id':n,'ref':'object:' + str(n),'kind':'hero','owner':1,
+             'last_seen_day':1,'stale':True,'note':'uncertain enemy ' * 100}
+            for n in range(25)], 'recent_results':[]}
+        raw, info = self.call(request)
+        self.assertEqual(restore_request(json.loads(raw)), request)
+        self.assertTrue(info['input_encoding']['history']['over_budget'])
+        self.assertEqual(info['input_encoding']['history']['omitted_sightings'], 0)
 
     def test_repeated_facts_are_shared_without_losing_uncertainty_or_time(self):
         request = self.request()
@@ -112,10 +174,11 @@ class PromptContextTest(unittest.TestCase):
         record = {'note':'Сведения о неизвестном противнике, а не подтверждение победы.' * 4,
                   'quantity':None, 'empty':[], 'flags':[False, 0, True, 1, 1.0]}
         request['observation']['records'] = [copy.deepcopy(record) for _ in range(10)]
-        request['observation']['literal'] = {'$ref':0, '$ref_':{'$ref':1}}
+        request['observation']['literal'] = {'$ref':0, '$ref_':{'$ref':1}, '$obj':[0,None]}
         raw, _ = self.call(request)
         encoded = json.loads(raw)
         self.assertNotIn(encoded['reference_key'], {'$ref', '$ref_'})
+        self.assertNotEqual(encoded.get('object_key'), '$obj')
         restored = restore_request(encoded)
         self.assertEqual(restored, request)
         self.assertEqual([type(x) for x in restored['observation']['records'][0]['flags']],

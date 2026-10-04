@@ -22,10 +22,13 @@ def codex_fixture(folder, source, expand_context=True):
 import io, json, sys
 if sys.argv[1:2] == ['exec']:
     wire = json.load(sys.stdin)
-    if set(wire) == {'reference_key', 'shared', 'request'}:
+    if {'reference_key', 'shared', 'request'} <= set(wire):
         marker, definitions = wire['reference_key'], wire['shared']
         def expand(value):
             if isinstance(value, dict):
+                if list(value) == [wire.get('object_key')]:
+                    shape, *cells = value[wire['object_key']]
+                    return {key:expand(cell) for key,cell in zip(wire['fields'][shape], cells)}
                 if list(value) == [marker]:
                     return expand(definitions[value[marker]])
                 return {key:expand(item) for key,item in value.items()}

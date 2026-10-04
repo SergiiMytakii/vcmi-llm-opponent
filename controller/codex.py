@@ -10,7 +10,8 @@ import time
 from strategy import strategy_schema, validate_strategy
 from experience import learning_schema, validate_learning
 from batch import validate_batch
-from prompt_context import compact_json, encode_request, SHARED_CONTEXT_INSTRUCTIONS
+from prompt_context import (compact_json, encode_request, context_parts, bounded_history,
+                            SHARED_CONTEXT_INSTRUCTIONS, HISTORY_INSTRUCTIONS, SOFT_INPUT_BYTES)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -114,9 +115,21 @@ def choose(request):
         raise ValueError('unsupported Codex CLI version; requires 0.160.0')
     with tempfile.TemporaryDirectory(prefix='vcmi-decision-') as folder:
         workspace = Path(folder)
-        model_request = encode_request(request)
-        shared_context = model_request is not request
+        projected, history = bounded_history(request)
+        model_request = encode_request(projected)
+        shared_context = model_request is not projected
         model_input = compact_json(model_request)
+        encoding = {'format':('shared-json-v2' if 'fields' in model_request else 'shared-json-v1') if shared_context else 'json',
+                    'original_bytes':len(json.dumps(request).encode('utf-8')),
+                    'sent_bytes':len(model_input.encode('utf-8')),
+                    'shared_values':len(model_request['shared']) if shared_context else 0,
+                    'field_sets':len(model_request.get('fields', [])) if shared_context else 0,
+                    'parts':context_parts(projected), 'original_parts':context_parts(request),
+                    'history':history, 'soft_input_budget_bytes':SOFT_INPUT_BYTES,
+                    'over_soft_input_budget':len(model_input.encode('utf-8')) > SOFT_INPUT_BYTES}
+        decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
+        if decision_dir:
+            (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
         instructions = (ROOT / 'instructions.txt').read_text(encoding='utf-8')
         references = {}
         for name in ('PROMPT', 'KNOWLEDGE'):
@@ -129,6 +142,8 @@ def choose(request):
                 references[name.lower()] = hashlib.sha256(raw).hexdigest()
         if shared_context:
             instructions += '\n' + SHARED_CONTEXT_INSTRUCTIONS
+        if history['applied']:
+            instructions += '\n' + HISTORY_INSTRUCTIONS
         (workspace / 'instructions.txt').write_text(instructions, encoding='utf-8')
         schema = {'type': 'object', 'additionalProperties': False,
                   'required': ['protocol', 'request_id', 'action_id'], 'properties': {
@@ -219,8 +234,5 @@ def choose(request):
         reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
         return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': 'medium',
                        'cli': VERSION, 'usage': usage, 'references': references,
-                       'input_encoding': {'format':'shared-json-v1' if shared_context else 'json',
-                                          'original_bytes':len(json.dumps(request).encode('utf-8')),
-                                          'sent_bytes':len(model_input.encode('utf-8')),
-                                          'shared_values':len(model_request['shared']) if shared_context else 0},
+                       'input_encoding': encoding,
                        'duration_seconds': round(time.monotonic() - started, 3)}

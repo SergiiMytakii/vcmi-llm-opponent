@@ -1,5 +1,6 @@
 """Real subprocess checks; build exchange-driver before running this module."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,16 @@ DRIVER = Path(os.environ.get("EXCHANGE_DRIVER", ROOT / ".build" / "exchange-driv
 
 
 class ProcessExchangeTest(unittest.TestCase):
+    def test_controller_json_is_minified_without_changing_escaped_strings(self):
+        driver = DRIVER.parent / ('json-transport-driver.exe' if os.name == 'nt' else 'json-transport-driver')
+        facts = {'values':[1, True, None, [], {}], 'text':'Привет \" герой \\ путь\n\t',
+                 'literal':'\\\" \" : , \\n'}
+        result = subprocess.run([str(driver)], input=json.dumps(facts, ensure_ascii=False, indent=4),
+                                text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), facts)
+        self.assertEqual(result.stdout, json.dumps(facts, ensure_ascii=False, separators=(',', ':')))
+
     def exchange(self, code, timeout=2000, request="request"):
         return subprocess.run(
             [str(DRIVER), str(timeout), sys.executable, "-c", code],
