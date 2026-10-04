@@ -136,7 +136,7 @@ def run_game(run):
                     else ["--testmap", manifest["map_resource"]])
         args = ["--nointro", "--disable-video", "--onlyAI", *scenario,
                 "--savefrequency", "1", "--serverport", str(port), "--logLocation", str(logs)]
-        args += ["--headless"] if manifest.get("headless", False) else ["--spectate", "--spectate-skip-battle-result"]
+        args += ["--headless"] if manifest.get("headless", False) else ["--spectate", "--spectate-skip-battle", "--spectate-skip-battle-result"]
         if len(names) > 1:
             if b"--ai" not in help_result.stdout:
                 raise ValueError("this engine lacks per-player --ai selection")
