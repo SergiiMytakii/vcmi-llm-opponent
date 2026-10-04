@@ -15,6 +15,7 @@
   ],
   "controller_sources": [
     "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/codex.py",
+    "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/prompt_context.py",
     "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/batch.py",
     "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/experience.py",
     "/ABSOLUTE/PATH/vcmi-llm-opponent/controller/strategy.py",

@@ -10,6 +10,7 @@ import time
 from strategy import strategy_schema, validate_strategy
 from experience import learning_schema, validate_learning
 from batch import validate_batch
+from prompt_context import compact_json, encode_request, SHARED_CONTEXT_INSTRUCTIONS
 
 
 ROOT = Path(__file__).resolve().parent
@@ -113,6 +114,9 @@ def choose(request):
         raise ValueError('unsupported Codex CLI version; requires 0.160.0')
     with tempfile.TemporaryDirectory(prefix='vcmi-decision-') as folder:
         workspace = Path(folder)
+        model_request = encode_request(request)
+        shared_context = model_request is not request
+        model_input = compact_json(model_request)
         instructions = (ROOT / 'instructions.txt').read_text(encoding='utf-8')
         references = {}
         for name in ('PROMPT', 'KNOWLEDGE'):
@@ -123,6 +127,8 @@ def choose(request):
                     raise ValueError('strategy reference is too large')
                 instructions += '\n\n' + name + '\n' + raw.decode('utf-8')
                 references[name.lower()] = hashlib.sha256(raw).hexdigest()
+        if shared_context:
+            instructions += '\n' + SHARED_CONTEXT_INSTRUCTIONS
         (workspace / 'instructions.txt').write_text(instructions, encoding='utf-8')
         schema = {'type': 'object', 'additionalProperties': False,
                   'required': ['protocol', 'request_id', 'action_id'], 'properties': {
@@ -143,7 +149,7 @@ def choose(request):
         if request.get('experience', {}).get('mode') == 'learn':
             schema['required'].append('learning')
             schema['properties']['learning'] = learning_schema(request['experience'])
-        (workspace / 'schema.json').write_text(json.dumps(schema), encoding='utf-8')
+        (workspace / 'schema.json').write_text(compact_json(schema), encoding='utf-8')
         config = {
             'model_provider': 'openai', 'forced_login_method': 'chatgpt',
             'model_reasoning_effort': 'medium', 'model_catalog_json': str(ROOT / 'model.json'),
@@ -163,7 +169,7 @@ def choose(request):
         for key, value in config.items():
             command += ['-c', key + '=' + json.dumps(value)]
         command += ['-']
-        (workspace / 'request.json').write_text(json.dumps(request), encoding='utf-8')
+        (workspace / 'request.json').write_text(model_input, encoding='utf-8')
         with (workspace / 'request.json').open('rb') as stdin, \
                 (workspace / 'events.jsonl').open('wb') as stdout, \
                 (workspace / 'stderr.log').open('wb') as stderr:
@@ -185,6 +191,8 @@ def choose(request):
                 child.wait(timeout=1)
                 decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
                 if decision_dir:
+                    (Path(decision_dir) / 'codex-request.json').write_text(model_input, encoding='utf-8')
+                    (Path(decision_dir) / 'codex-schema.json').write_text(compact_json(schema), encoding='utf-8')
                     for name in ('events.jsonl', 'stderr.log'):
                         with (workspace / name).open('rb') as stream:
                             (Path(decision_dir) / ('codex-' + name)).write_bytes(stream.read(LIMIT))
@@ -211,4 +219,8 @@ def choose(request):
         reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
         return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': 'medium',
                        'cli': VERSION, 'usage': usage, 'references': references,
+                       'input_encoding': {'format':'shared-json-v1' if shared_context else 'json',
+                                          'original_bytes':len(json.dumps(request).encode('utf-8')),
+                                          'sent_bytes':len(model_input.encode('utf-8')),
+                                          'shared_values':len(model_request['shared']) if shared_context else 0},
                        'duration_seconds': round(time.monotonic() - started, 3)}
