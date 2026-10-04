@@ -47,7 +47,7 @@ Reply exchange(const std::string & executable, const std::vector<std::string> & 
 	Reply reply;
 	if(cancelled)
 		return {{}, "cancelled"};
-	if(input.size() > 256 * 1024)
+	if(input.size() > 512 * 1024)
 		return {{}, "request too large"};
 	const auto deadline = std::chrono::steady_clock::now() + timeout;
 	try

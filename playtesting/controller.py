@@ -11,7 +11,7 @@ import uuid
 from .runs import load, now, verify, write_json
 
 
-INPUT_LIMIT = 256 * 1024
+INPUT_LIMIT = 512 * 1024
 OUTPUT_LIMIT = 8192
 STDERR_LIMIT = 64 * 1024
 

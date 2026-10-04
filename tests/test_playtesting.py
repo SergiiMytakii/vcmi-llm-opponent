@@ -62,6 +62,28 @@ class PlaytestingTest(unittest.TestCase):
         return {"protocol": 1, "request_id": "0:1", "observation": {"player": 0, "day": 1},
                 "actions": [{"id": "end", "kind": "end_turn"}]}
 
+    def test_recorder_and_controller_accept_512_kib_and_reject_one_byte_more(self):
+        self.settings['controller'] = [sys.executable, str(ROOT / 'controller/main.py')]
+        self.prepare()
+        for size in (262145, 524288, 524289):
+            with self.subTest(size=size):
+                request = self.request()
+                request['observation']['note'] = ''
+                request['observation']['note'] = 'x' * (size - len(json.dumps(request).encode('utf-8')))
+                raw = json.dumps(request).encode('utf-8')
+                self.assertEqual(len(raw), size)
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / 'scripts/playtest_controller.py')],
+                    input=raw, capture_output=True, timeout=5,
+                    env={**os.environ, 'VCMI_PLAYTEST_RUN':str(self.run_dir),
+                         'VCMI_CODEX_EXECUTABLE':'/missing/codex'})
+                if size <= 524288:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)['action_id'], 'end')
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, b'')
+
     def test_prepares_private_snapshot_and_refuses_to_overwrite_a_run(self):
         manifest = self.prepare()
         self.assertEqual(manifest["case_id"], "trial")

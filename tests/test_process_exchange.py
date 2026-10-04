@@ -24,6 +24,18 @@ class ProcessExchangeTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "REQUEST\n")
 
+    def test_accepts_512_kib_request_and_rejects_one_byte_more(self):
+        code = "import sys; print(len(sys.stdin.buffer.read()))"
+        for size in (262145, 524288):
+            with self.subTest(size=size):
+                result = self.exchange(code, request="x" * size)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, str(size) + "\n")
+        result = self.exchange(code, request="x" * 524289)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("request too large", result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_hung_controller_is_killed_within_bound(self):
         start = time.monotonic()
         result = self.exchange("import time; time.sleep(30)", timeout=150)

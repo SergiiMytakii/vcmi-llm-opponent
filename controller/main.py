@@ -12,8 +12,8 @@ from experience import Experience
 
 
 def main():
-    raw = sys.stdin.buffer.read(256 * 1024 + 1)
-    if len(raw) > 256 * 1024:
+    raw = sys.stdin.buffer.read(512 * 1024 + 1)
+    if len(raw) > 512 * 1024:
         raise ValueError('request too large')
     request = json.loads(raw.decode('utf-8'))
     validate_request(request)
