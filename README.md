@@ -7,7 +7,7 @@ When upgrading VCMI, update the pin, reapply the small integration patch, rebuil
 before releasing our matching build. Installed VCMI and existing saves must remain separate.
 
 The working implementation calls Codex CLI through a ChatGPT subscription using `gpt-6.1-sol`
-with medium reasoning. The adapter offers construction, troop recruitment, hero destinations,
+with medium reasoning. The adapter offers construction, troop recruitment, town-tavern hero hiring, hero destinations,
 exploration, attacks and end-turn; VCMI executes routes and battles. Real Codex construction and
 recruitment, scripted movement, and mixed ExternalAI/Nullkiller2 assignment have local runtime proof.
 The [two-player land scenario](docs/land-duel.md) supplies the initial calibration map.

@@ -11,6 +11,8 @@
 #include "../../lib/callback/Calendar.h"
 #include "../../lib/entities/building/CBuilding.h"
 #include "../../lib/entities/faction/CTown.h"
+#include "../../lib/entities/hero/CHero.h"
+#include "../../lib/IGameSettings.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/json/JsonNode.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
@@ -60,6 +62,27 @@ struct RecruitChoice
 	int amount;
 	int level;
 };
+
+struct HeroHireChoice
+{
+	ObjectInstanceID town;
+	HeroTypeID hero;
+};
+
+ResourceSet heroHireCost()
+{
+	ResourceSet cost;
+	cost[GameResID::GOLD] = GameConstants::HERO_GOLD_COST;
+	return cost;
+}
+
+bool canHireHero(const CCallback & callback, PlayerColor player, const CGTownInstance * town)
+{
+	return town && town->tempOwner == player && town->hasBuilt(BuildingID::TAVERN)
+		&& !town->getVisitingHero() && callback.getResourceAmount().canAfford(heroHireCost())
+		&& callback.getHeroCount(player, false) < callback.getSettings().getInteger(EGameSettings::HEROES_PER_PLAYER_ON_MAP_CAP)
+		&& callback.getHeroCount(player, true) < callback.getSettings().getInteger(EGameSettings::HEROES_PER_PLAYER_TOTAL_CAP);
+}
 
 struct UpgradeChoice
 {
@@ -306,7 +329,7 @@ void ExternalAI::requestSent(const CPackForServer * pack, int requestID)
 		std::lock_guard lock(requestMutex);
 		queryRequests.emplace(requestID, reply->qid);
 	}
-	if(dynamic_cast<const BuildStructure *>(pack) || dynamic_cast<const RecruitCreatures *>(pack)
+	if(dynamic_cast<const BuildStructure *>(pack) || dynamic_cast<const RecruitCreatures *>(pack) || dynamic_cast<const HireHero *>(pack)
 		|| dynamic_cast<const UpgradeCreature *>(pack) || dynamic_cast<const ArrangeStacks *>(pack) || dynamic_cast<const MoveHero *>(pack)
 		|| dynamic_cast<const SaveLocalState *>(pack))
 	{
@@ -425,6 +448,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 	selectedAction = JsonNode();
 	std::map<std::string, BuildChoice> builds;
 	std::map<std::string, RecruitChoice> recruits;
+	std::map<std::string, HeroHireChoice> hires;
 	std::map<std::string, UpgradeChoice> upgrades;
 	std::map<std::string, MoveChoice> moves;
 	std::map<std::string, TransferChoice> transfers;
@@ -439,9 +463,13 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 		request["observation"]["player"].Integer() = playerID.getNum();
 		request["observation"]["day"].Integer() = cb->getCalendar().getCurrentDay();
 		request["observation"]["resources"] = resourcesJSON(cb->getResourceAmount());
+		request["observation"]["hero_limits"]["on_map_count"].Integer() = cb->getHeroCount(playerID, false);
+		request["observation"]["hero_limits"]["total_count"].Integer() = cb->getHeroCount(playerID, true);
+		request["observation"]["hero_limits"]["on_map_cap"].Integer() = cb->getSettings().getInteger(EGameSettings::HEROES_PER_PLAYER_ON_MAP_CAP);
+		request["observation"]["hero_limits"]["total_cap"].Integer() = cb->getSettings().getInteger(EGameSettings::HEROES_PER_PLAYER_TOTAL_CAP);
 		for(const auto * name : GameConstants::RESOURCE_NAMES)
 			request["observation"]["resource_order"].Vector().push_back(JsonNode(std::string(name)));
-		for(const auto * capability : {"build", "recruit", "transfer", "upgrade", "visit", "attack", "explore", "end_turn"})
+		for(const auto * capability : {"build", "recruit", "hire_hero", "transfer", "upgrade", "visit", "attack", "explore", "end_turn"})
 			request["observation"]["capabilities"].Vector().push_back(JsonNode(std::string(capability)));
 		request["observation"]["model_calls_remaining"].Integer() = 3 - attempt;
 		if(!savedState["pending"].isNull()) request["observation"]["previous_unconfirmed_action"] = savedState["pending"];
@@ -555,6 +583,32 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 		request["observation"]["towns"].Vector();
 		for(const auto * town : cb->getTownsInfo(true))
 		{
+			if(canHireHero(*cb, playerID, town))
+				for(const auto * candidate : cb->getAvailableHeroes(town))
+				{
+					const auto id = "hire-hero-" + std::to_string(hires.size());
+					hires.emplace(id, HeroHireChoice{town->id, candidate->getHeroTypeID()});
+					JsonNode action;
+					action["id"].String() = id;
+					action["kind"].String() = "hire_hero";
+					action["town"].Integer() = objectAlias(town->id);
+					action["hero_type"].String() = candidate->getHeroType()->getJsonKey();
+					action["level"].Integer() = candidate->level;
+					action["army"] = armyJSON(candidate);
+					action["secondary_skills"].Vector();
+					for(const auto & [skill, level] : candidate->secSkills)
+						if(skill != SecondarySkill::NONE)
+						{
+							JsonNode item;
+							item["skill"].String() = SecondarySkill::encode(skill.getNum());
+							item["level"].Integer() = level;
+							action["secondary_skills"].Vector().push_back(item);
+						}
+					action["cost"] = resourcesJSON(heroHireCost());
+					action["spawn_position"] = positionJSON(town->visitablePos());
+					action["effect"].String() = "new_owned_visiting_hero_with_starting_army_separate_movement_required";
+					request["actions"].Vector().push_back(action);
+				}
 			addUpgrades(town);
 			JsonNode townInfo;
 			townInfo["id"].Integer() = objectAlias(town->id);
@@ -883,7 +937,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 				if(!reply.isStruct() || reply.Struct().size() != (hasStrategy ? 4 : 3) || !reply["protocol"].isNumber()
 					|| reply["protocol"].Float() != 1 || !reply["request_id"].isString()
 					|| reply["request_id"].String() != requestID || !reply["action_id"].isString()
-					|| (reply["action_id"].String() != "end" && !builds.count(reply["action_id"].String()) && !recruits.count(reply["action_id"].String()) && !moves.count(reply["action_id"].String()) && !transfers.count(reply["action_id"].String()) && !upgrades.count(reply["action_id"].String())))
+					|| (reply["action_id"].String() != "end" && !builds.count(reply["action_id"].String()) && !recruits.count(reply["action_id"].String()) && !hires.count(reply["action_id"].String()) && !moves.count(reply["action_id"].String()) && !transfers.count(reply["action_id"].String()) && !upgrades.count(reply["action_id"].String())))
 					throw std::runtime_error("invalid or stale action choice");
 				if(hasStrategy && !externalai::validStrategy(reply["strategy"], request["memory"], request["actions"]))
 					throw std::runtime_error("invalid strategy update");
@@ -927,6 +981,38 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 	{
 		const auto choice = moves.at(actionID);
 		return moveTo(choice.hero, choice.destination, requestID, actionID);
+	}
+	if(hires.count(actionID))
+	{
+		const auto choice = hires.at(actionID);
+		ResourceSet expectedResources;
+		int beforeCount = 0;
+		std::set<ObjectInstanceID> beforeHeroes;
+		{
+			std::shared_lock gsLock(CGameState::mutex, std::defer_lock);
+			if(!lockState(gsLock, stopping) || !cb->isPlayerMakingTurn(playerID)) return false;
+			const auto * town = cb->getTown(choice.town);
+			if(!canHireHero(*cb, playerID, town)) return false;
+			const CGHeroInstance * candidate = nullptr;
+			for(const auto * available : cb->getAvailableHeroes(town))
+				if(available->getHeroTypeID() == choice.hero) candidate = available;
+			if(!candidate) return false;
+			beforeCount = cb->getHeroCount(playerID, true);
+			for(const auto * owned : cb->getHeroesInfo())
+				if(owned->tempOwner == playerID) beforeHeroes.insert(owned->id);
+			expectedResources = cb->getResourceAmount() - heroHireCost();
+			cb->recruitHero(town, candidate);
+		}
+		const bool acknowledged = waitForRequest();
+		std::shared_lock gsLock(CGameState::mutex, std::defer_lock);
+		if(!lockState(gsLock, stopping)) return false;
+		const auto * town = cb->getTown(choice.town);
+		const auto * hired = town ? town->getVisitingHero() : nullptr;
+		const bool observed = acknowledged && town && town->tempOwner == playerID && hired && hired->tempOwner == playerID
+			&& hired->getHeroTypeID() == choice.hero && !beforeHeroes.count(hired->id)
+			&& cb->getHeroCount(playerID, true) == beforeCount + 1 && cb->getResourceAmount() == expectedResources;
+		logAi->info("ExternalAI hire hero result observed=%d request=%s action=%s dispatched=1", observed, requestID, actionID);
+		return observed;
 	}
 	if(upgrades.count(actionID))
 	{

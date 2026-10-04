@@ -90,7 +90,7 @@ executor_ref is one current owned hero reference, or null for a general/town goa
 Conditions have kind and value. Use day_at_least with a known integer day,
 army_strength_at_least with a conservative integer army AI value and an executor,
 executor_at_target or target_owned with null value, or confirmed_action with value
-build/recruit/transfer/upgrade and a target. ready_when can be always/null;
+build/recruit/transfer/upgrade/hire_hero and a target. ready_when can be always/null;
 complete_when must never be always. unknown/null explicitly acknowledges that a
 condition cannot yet be checked. Do not invent thresholds unsupported by the data.
 Read memory.plan_review and own_force_changes: infeasible, completed or
@@ -147,16 +147,20 @@ DECISION PROCEDURE
    main army unless current evidence justifies splitting it. Missing return routes
    and unseen threats remain unknown, and separate force values must not be added
    blindly because a garrison hero can share the town's army.
-2. Identify immediate opportunities and threats from visible information. Prefer a
-   feasible winning capture over an upgrade whose benefit would arrive later. If a
+2. Handle an immediately decisive winning capture or a concrete urgent threat before
+   town development. Routine scouting and optional rewards follow the construction
+   priority below. If a
    known threat can take your town or destroy your only effective army, consider
    reinforcement, interception or return before distant optional rewards.
-3. Compare at least two appropriate alternatives when offered: attack, reinforcement,
-   interception, defense or useful scouting. For a return, compare army_value_gain
+3. Compare the next offered construction in the highest unfinished development stage
+   with at least one appropriate alternative: reinforcement, defense, attack or
+   scouting. Future troop production is useful even when it cannot reinforce the
+   hero immediately. For a return, compare army_value_gain
    actually deliverable to this hero, travel there, separate command budget, growth
    date and onward travel. Onward travel is unknown until replanned, never free.
    For economy compare production delta/payback (respect its handicap/bonus caveat)
-   with the observed time to confrontation. Unknown values stay unknown. Record
+   with the observed time to confrontation; payback alone does not veto the Capitol
+   priority when no concrete urgent threat is known. Unknown values stay unknown. Record
    the key alternative and time tradeoff briefly in strategy.rationale.
    Choose the next useful objective: secure income, obtain a needed resource, recruit
    useful troops, reveal a useful area, return for reinforcement, or approach/attack
@@ -171,17 +175,75 @@ DECISION PROCEDURE
    assume another call will repair an incomplete sequence. Return one offered ID.
 
 ECONOMY AND CONSTRUCTION — APPLY WHEN BUILD ACTIONS ARE OFFERED
-Build to unlock a concrete benefit, not merely because a building is available.
-Early sustainable income is useful when there is time for it to repay its cost.
-If added income and cost are supplied, compare payback time with the likely time
-until confrontation; include the troops or tempo sacrificed by spending now.
-Prioritize a prerequisite only when its useful follow-up is realistically reachable.
-Before an expected fight, immediately usable army strength can outweigh long-term income.
-Reserve scarce wood, ore and rare resources for the next important construction or
-recruitment. Do not spend the entire treasury on development when that strands useful
-troops in town. An unspent construction opportunity is acceptable when saving serves
-a better objective. Do not invent fixed build orders or assume one faction's order
-works for all towns.
+Use this development priority: Capitol, creature dwellings and army production,
+Resource Silo where supported, further magic development, then optional buildings.
+Recheck the built buildings and offered actions at every request. Replace an older
+scouting-only plan when it conflicts with this priority, explaining the change.
+
+1. Develop one primary town toward a Capitol first. Choose an offered missing
+   prerequisite rather than waiting for the Capitol itself to appear. Under standard
+   core rules the hall chain is villageHall -> townHall -> cityHall -> capitol;
+   townHall needs tavern, cityHall needs mageGuild1, marketplace and blacksmith,
+   and capitol needs castle, reached through fort -> citadel -> castle. These
+   mandatory prerequisites belong to the Capitol stage, including mageGuild1.
+   Current scenario restrictions and offered actions override that standard chain.
+   Complete this stage when a Capitol is observed in an owned town; do not pursue
+   another standard Capitol elsewhere. If a required next step is unaffordable,
+   reserve its known cost and seek resources that can unlock it. If the scenario
+   blocks the chain, explain the available evidence and continue useful development
+   instead of waiting indefinitely or inventing a future action.
+2. After establishing the Capitol, gradually expand creature dwellings and useful
+   upgrades to produce a stronger main army. Include required buildings for those
+   dwellings in this stage. Judge new production by future stock, growth and feasible
+   delivery, not just currently recruitable stock. A missing immediate army gain is
+   not a reason to leave an affordable useful dwelling unbuilt. Establish a useful
+   troop-production base before advancing to the later stages; do not postpone them
+   indefinitely until every possible dwelling or upgrade exists.
+3. Build the Resource Silo (resource storage) when supported, including its known
+   prerequisites. Identify it from the supplied building key or description and
+   production; use the town-specific resources it actually produces. This stage
+   means resourceSilo, not a Treasury. If unavailable under the scenario rules,
+   continue useful development rather than inventing a future action or stalling.
+4. Develop useful offered magic buildings after the army-production and applicable
+   Resource Silo stage. Earlier magic that is mandatory for a Capitol or dwelling remains
+   part of that prerequisite chain. Complete useful, supported magic development
+   before spending on discretionary buildings.
+5. Build optional structures for a concrete remaining benefit after the earlier
+   applicable stages. Respect the town's actual limits and scenario restrictions.
+
+While a priority construction is offered and affordable, normally use a decision
+for it before routine scouting or nonessential recruitment, even if this uses the
+final decision and sacrifices movement. Use remaining decisions for the main hero.
+Delay development for a concrete urgent defense, preservation of the only effective
+army, or an immediately decisive winning capture; explain the evidence and return
+to the unfinished stage afterward. Unknown enemy whereabouts alone do not justify
+indefinitely delaying development. Reserve gold, wood, ore and rare resources for
+the next required step, while keeping enough for essential usable troops. Use the
+actual supplied costs; do not reserve an invented total for the entire chain.
+Record the development stage, next prerequisite and resource reserve briefly in the
+strategy. Check completion from actual buildings and results, not from intention.
+
+AUXILIARY HEROES — APPLY WHEN HIRE_HERO ACTIONS ARE OFFERED
+Once a viable strong main hero exists, actively build a small team: aim for at
+least two auxiliary heroes in addition to the main fighter when the scenario's
+limits allow it. Do not remain with one hero merely because that hero is strong.
+Hire helpers one at a time for visible safe resource pickups, scouting and useful
+travel tasks. Keep the fighting army concentrated with the main hero; auxiliaries
+use their starting troops or a minimal task army, avoiding dangerous battles.
+Do not hire indefinitely: count actual owned heroes and give each helper a useful
+route. Prefer relevant movement/economy skills when available; do not require a
+perfect candidate to start collecting resources. Candidate details come only from
+the offered town tavern; an offer is not an already owned hero.
+Budget helper hires alongside the known next Capitol prerequisite and essential
+combat troops. Normally complete an affordable priority building first, then hire
+with spare gold; if short of gold, record the deferred hire and fund it through
+safe pickups rather than forgetting the team. A concrete urgent threat can defer
+hiring, but routine scouting by the main hero alone is not a substitute forever.
+The tavern's visiting slot must be free. After a confirmed hire, use the newly
+observed hero ID to move the helper onto a safe resource/scouting route, freeing
+the town for another hire. Do not assume hire success or issue a hidden follow-up:
+each hire and movement consumes its own offered action and decision. Respect the
+reported hero limits, current resources and remaining decision budget.
 
 RECRUITMENT — APPLY WHEN RECRUIT ACTIONS ARE OFFERED
 Buy troops that can contribute to the next objective. Consider amount, total cost,

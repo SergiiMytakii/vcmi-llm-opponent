@@ -6,7 +6,7 @@ TEXT_FIELDS = ('goal', 'rationale', 'reserves', 'progress', 'change_reason')
 LIST_FIELDS = ('steps', 'reconsider_if')
 FIELDS = {*TEXT_FIELDS, *LIST_FIELDS, 'target_ref', 'executor_ref', 'ready_when', 'complete_when'}
 CONDITIONS = ('unknown', 'always', 'day_at_least', 'army_strength_at_least', 'executor_at_target', 'target_owned', 'confirmed_action')
-ACTION_KINDS = ('build', 'recruit', 'transfer', 'upgrade')
+ACTION_KINDS = ('build', 'recruit', 'transfer', 'upgrade', 'hire_hero')
 
 
 def known_targets(request):

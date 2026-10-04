@@ -43,6 +43,10 @@ class NativeVisibilityTest(unittest.TestCase):
             if name not in ('base', 'hidden_insert', 'hidden_remove', 'hidden', 'same_category', 'different_category'):
                 continue
             with self.subTest(variant=name):
+                own_town = next(o for o in data['objects.json'].values()
+                                if o['type'] == 'town' and o['options']['owner'] == 'red')
+                own_town['options']['buildings']['allOf'].append('tavern')
+                own_town['options']['buildings']['noneOf'].remove('tavern')
                 map_path = profile / DATA / 'Maps/Visibility.vmap'
                 with zipfile.ZipFile(map_path, 'w', zipfile.ZIP_DEFLATED) as archive:
                     for filename, value in data.items():
@@ -88,6 +92,8 @@ class NativeVisibilityTest(unittest.TestCase):
         before = observed['base']['0:1:0']['observation']['heroes'][0]['position']
         after = observed['base']['0:1:1']['observation']['heroes'][0]['position']
         self.assertNotEqual(before, after, 'fixture did not actually move the hero')
+        self.assertTrue(any(a['kind'] == 'hire_hero' for r in observed['base'].values()
+                            for a in r['actions']), 'fixture did not expose the player tavern pool')
         self.maxDiff = 4000
         for name in ('hidden', 'hidden_insert', 'hidden_remove', 'same_category'):
             with self.subTest(comparison=name):

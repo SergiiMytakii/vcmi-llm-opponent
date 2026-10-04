@@ -68,7 +68,7 @@ inline bool validCondition(const JsonNode & condition, bool completion = false)
 	if(kind == "day_at_least" || kind == "army_strength_at_least")
 		return value.getType() == JsonNode::JsonType::DATA_INTEGER && value.Integer() >= 0 && value.Integer() <= 2147483647;
 	if(kind == "confirmed_action")
-		return value.isString() && (value.String() == "build" || value.String() == "recruit" || value.String() == "transfer" || value.String() == "upgrade");
+		return value.isString() && (value.String() == "build" || value.String() == "recruit" || value.String() == "transfer" || value.String() == "upgrade" || value.String() == "hire_hero");
 	return value.isNull() && (kind == "unknown" || (!completion && kind == "always") || kind == "executor_at_target" || kind == "target_owned");
 }
 

@@ -169,6 +169,16 @@ int main()
 		checked["plan_result_cursor"] = checked["result_sequence"];
 		externalai::observeMemory(checked, own, checkedActions, json("[]"));
 		require(checked["plan_review"]["complete"].String() == "not_met", "old command completed new intent");
+		checked["plan"]["complete_when"] = json(R"({"kind":"confirmed_action","value":"hire_hero"})");
+		require(externalai::validStrategy(checked["plan"], checked, checkedActions), "hero hire intent rejected");
+		auto hireResult = json(R"({"kind":"hire_hero","target_ref":"object:42","town":42})");
+		externalai::recordResult(checked, 6, hireResult, false);
+		externalai::observeMemory(checked, own, checkedActions, json("[]"));
+		require(checked["plan_review"]["complete"].String() == "not_met", "unconfirmed hero hire completed intent");
+		externalai::recordResult(checked, 6, hireResult, true);
+		externalai::observeMemory(checked, own, checkedActions, json("[]"));
+		require(checked["plan_review"]["complete"].String() == "met", "confirmed hero hire did not complete intent");
+		checked["plan_result_cursor"] = checked["result_sequence"];
 		checked["plan"]["ready_when"] = json(R"({"kind":"target_owned","value":null})");
 		externalai::observeMemory(checked, own, checkedActions, json("[]"));
 		own["visible_objects"][0]["owner"].Integer() = 1;

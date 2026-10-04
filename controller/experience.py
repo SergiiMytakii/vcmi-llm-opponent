@@ -16,7 +16,7 @@ DEFAULT_DB = ROOT / '.build/experience.sqlite3'
 CONDITIONS = ('combat', 'defense', 'economy', 'reinforcement', 'exploration', 'tempo')
 KINDS = {'attack':'combat', 'build':'economy', 'recruit':'reinforcement',
          'transfer':'reinforcement', 'upgrade':'reinforcement', 'explore':'exploration',
-         'visit':'exploration', 'end_turn':'tempo'}
+         'visit':'exploration', 'hire_hero':'exploration', 'end_turn':'tempo'}
 CONTEXT_LIMIT = 32768
 
 

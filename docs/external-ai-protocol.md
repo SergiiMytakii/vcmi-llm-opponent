@@ -38,6 +38,7 @@ The engine exports currently offered actions:
 | --- | --- |
 | `build` | Construct one normal building: `town`, `building`, `cost`. Automatic, Grail and special buildings are excluded. |
 | `recruit` | Buy the stated creature/count from an owned town: `town`, `destination`, `creature`, `amount`, `cost`. The destination is the visiting owned hero when present, otherwise the town. |
+| `hire_hero` | Hire an offered candidate from an owned town tavern: `town`, `hero_type`, `level`, `army`, `secondary_skills`, `cost`, `spawn_position`. Requires a free visiting slot, enough gold and both configured hero limits. No troop transfer or movement is included. |
 | `upgrade` | Upgrade one existing owned stack through VCMI: `destination`, `slot`, `from_creature`, `creature`, unchanged `amount`, full `cost`. Availability is rechecked immediately before dispatch. |
 | `transfer` | Move one complete town stack into its visiting owned hero, merging matching troops or using a free slot: `town`, `destination`, `creature`, `amount`, zero `cost`. The town loses those troops. |
 | `visit` / `attack` | Move an owned `hero` toward an observed `target`; `travel_turns`, object type/ownership and permitted army information describe the candidate. Routes and battles belong to the engine. |
@@ -54,6 +55,13 @@ Candidates may be legal but strategically unsafe. Movement can stop after an
 interaction, battle or exhausted movement; a progress result is not proof of
 reaching or capturing the target. Recruitment into a distant town does not
 reinforce the hero until a separate transfer occurs at that town.
+
+`observation.hero_limits` reports own `on_map_count`, `total_count` and their
+configured `on_map_cap` / `total_cap`. Hero offers come from the player's tavern
+pool and have no owned object ID before hiring. The adapter rechecks availability,
+ownership, slot, gold and limits before dispatch. Confirmation requires the new
+owned visiting hero of the chosen type, an increased own hero count and exact
+resource deduction. Adventure taverns and inviting the next candidate are excluded.
 
 Illustrative reply:
 

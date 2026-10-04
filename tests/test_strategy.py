@@ -78,6 +78,15 @@ class StrategyContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_reply(self.request(), reply)
 
+    def test_plan_can_finish_after_confirmed_hero_hire_at_a_known_town(self):
+        request = self.request()
+        request['actions'].append({'id': 'hire-hero-0', 'kind': 'hire_hero',
+                                   'town': 42, 'target_ref': 'object:42'})
+        plan = {**PLAN, 'goal': 'Hire a scout',
+                'complete_when': {'kind': 'confirmed_action', 'value': 'hire_hero'}}
+        reply = {**self.reply(plan), 'action_id': 'hire-hero-0'}
+        self.assertEqual(validate_reply(request, reply)['strategy'], plan)
+
     def test_threshold_conditions_require_bounded_integer_json_values(self):
         request = self.request()
         request['observation']['heroes'] = [{'id': 7}]
