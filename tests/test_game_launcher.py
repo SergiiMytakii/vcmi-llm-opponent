@@ -1,5 +1,6 @@
 """Developer launcher through its public command line, using private fixture data."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -21,9 +22,37 @@ class GameLauncherTest(unittest.TestCase):
         (self.data / 'H3bitmap.lod').write_bytes(b'private fixture, not game assets')
         self.profile = self.root / 'Separate profile'
 
-    def cli(self, *args):
+    def cli(self, *args, **kwargs):
         return subprocess.run([sys.executable, str(CLI), *map(str, args)], capture_output=True,
-                              text=True, timeout=10)
+                              text=True, timeout=10, **kwargs)
+
+    @unittest.skipUnless(os.name == 'posix', 'executable script engine fixture')
+    def test_live_launcher_enables_learning_despite_inherited_off_mode(self):
+        from codex_fixture import codex_fixture
+        self.assertEqual(self.cli('init', '--data', self.data, '--profile', self.profile).returncode, 0)
+        engine = self.root / 'fixture-engine'
+        engine.write_text(f'#!{sys.executable}\n' + '''import os, pathlib, sys
+assert os.environ['VCMI_EXPERIENCE_MODE'] == 'learn'
+if sys.argv[1:] == ['--help']:
+    print('VCMI_PROFILE_DIR')
+elif sys.argv[1:] == ['--version']:
+    profile = pathlib.Path(os.environ['VCMI_PROFILE_DIR'])
+    for label, suffix in [('data',''),('cache','cache'),('config','config'),('logs','logs'),
+                          ('saves','Saves'),('extracted','cache/extracted')]:
+        print(f'user {label}: {profile / suffix}')
+else:
+    raise AssertionError('check must not launch a game')
+''')
+        engine.chmod(0o700)
+        fixture_env = codex_fixture(self.root, '''import sys
+if sys.argv[1:] == ['--version']: print('codex-cli 0.160.0')
+elif sys.argv[1:] == ['login','status']: print('Logged in using ChatGPT')
+else: raise AssertionError('check must not call the model')
+''')
+        result = self.cli('run','--engine',engine,'--profile',self.profile,'--mode','human',
+                          '--codex',fixture_env['VCMI_CODEX_EXECUTABLE'],'--check',
+                          env={**os.environ,**fixture_env,'VCMI_EXPERIENCE_MODE':'off'})
+        self.assertEqual(result.returncode,0,result.stderr)
 
     def test_new_profile_copies_data_and_creates_the_restricted_map_without_overwriting(self):
         args = ('init', '--data', self.data, '--profile', self.profile)

@@ -44,7 +44,8 @@ def preflight(engine, profile, codex):
                 'VCMI_PLAYTEST_KNOWLEDGE'):
         env.pop(key, None)
     env.update(VCMI_PROFILE_DIR=str(profile), VCMI_EXTERNAL_AI_EXECUTABLE=sys.executable,
-               VCMI_EXTERNAL_AI_SCRIPT=str(ROOT / 'controller/main.py'), VCMI_CODEX_EXECUTABLE=str(codex))
+               VCMI_EXTERNAL_AI_SCRIPT=str(ROOT / 'controller/main.py'), VCMI_CODEX_EXECUTABLE=str(codex),
+               VCMI_EXPERIENCE_MODE='learn')
     # Help exits before VCMI initializes directories; an installed/older game
     # must be rejected here, without ever opening its normal profile.
     result = subprocess.run([str(engine), '--help'], cwd=engine.parent, env=env,

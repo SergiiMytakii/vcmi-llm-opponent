@@ -76,14 +76,15 @@ class PlaytestingTest(unittest.TestCase):
         self.assertEqual(json.loads((self.run_dir / "manifest.json").read_text())["run_id"],
                          manifest["run_id"])
 
-    def test_evaluation_freezes_experience_without_touching_the_training_library(self):
+    def test_evaluation_learns_live_and_freezes_baseline_for_offline_replay(self):
         library = self.root / 'experience.sqlite3'
         with sqlite3.connect(library) as db:
             db.execute('CREATE TABLE fixture(value TEXT)')
             db.execute('INSERT INTO fixture VALUES(?)',('known lesson',))
         self.settings.update(purpose='evaluation',experience_database=str(library))
         manifest = self.prepare()
-        self.assertEqual(manifest['experience']['mode'],'read_only')
+        self.assertEqual(manifest['experience']['mode'],'learn')
+        self.assertEqual(manifest['experience']['database'],str(library.resolve()))
         frozen = self.run_dir / manifest['experience']['baseline']['path']
         before = frozen.read_bytes()
         with sqlite3.connect(library) as db:
@@ -93,6 +94,51 @@ class PlaytestingTest(unittest.TestCase):
         frozen.write_bytes(b'corrupted frozen experience')
         result = self.hook(self.request())
         self.assertNotEqual(result.returncode,0)
+
+    def test_evaluation_without_existing_experience_enables_learning_in_live_controller(self):
+        library = self.root / 'new-experience.sqlite3'
+        probe = self.root / 'experience_probe.py'
+        probe.write_text('''import json, os, sys
+request = json.load(sys.stdin)
+assert os.environ['VCMI_EXPERIENCE_MODE'] == 'learn'
+assert os.environ['VCMI_EXPERIENCE_DB'] == sys.argv[1]
+print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':'end'}))
+''')
+        self.settings.update(purpose='evaluation',experience_database=str(library),
+                             controller=[sys.executable,str(probe),str(library.resolve())])
+        manifest = self.prepare()
+        self.assertIsNone(manifest['experience']['baseline'])
+        result = self.hook(self.request())
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_offline_replay_reads_frozen_experience_without_writing_live_library(self):
+        library = self.root / 'experience.sqlite3'
+        with sqlite3.connect(library) as db:
+            db.execute('CREATE TABLE fixture(value TEXT)')
+        probe = self.root / 'replay_probe.py'
+        probe.write_text('''import json, os, sqlite3, sys
+request = json.load(sys.stdin)
+if os.environ['VCMI_EXPERIENCE_MODE'] == 'learn':
+    with sqlite3.connect(os.environ['VCMI_EXPERIENCE_DB']) as db:
+        db.execute('INSERT INTO fixture VALUES(?)',('live',))
+else:
+    assert os.environ['VCMI_EXPERIENCE_MODE'] == 'read_only'
+    assert os.environ['VCMI_EXPERIENCE_DB'].endswith('experience-before.sqlite3')
+print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':'end'}))
+''')
+        self.settings.update(purpose='evaluation',experience_database=str(library),
+                             controller=[sys.executable,str(probe)])
+        self.prepare()
+        result = self.hook(self.request())
+        self.assertEqual(result.returncode,0,result.stderr)
+        decision = next((self.run_dir / 'decisions').iterdir()).name
+        target = self.root / 'replay'
+        result = self.cli('prepare','--config',self.config,'--out',target)
+        self.assertEqual(result.returncode,0,result.stderr)
+        before = library.read_bytes()
+        result = self.cli('replay','--source-run',self.run_dir,'--decision',decision,'--target-run',target)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(library.read_bytes(),before)
 
     def test_training_and_integration_use_separate_experience_owners(self):
         manifest = self.prepare()

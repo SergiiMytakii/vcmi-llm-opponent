@@ -124,19 +124,16 @@ def prepare(config_path, out):
             dest = out / "references" / (name + ".md")
             shutil.copyfile(path, dest)
             references[name] = {"path": str(dest.relative_to(out)), "sha256": digest(dest)}
-        # Training carries generic lessons across matches. Integration keeps its
-        # own library; evaluation and offline replay consume a frozen baseline.
+        # Live matches learn; integration keeps its own library. Offline replay
+        # consumes the frozen initial baseline without changing live experience.
         library = absolute(config.get('experience_database',str(ROOT / '.build/experience.sqlite3')),base)
-        experience = {'mode':'learn','database':str(library if config['purpose'] == 'training' else out / 'experience.sqlite3'),
+        experience = {'mode':'learn','database':str(out / 'experience.sqlite3' if config['purpose'] == 'integration' else library),
                       'baseline':None}
         if config['purpose'] in ('training','evaluation') and library.is_file():
             snapshot_path = out / 'experience-before.sqlite3'
             with sqlite3.connect(library.as_uri()+'?mode=ro',uri=True) as source, sqlite3.connect(snapshot_path) as target:
                 source.backup(target)
             experience['baseline'] = {'path':snapshot_path.name,'sha256':digest(snapshot_path)}
-        if config['purpose'] == 'evaluation':
-            experience.update(mode='read_only' if experience['baseline'] else 'off',
-                              database=str(out / 'experience-before.sqlite3'))
         manifest = {
             **config, "run_id": uuid.uuid4().hex, "created_at": now(), "status": "prepared",
             "engine": str(engine), "engine_sha256": digest(engine),
