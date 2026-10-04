@@ -35,6 +35,8 @@ def kill_controller(child, own_group=False):
 def validate_reply(request, raw):
     reply = json.loads(raw)
     fields = {"protocol", "request_id", "action_id"}
+    if isinstance(reply, dict) and 'follow_up_action_ids' in reply:
+        fields.add('follow_up_action_ids')
     if isinstance(reply, dict) and 'strategy' in reply and 'memory' in request:
         from controller.strategy import validate_strategy
         validate_strategy(request, reply['strategy'])
@@ -47,6 +49,8 @@ def validate_reply(request, raw):
         raise ValueError("stale request_id")
     if not isinstance(reply["action_id"], str) or reply["action_id"] not in {a["id"] for a in request["actions"]}:
         raise ValueError("action_id was not offered")
+    from controller.batch import validate_batch
+    validate_batch(request, reply)
     return reply
 
 

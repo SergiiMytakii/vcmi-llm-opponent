@@ -93,7 +93,8 @@ class NativeSaveLoadTest(unittest.TestCase):
             return requests(run)
 
         first = prepare('save', config)
-        before = drive(first, saving=True)['0:1:1']
+        initial = drive(first, saving=True)
+        before = initial['0:1:1']
         self.assertEqual(before['memory']['plan']['goal'], 'Save/load integration probe')
         self.assertEqual(before['memory']['recent_results'][0]['outcome'], 'completed')
         config.update(profile_template=str(first / 'profile'),
@@ -101,14 +102,16 @@ class NativeSaveLoadTest(unittest.TestCase):
         restored = drive(prepare('load', config), saving=False)
         self.assertEqual({key for key in restored if key.startswith('0:1:')}, {'0:1:2'})
         after = restored['0:1:2']
-        self.assertEqual(after['observation']['model_calls_remaining'], 1)
+        self.assertEqual(after['observation']['turn_actions_remaining'],
+                         before['observation']['turn_actions_remaining'] - 1)
         self.assertEqual(after['memory']['plan'], before['memory']['plan'])
         self.assertEqual(after['memory']['experience_id'], before['memory']['experience_id'])
         self.assertEqual(after['memory']['recent_results'], before['memory']['recent_results'])
         for key in ('resources', 'towns', 'heroes'):
             self.assertEqual(after['observation'][key], before['observation'][key])
         self.assertFalse(any(action['kind'] == 'build' for action in after['actions']))
-        self.assertEqual(restored['0:2:0']['observation']['model_calls_remaining'], 3)
+        self.assertEqual(restored['0:2:0']['observation']['turn_actions_remaining'],
+                         initial['0:1:0']['observation']['turn_actions_remaining'])
 
 
 if __name__ == '__main__':
