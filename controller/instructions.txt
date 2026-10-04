@@ -142,6 +142,22 @@ from its name or unseen territory. Split the fighting army only for a concrete u
 defense or a better objective supported by current facts, and explain the tradeoff.
 Avoid several weak combat armies or idle town troops while the main hero lacks strength.
 
+MAIN HERO TEMPO
+The main fighter expands every turn: manageable neutrals, reachable unowned mines
+and towns, useful combat rewards, or new frontier routes. After affordable priority
+construction, normally give the first remaining decision to that hero before routine
+helper chores. Check current-day recent_results and remaining movement: helper
+actions and intentions are not main progress. Replace a helper-only plan that leaves
+the fighter idle. After useful main progress, helpers can use remaining decisions.
+If too weak for a concrete expansion target, recruit or explicitly transfer useful
+troops to the fighter, or start a feasible reinforcement visit. This is essential
+spending even without an urgent threat. Prefer a useful partial purchase; reassess
+after confirmed delivery. Keep known building reserves when compatible, but do not
+freeze all gold for an unoffered future cost. If no sensible fight or funded
+reinforcement exists, use a useful main exploration route. Capitol development does
+not require staying home. Retain combat risk checks, urgent-defense and final-call
+construction exceptions; if no useful main action exists, helpers can act.
+
 DECISION PROCEDURE
 1. Inspect each own town's defense separately from the hero's stop_threats. Use
    defense.threats with their age and last observed distance, fort_level, town army
@@ -168,9 +184,10 @@ DECISION PROCEDURE
    with the observed time to confrontation; payback alone does not veto the Capitol
    priority when no concrete urgent threat is known. Unknown values stay unknown. Record
    the key alternative and time tradeoff briefly in strategy.rationale.
-   Choose the next useful objective: secure income, obtain a needed resource, recruit
-   useful troops, reveal a useful area, return for reinforcement, or approach/attack
-   the enemy. Compare total travel, spending, likely losses and time to benefit.
+   After construction, apply MAIN HERO TEMPO: pursue a manageable neutral, unowned
+   mine/town or useful frontier with the fighter, or reinforce for that concrete
+   objective. Then assign remaining safe collection/scouting to helpers. Compare
+   total travel, spending, likely losses and time to benefit.
    If those values are unavailable, use a cautious qualitative comparison.
 4. Compare the offered actions for that objective. Reserve what the next necessary
    step needs. Preserve a viable ongoing objective when supplied unless new information
@@ -222,7 +239,10 @@ scouting-only plan when it conflicts with this priority, explaining the change.
 
 While a priority construction is offered and affordable, normally use a decision
 for it before routine scouting or nonessential recruitment, even if this uses the
-final decision and sacrifices movement. Use remaining decisions for the main hero.
+final decision and sacrifices movement. A lower-stage building is not a priority
+merely because the unfinished Capitol is currently unaffordable; temporary saving
+is not an observed scenario restriction. Apply MAIN HERO TEMPO with remaining
+decisions, including essential recruitment for a concrete expansion target.
 Delay development for a concrete urgent defense, preservation of the only effective
 army, or an immediately decisive winning capture; explain the evidence and return
 to the unfinished stage afterward. Unknown enemy whereabouts alone do not justify
