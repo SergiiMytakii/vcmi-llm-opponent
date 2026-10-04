@@ -48,10 +48,28 @@ cmake -S .build/vcmi -B .build/mac -G Ninja \
 cmake --build .build/mac --target vcmiclient vcmiserver -j 4
 ```
 
-The build outputs are in `.build/mac/bin`. This is a developer build, not yet a packaged installer.
-Launching it directly uses VCMI's ordinary macOS profile: do not do so against the user's installed-game profile.
-The initial runtime smoke uses a separate private fixture and a process-local profile shim with write protection
-on the original profile. A distributable isolated launcher remains required before user installation.
+The build outputs are in `.build/mac/bin`. Do not distribute copies of these raw
+binaries: their library search paths still point into the build and Conan cache.
+Install into a fresh private directory to collect dependencies and rewrite those paths:
+
+```sh
+cmake --install .build/mac --prefix "$PWD/.build/mac-runtime"
+```
+
+This produces `.build/mac-runtime/VCMI.app` with the client, server, libraries and
+VCMI resources. It contains no licensed Heroes III data. Keep the controller,
+`scripts/`, `playtesting/` and their repository-relative layout alongside it; use
+`scripts/play.py` with this installed executable. Python 3.10+ and the pinned
+Codex CLI remain prerequisites. This developer bundle uses local ad-hoc signing;
+it is not a notarized public installer. Do not double-click the native app: that
+bypasses profile setup.
+Always set `VCMI_PROFILE_DIR` to an absolute private data directory containing `Data/`, `Maps/`
+and `config/`. The patched engine keeps configuration, cache, logs and saves under that directory.
+Without this variable VCMI still uses its ordinary platform profile. Do not launch against the installed profile.
+`--help` advertises `VCMI_PROFILE_DIR`; `--version` prints every resolved writable path. The tester checks
+both before starting a game and protects the installed profile with the macOS sandbox. It no longer needs
+a profile-interposition dylib. The [isolated launcher](playing.md) performs these
+same capability and path checks before a user game.
 
 ## Windows 11 x64 — verification pending
 
@@ -59,26 +77,28 @@ Prepare a short writable checkout such as `C:\vcmi-ai`. Install Visual Studio C+
 (compiler 19.29), Windows SDK, Git, and Python. Use an x64 Developer PowerShell with that compiler selected.
 This matches the pinned upstream dependency profile (`msvc/192`); Windows 11 is our support boundary.
 
-Create the venv/install build requirements/prepare source as above. Download `dependencies-windows-x64.txz`
-from the same dependency release into `.build/`. Windows dependency checksum/lock and runtime acceptance
-must be recorded on the developer machine before declaring this platform supported.
+Create the venv and install build requirements, then run the build script below.
+It creates a fresh checkout, downloads the pinned official dependency archive,
+checks its SHA-256 from `engine/version.json`, and uses a private Conan cache.
+It refuses an existing work directory. If a build fails, retain that directory
+and use a new `--work` path for another attempt.
 
 ```powershell
-$env:PATH = "$PWD\.venv\Scripts;$env:PATH"
-$env:CONAN_HOME = "$PWD\.build\conan"
-conan profile detect
-conan cache restore .build\dependencies-windows-x64.txz
-Push-Location .build\vcmi
-conan install . --output-folder=../conan-generated --build=never --profile=dependencies/conan_profiles/msvc-x64 --conf=tools.cmake.cmaketoolchain:generator=Ninja
-Pop-Location
-cmake -S .build/vcmi -B .build/windows -G Ninja "-DCMAKE_TOOLCHAIN_FILE=$PWD/.build/conan-generated/conan_toolchain.cmake" -DCMAKE_BUILD_TYPE=Release -DENABLE_LAUNCHER=OFF -DENABLE_EDITOR=OFF -DENABLE_TEST=OFF -DENABLE_MMAI=OFF -DENABLE_DISCORD=OFF -DENABLE_INNOEXTRACT=OFF -DENABLE_CCACHE=OFF
-cmake --build .build/windows --target vcmiclient vcmiserver -j 4
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.venv\Scripts\python.exe scripts/build_windows.py --work .build/windows --jobs 4
 ```
 
-Before a game run, use the engine's `config/dirs.json` next to the generated executable to point
-`userDataPath`, `userConfigPath`, `userCachePath`, `userLogsPath`, and `userSavePath` to a separate absolute
-fixture directory tree. Copy only the developer's own licensed data into that fixture. Inspect startup log paths
-before starting a game. Do not run against the installed profile.
+The script installs the client, server, dependencies and shipped resources into
+`.build/windows/runtime`, builds both native test drivers and runs Python tests.
+Commands and failures are recorded in `build.log`; `build-evidence.json` is written
+only after success. The Windows resolved dependency graph is not yet locked or
+verified. The dependency archive digest is pinned, but this is not a claim of a
+reproduced Windows build.
+
+Use [the isolated launcher](playing.md) for game checks. It sets `VCMI_PROFILE_DIR`
+without changing HOME or Codex authentication. Windows compilation and runtime
+verification remain pending; source support is not platform acceptance.
 
 ## Controller and transport checks
 
@@ -89,11 +109,12 @@ cmake -S tests -B .build/transport -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$PWD/.build/conan-generated/conan_toolchain.cmake" \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build .build/transport
-EXCHANGE_DRIVER=.build/transport/exchange-driver python3 -m unittest discover -s tests -v
+EXCHANGE_DRIVER=.build/transport/exchange-driver FAKE_CODEX_DRIVER=.build/transport/fake-codex-driver python3 -m unittest discover -s tests -v
 ```
 
 On Windows use the same CMake commands with PowerShell quoting and set
-`$env:EXCHANGE_DRIVER="$PWD\.build\transport\exchange-driver.exe"` before `python -m unittest discover -s tests -v`.
+`$env:EXCHANGE_DRIVER="$PWD\.build\transport\exchange-driver.exe"` and
+`$env:FAKE_CODEX_DRIVER="$PWD\.build\transport\fake-codex-driver.exe"` before running the tests.
 Tests execute real subprocesses: stdin EOF, output collection, nonzero exit, timeout, cancellation,
 descendant cleanup, output limit, and a Unicode script path containing spaces.
 
@@ -106,5 +127,8 @@ Required evidence: `ExternalAI ... selected build-...`, `ExternalAI build result
 player/turn. Repeat with an invalid or hanging controller and confirm fallback ends the turn.
 Stop only the processes created by the test and verify original saves/config hashes remain unchanged.
 
-This does not prove full-match strategy or the two final game modes. Those require the remaining MVP work,
-including Codex, heroes/recruitment, the restricted map and separate LLM/Nullkiller assignment.
+These construction checks remain useful regressions. The working tree now also contains Codex,
+recruitment, movement, per-player AI selection and a restricted scenario. Follow
+[playtesting](testing/llm-opponent-playtest.md) for current isolated runs and
+[land-duel verification](verification-land-duel-2026-10-04.md) for actual full-match evidence.
+Both final modes, save/load, Windows and release packaging still require complete acceptance.

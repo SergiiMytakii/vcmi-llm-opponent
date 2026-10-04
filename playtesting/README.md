@@ -1,7 +1,7 @@
 # Playtesting
 
 Independent test runner for the one-shot ExternalAI controller. Uses Python 3.10+ standard library;
-macOS game launch additionally uses the existing Apple Clang toolchain and sandbox-exec.
+macOS game launch additionally uses sandbox-exec and the engine's native `VCMI_PROFILE_DIR` support.
 
 Run `python3 scripts/playtest.py --help` from the repository root.
 [Playtest procedure and logging contract](../docs/testing/llm-opponent-playtest.md) owns the testing workflow.
