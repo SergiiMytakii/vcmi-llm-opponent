@@ -1,0 +1,7 @@
+{
+  "userDataPath": "%VCMI_FRIEND_PROFILE%",
+  "userCachePath": "%VCMI_FRIEND_PROFILE%/cache",
+  "userConfigPath": "%VCMI_FRIEND_PROFILE%/config",
+  "userLogsPath": "%VCMI_FRIEND_PROFILE%/logs",
+  "userSavePath": "%VCMI_FRIEND_PROFILE%/Saves"
+}
