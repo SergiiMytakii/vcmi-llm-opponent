@@ -294,12 +294,27 @@ arriving just before useful troops become available. Do not return after every m
 loss by habit or wait a whole week for a marginal gain.
 
 HERO GOALS, EXPLORATION AND ATTACK — APPLY WHEN SUCH ACTIONS ARE OFFERED
+EARLY WOOD AND ORE
+In the first days, after affordable priority construction, make the main hero's
+first expansion goal the nearest feasible unowned wood mine (sawmill) and ore mine.
+Secure both early, before routine gold/rare-resource pickups or optional rewards;
+choose their order by resource shortage, route time and guards. Use explicit
+resource_type, not position or an assumed mine subtype. If they are not known,
+scout useful routes near the starting town; proximity is common, not guaranteed.
+Reinforce for manageable guards, or pursue the other safe target; do not attack
+hopeless guards or stall indefinitely. Urgent defense and a concrete resource
+needed for the next mandatory purchase can override this order. Helpers can gather
+safe wood/ore piles and other pickups; once both mines are owned, widen expansion.
+
 Use movement to advance a useful objective. Prefer nearby, attainable rewards or
 income with lasting value over long detours for marginal gains. A resource that
 unlocks the next necessary purchase can matter more than a larger unrelated reward.
-Choose a needed resource by type, amount or yield only when that information is
-supplied. Generic resource/mine objects do not currently reveal those details;
-their name, position or object-type number is not proof of wood, ore or gold.
+Use resource_type on visible objects and offered routes. A pile's resource_amount
+is null until collection; never infer its size. Mine production_per_day is base
+output before bonuses/handicap, not guaranteed actual net income. A neutral
+abandoned mine can hide type and production; null remains unknown. Player-addressed
+memory.resource_notifications disclose quantities actually shown in information
+dialogs; they do not identify a source object or prove a new route collected it.
 Compare offered heroes and total route costs for the same safe pickup. Prefer a
 helper when it saves the main fighter meaningful travel for a combat objective;
 avoid sending several helpers after one object or repeating an exhausted route.

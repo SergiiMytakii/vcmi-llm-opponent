@@ -17,6 +17,8 @@
 #include "../../lib/json/JsonNode.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
+#include "../../lib/mapObjects/CGResource.h"
+#include "../../lib/mapObjects/MiscObjects.h"
 #include "../../lib/mapObjects/army/CStackInstance.h"
 #include "../../lib/CCreatureHandler.h"
 #include "../../lib/constants/StringConstants.h"
@@ -169,6 +171,32 @@ JsonNode resourcesJSON(const ResourceSet & resources)
 	for(int index = 0; index < GameConstants::RESOURCE_QUANTITY; ++index)
 		result.Vector().push_back(JsonNode(resources[GameResID(index)]));
 	return result;
+}
+
+void appendResourceInfo(JsonNode & item, const CGObjectInstance * object)
+{
+	if(const auto * resource = dynamic_cast<const CGResource *>(object))
+	{
+		item["resource_type"].String() = GameResID::encode(resource->resourceID().getNum());
+		// Hover text reveals the type, not the pile's hidden map amount.
+		item["resource_amount"] = JsonNode();
+		item["resource_amount_visibility"].String() = "revealed_on_collection";
+	}
+	else if(const auto * mine = dynamic_cast<const CGMine *>(object))
+	{
+		if(mine->isAbandoned() && mine->tempOwner == PlayerColor::NEUTRAL)
+		{
+			item["resource_type"] = JsonNode();
+			item["production_per_day"] = JsonNode();
+			item["resource_visibility"].String() = "hidden_until_captured";
+		}
+		else
+		{
+			item["resource_type"].String() = GameResID::encode(mine->producedResource.getNum());
+			item["production_per_day"].Integer() = mine->defaultResProduction();
+			item["production_basis"].String() = "base_before_bonuses_and_handicap";
+		}
+	}
 }
 
 JsonNode armyJSON(const CArmedInstance * army)
@@ -414,6 +442,19 @@ bool ExternalAI::persistState()
 		{
 			std::lock_guard lock(requestMutex);
 			developmentCombatGoals = std::move(goals);
+			// observeMemory owns fresh-memory initialization. Keep notices buffered
+			// until it has established the schema, including before the first decision.
+			if(!memory.isNull())
+			{
+				for(auto & notice : resourceNotifications)
+				{
+					notice["observed_day"].Integer() = cb->getCalendar().getCurrentDay();
+					savedState["memory"]["resource_notifications"].Vector().push_back(std::move(notice));
+				}
+				resourceNotifications.clear();
+				auto & notices = savedState["memory"]["resource_notifications"].Vector();
+				if(notices.size() > 16) notices.erase(notices.begin(), notices.end() - 16);
+			}
 		}
 		savedState["schema"].Integer() = 1;
 		cb->saveLocalState(externalai::localStateUpdate(savedState));
@@ -503,6 +544,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 				item["kind"].String() = kind;
 				item["position"] = positionJSON(object->visitablePos());
 				item["owner"].Integer() = object->tempOwner.getNum();
+				appendResourceInfo(item, object);
 				if(type == Obj::HERO)
 				{
 					InfoAboutHero info;
@@ -839,6 +881,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 					action["object_id"].Integer() = objectAlias(object->id);
 					action["object_type"].Integer() = object->ID.getNum();
 					action["owner"].Integer() = object->tempOwner.getNum();
+					appendResourceInfo(action, object);
 					if(object->ID == Obj::HERO)
 					{
 						InfoAboutHero info;
@@ -1187,6 +1230,24 @@ bool ExternalAI::moveTo(ObjectInstanceID heroID, int3 destination, const std::st
 	}
 	logAi->info("ExternalAI move result observed=%d request=%s action=%s dispatched=1", progressed, requestID, actionID);
 	return progressed;
+}
+
+void ExternalAI::showInfoDialog(EInfoWindowMode, const std::string &, const std::vector<Component> & components, int)
+{
+	// Only player-addressed information reaches this interface. Do not touch
+	// worker-owned savedState here; drain the bounded notifications when persisting.
+	std::lock_guard lock(requestMutex);
+	for(const auto & component : components)
+	{
+		if(component.type != ComponentType::RESOURCE || !component.value) continue;
+		JsonNode notice;
+		notice["resource_type"].String() = GameResID::encode(component.subType.as<GameResID>().getNum());
+		notice["amount"].Integer() = *component.value;
+		notice["source"].String() = "player_info_dialog";
+		resourceNotifications.push_back(std::move(notice));
+	}
+	if(resourceNotifications.size() > 16)
+		resourceNotifications.erase(resourceNotifications.begin(), resourceNotifications.end() - 16);
 }
 
 void ExternalAI::showRecruitmentDialog(const CGDwelling *, const CArmedInstance *, int, QueryID id) { answer(id, 0); }

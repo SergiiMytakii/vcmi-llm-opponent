@@ -32,6 +32,22 @@ of detail: `count` for detailed information, otherwise `quantity_category`.
 Missing information is unknown. `previous_unconfirmed_action`, when present,
 is evidence of an uncertain result and must not be treated as a command to retry.
 
+Visible resource piles and routes expose `resource_type`. Their `resource_amount`
+is null with `resource_amount_visibility: "revealed_on_collection"`: map visibility
+does not reveal hidden pile size. Visible mines/routes expose `resource_type`
+and `production_per_day`, with `production_basis: "base_before_bonuses_and_handicap"`.
+These describe public base production, not net income. Neutral abandoned mines keep
+type/production null with `resource_visibility: "hidden_until_captured"`.
+Resource facts remain in observed-object memory with its ordinary age/staleness.
+
+`memory.resource_notifications` retains up to 16 player-addressed resource
+information components: `resource_type`, signed `amount`, `source: "player_info_dialog"`
+and `observed_day` (day incorporated into memory). This reveals exact quantities
+actually shown to this player, including pickups, without reading uncollected map
+amounts. Notifications do not identify a source object or independently prove
+collection by a particular movement. They persist with ordinary AI local state;
+callbacks buffer them under the request mutex for the turn worker.
+
 The engine exports currently offered actions:
 
 | Kind | Effect and relevant fields |

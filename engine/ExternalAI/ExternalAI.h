@@ -22,6 +22,7 @@ class ExternalAI final : public CAdventureAI
 	// Published by the turn worker under requestMutex; level-up callbacks never
 	// read worker-owned savedState while a battle is unwinding.
 	std::map<ObjectInstanceID, bool> developmentCombatGoals;
+	std::vector<JsonNode> resourceNotifications;
 	uint64_t turnNumber = 0;
 	JsonNode savedState;
 	JsonNode selectedAction;
@@ -47,6 +48,7 @@ public:
 	void battleEnded() override;
 	void gameOver(PlayerColor player, const EVictoryLossCheckResult & result) override;
 	void queryResolved(QueryID id) override;
+	void showInfoDialog(EInfoWindowMode, const std::string &, const std::vector<Component> &, int) override;
 	void showRecruitmentDialog(const CGDwelling *, const CArmedInstance *, int, QueryID id) override;
 	void showMarketWindow(const IMarket *, const CGHeroInstance *, QueryID id) override;
 	void showUniversityWindow(const IMarket *, const CGHeroInstance *, QueryID id) override;
