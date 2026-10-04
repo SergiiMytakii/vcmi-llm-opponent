@@ -35,6 +35,10 @@ def report(run):
             if explanation.is_file() and explanation.stat().st_size <= 64 * 1024:
                 try:
                     metadata = read_json(explanation, {})
+                    if isinstance(metadata, dict):
+                        for key in ('experience','experience_error'):
+                            if key in metadata:
+                                record[key] = metadata[key]
                     if isinstance(metadata, dict) and isinstance(metadata.get("explanation"), str):
                         record["explanation"] = metadata["explanation"]
                         record["explanation_source"] = "controller declaration"
@@ -82,6 +86,7 @@ def report(run):
                             "max": max(timings) if timings else None},
         "unattributed_build_results": unattributed,
         "episodes": episodes, "references": manifest["references"],
+        "experience":manifest.get('experience',{}),
         "randomness": "uncontrolled" if manifest.get("seed") is None else "declared; engine application unconfirmed",
     }
     write_json(run / "report.json", value)
@@ -139,7 +144,7 @@ def outcome(run, result, evidence):
 
 def compare(runs):
     manifests = [load(Path(run)) for run in runs]
-    keys = ("case_id", "purpose", "engine_sha256", "engine_sources", "map_sha256", "players", "seed", "difficulty", "profile_sha256")
+    keys = ("case_id", "purpose", "engine_sha256", "engine_sources", "map_sha256", "save_resource", "save_sha256", "players", "seed", "difficulty", "profile_sha256")
     mismatches = [key for key in keys if any(m.get(key) != manifests[0].get(key) for m in manifests[1:])]
     reports = [report(run) for run in runs]
     return {"same_start_conditions": not mismatches, "different_fields": mismatches,

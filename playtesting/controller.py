@@ -34,8 +34,13 @@ def kill_controller(child, own_group=False):
 
 def validate_reply(request, raw):
     reply = json.loads(raw)
-    if not isinstance(reply, dict) or set(reply) != {"protocol", "request_id", "action_id"}:
-        raise ValueError("reply must have exactly protocol, request_id, action_id")
+    fields = {"protocol", "request_id", "action_id"}
+    if isinstance(reply, dict) and 'strategy' in reply and 'memory' in request:
+        from controller.strategy import validate_strategy
+        validate_strategy(request, reply['strategy'])
+        fields.add('strategy')
+    if not isinstance(reply, dict) or set(reply) != fields:
+        raise ValueError("invalid reply fields")
     if type(reply["protocol"]) is not int or reply["protocol"] != request["protocol"]:
         raise ValueError("unsupported reply protocol")
     if reply["request_id"] != request["request_id"]:
@@ -75,6 +80,10 @@ def exchange(run, raw, engine_owned=False):
         for key in ("DYLD_INSERT_LIBRARIES", "VCMI_PLAYTEST_PROFILE", "VCMI_PROBE_PROFILE"):
             env.pop(key, None)
         env["VCMI_PLAYTEST_DECISION_DIR"] = str(directory)
+        experience = manifest.get('experience',{})
+        baseline = experience.get('baseline')
+        env['VCMI_EXPERIENCE_MODE'] = experience.get('mode','off') if engine_owned else 'read_only' if baseline else 'off'
+        env['VCMI_EXPERIENCE_DB'] = experience.get('database','') if engine_owned else str(run / baseline['path']) if baseline else ''
         for name, reference in manifest["references"].items():
             env["VCMI_PLAYTEST_" + name.upper()] = str(run / reference["path"])
         with (directory / "request.json").open("rb") as stdin, \

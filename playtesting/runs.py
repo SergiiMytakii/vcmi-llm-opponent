@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import uuid
 
 
@@ -69,6 +70,14 @@ def prepare(config_path, out):
         raise ValueError("map_resource must be a relative Maps/... path")
     if not engine.is_file() or not (profile / DATA / resource).is_file():
         raise ValueError("engine or fixture map is missing")
+    save_resource = config.get('save_resource')
+    if save_resource is not None:
+        saved = Path(save_resource)
+        if (saved.is_absolute() or '..' in saved.parts or not saved.parts
+                or saved.parts[0] != 'Saves' or saved.suffix.lower() != '.vsgm1'):
+            raise ValueError('save_resource must be a relative Saves/...vsgm1 path')
+        if not (profile / DATA / saved).is_file():
+            raise ValueError('fixture save is missing')
     if not (profile / DATA / "config/settings.json").is_file():
         raise ValueError("fixture config/settings.json is missing")
     if any(p.is_symlink() for p in profile.rglob("*")):
@@ -79,8 +88,8 @@ def prepare(config_path, out):
     if config.get("purpose") not in ("integration", "training", "evaluation") or not config.get("case_id"):
         raise ValueError("case_id and purpose (integration/training/evaluation) are required")
     finite_positive(config["max_seconds"], "max_seconds")
-    config.setdefault("decision_timeout_seconds", 18)
-    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 18)
+    config.setdefault("decision_timeout_seconds", 37)
+    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 37)
     controller = config["controller"]
     if not isinstance(controller, list) or not controller or any(not isinstance(a, str) for a in controller):
         raise ValueError("controller must be an argv array, without a shell")
@@ -115,12 +124,27 @@ def prepare(config_path, out):
             dest = out / "references" / (name + ".md")
             shutil.copyfile(path, dest)
             references[name] = {"path": str(dest.relative_to(out)), "sha256": digest(dest)}
+        # Training carries generic lessons across matches. Integration keeps its
+        # own library; evaluation and offline replay consume a frozen baseline.
+        library = absolute(config.get('experience_database',str(ROOT / '.build/experience.sqlite3')),base)
+        experience = {'mode':'learn','database':str(library if config['purpose'] == 'training' else out / 'experience.sqlite3'),
+                      'baseline':None}
+        if config['purpose'] in ('training','evaluation') and library.is_file():
+            snapshot_path = out / 'experience-before.sqlite3'
+            with sqlite3.connect(library.as_uri()+'?mode=ro',uri=True) as source, sqlite3.connect(snapshot_path) as target:
+                source.backup(target)
+            experience['baseline'] = {'path':snapshot_path.name,'sha256':digest(snapshot_path)}
+        if config['purpose'] == 'evaluation':
+            experience.update(mode='read_only' if experience['baseline'] else 'off',
+                              database=str(out / 'experience-before.sqlite3'))
         manifest = {
             **config, "run_id": uuid.uuid4().hex, "created_at": now(), "status": "prepared",
             "engine": str(engine), "engine_sha256": digest(engine),
             "engine_sources": engine_sources,
             "controller": controller, "controller_sources": sources, "references": references,
+            "experience":experience,
             "map_sha256": digest(out / "profile" / DATA / resource),
+            "save_sha256": digest(out / "profile" / DATA / save_resource) if save_resource else None,
             "profile_sha256": snapshot(out / "profile"),
             "engine_pin": json.loads((ROOT / "engine/version.json").read_text()),
             "reference_consumption": "unconfirmed: controller must explicitly use the snapshot paths",
@@ -143,6 +167,9 @@ def verify(run, check_profile=False):
     for ref in manifest["references"].values():
         if digest(run / ref["path"]) != ref["sha256"]:
             raise ValueError("reference snapshot changed since prepare")
+    baseline = manifest.get('experience',{}).get('baseline')
+    if baseline and digest(run / baseline['path']) != baseline['sha256']:
+        raise ValueError('experience baseline changed since prepare')
     if check_profile and snapshot(run / "profile") != manifest["profile_sha256"]:
         raise ValueError("initial profile changed since prepare; prepare a new run")
     return manifest

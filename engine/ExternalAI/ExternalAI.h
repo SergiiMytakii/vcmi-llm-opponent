@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../lib/callback/CAdventureAI.h"
+#include "../../lib/json/JsonNode.h"
 #include <atomic>
 #include <condition_variable>
 #include <thread>
@@ -14,8 +15,21 @@ class ExternalAI final : public CAdventureAI
 	std::condition_variable requestChanged;
 	int pendingRequest = -1;
 	bool requestCompleted = false;
+	bool requestSucceeded = false;
+	bool battleBlocked = false;
+	std::set<QueryID> pendingQueries;
+	std::map<int, QueryID> queryRequests;
 	uint64_t turnNumber = 0;
+	JsonNode savedState;
+	JsonNode selectedAction;
+	std::string experienceID;
+	std::atomic<bool> finalReviewStarted{false};
+	int objectAlias(ObjectInstanceID id);
+	bool persistState();
 	void runTurn(uint64_t turn);
+	bool runDecision(uint64_t turn, int attempt);
+	bool waitForRequest(int seconds = 5);
+	bool moveTo(ObjectInstanceID hero, int3 destination, const std::string & requestID, const std::string & actionID);
 	void answer(QueryID id, int choice);
 
 public:
@@ -26,6 +40,14 @@ public:
 	std::string getBattleAIName() const override;
 	void requestSent(const CPackForServer * pack, int requestID) override;
 	void requestRealized(PackageApplied * pack) override;
+	void playerBlocked(int reason, bool start) override;
+	void battleEnded() override;
+	void gameOver(PlayerColor player, const EVictoryLossCheckResult & result) override;
+	void queryResolved(QueryID id) override;
+	void showRecruitmentDialog(const CGDwelling *, const CArmedInstance *, int, QueryID id) override;
+	void showMarketWindow(const IMarket *, const CGHeroInstance *, QueryID id) override;
+	void showUniversityWindow(const IMarket *, const CGHeroInstance *, QueryID id) override;
+	void showTavernWindow(const CGObjectInstance *, const CGHeroInstance *, QueryID id) override;
 	void heroGotLevel(const CGHeroInstance *, PrimarySkill, std::vector<SecondarySkill> &, QueryID id) override;
 	void commanderGotLevel(const CCommanderInstance *, std::vector<ui32>, QueryID id) override;
 	void showBlockingDialog(const std::string &, const std::vector<Component> &, QueryID id, int, bool selection, bool cancel, bool safeToAutoaccept) override;

@@ -1,6 +1,8 @@
+diff --git a/AI/CMakeLists.txt b/AI/CMakeLists.txt
+index df873b241..0ca32ec21 100644
 --- a/AI/CMakeLists.txt
 +++ b/AI/CMakeLists.txt
-@@ -17,6 +17,7 @@
+@@ -17,6 +17,7 @@ endif()
  
  # Adventure AI's
  add_subdirectory(EmptyAI)
@@ -8,20 +10,192 @@
  
  if(ENABLE_NULLKILLER2_AI)
  	add_subdirectory(Nullkiller2)
---- a/libFacade/CMakeLists.txt
-+++ b/libFacade/CMakeLists.txt
-@@ -32,7 +32,7 @@
- 	target_link_libraries(vcmi PRIVATE vcmiLua)
+diff --git a/client/CServerHandler.cpp b/client/CServerHandler.cpp
+index 528c8793b..8f0107ac3 100644
+--- a/client/CServerHandler.cpp
++++ b/client/CServerHandler.cpp
+@@ -988,7 +988,10 @@ void CServerHandler::debugStartTest(std::string filename, bool save)
+ 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+ 	}
+ 	// "Click" on color to remove us from it
+-	setPlayer(myFirstColor());
++	// An AI-only save already has no human color. Sending CANNOT_DETERMINE
++	// would create an invalid player slot instead of removing an existing one.
++	if(myFirstColor().isValidPlayer())
++		setPlayer(myFirstColor());
+ 	while(myFirstColor() != PlayerColor::CANNOT_DETERMINE)
+ 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
  
- 	if(ENABLE_CLIENT OR ENABLE_TEST)
--		target_link_libraries(vcmi PRIVATE EmptyAI)
-+		target_link_libraries(vcmi PRIVATE EmptyAI ExternalAI)
+diff --git a/client/Client.cpp b/client/Client.cpp
+index 4d35d9017..966945302 100644
+--- a/client/Client.cpp
++++ b/client/Client.cpp
+@@ -289,6 +289,20 @@ std::optional<PlayerColor> CClient::findPlayerColorForSpectatorInterface() const
  
- 		if(ENABLE_NULLKILLER2_AI)
- 			target_link_libraries(vcmi PRIVATE Nullkiller2)
+ std::string CClient::aiNameForPlayer(const PlayerSettings & ps, bool battleAI, bool alliedToHuman) const
+ {
++	if(!battleAI)
++	{
++		const auto & players = gameState().getStartInfo()->playerInfos;
++		const auto player = players.find(ps.color);
++		const auto & overrides = settings["session"]["playerAI"].Vector();
++		const auto index = std::distance(players.begin(), player);
++		if(player != players.end() && index < overrides.size())
++		{
++			const auto & name = overrides[index].String();
++			if(!AIFactory::isAvailableAdventureAI(name))
++				throw std::runtime_error("Unavailable per-player adventure AI: " + name);
++			return name;
++		}
++	}
+ 	if(ps.name.size() && AIFactory::isAvailableAdventureAI(ps.name))
+ 		return ps.name;
+ 
+diff --git a/client/gui/CIntObject.cpp b/client/gui/CIntObject.cpp
+index 33789867f..decace23a 100644
+--- a/client/gui/CIntObject.cpp
++++ b/client/gui/CIntObject.cpp
+@@ -82,6 +82,9 @@ void CIntObject::deactivate()
+ 	if (!isActive())
+ 		return;
+ 
++	// Closed windows can survive until the frame ends while their controllers
++	// are already destroyed (e.g. a spectator skipping the battle result).
++	ENGINE->windows().cancelRedraw(this);
+ 	deactivateEvents(used | GENERAL);
+ 
+ 	assert(!isActive());
+diff --git a/clientapp/EntryPoint.cpp b/clientapp/EntryPoint.cpp
+index 5d9b824e7..e05c51780 100644
+--- a/clientapp/EntryPoint.cpp
++++ b/clientapp/EntryPoint.cpp
+@@ -136,6 +136,9 @@ static void prog_help(const po::options_description &opts)
+ 	printf("warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n");
+ 	printf("\n");
+ 	std::cout << opts;
++#if defined(VCMI_WINDOWS) || defined(VCMI_MAC)
++	std::cout << "\nVCMI_PROFILE_DIR: absolute directory for a separate writable profile.\n";
++#endif
+ }
+ 
+ #if defined(VCMI_WINDOWS) && !defined(__GNUC__) && defined(VCMI_WITH_DEBUG_CONSOLE)
+@@ -282,6 +285,12 @@ int main(int argc, char * argv[])
+ 			s->Integer() = defaultValue;
+ 	};
+ 
++	// Preserve per-player AI overrides for both graphical and headless starts.
++	session["playerAI"].Vector().clear();
++	if(vm.count("ai"))
++		for(const auto & name : vm["ai"].as<std::vector<std::string>>())
++			session["playerAI"].Vector().push_back(JsonNode(name));
++
+ 	setSettingBool("session/onlyai", "onlyAI");
+ 	setSettingBool("session/disableVideo", "disable-video");
+ 	if(vm.count("headless"))
+diff --git a/lib/CConsoleHandler.cpp b/lib/CConsoleHandler.cpp
+index 90f00215f..d635b7114 100644
+--- a/lib/CConsoleHandler.cpp
++++ b/lib/CConsoleHandler.cpp
+@@ -16,6 +16,11 @@
+ #include "texts/TextOperations.h"
+ #include <boost/stacktrace.hpp>
+ 
++#ifdef VCMI_MAC
++#include <poll.h>
++#include <unistd.h>
++#endif
++
+ #if defined(NDEBUG) && !defined(VCMI_ANDROID)
+ #define USE_ON_TERMINATE
+ #endif
+@@ -242,7 +247,15 @@ int CConsoleHandler::run()
+ 	{
+ #ifndef _MSC_VER
+ 		//check if we have some unreaded symbols
+-		if (std::cin.rdbuf()->in_avail())
++		bool inputAvailable = std::cin.rdbuf()->in_avail() > 0;
++#ifdef VCMI_MAC
++		// libc++'s stdin stream buffer reports zero even when stdin is readable.
++		// Keep the timed shutdown wait, but also check the actual descriptor.
++		pollfd input = {STDIN_FILENO, POLLIN, 0};
++		if(!inputAvailable && poll(&input, 1, 0) > 0)
++			inputAvailable = (input.revents & (POLLIN | POLLHUP)) != 0;
++#endif
++		if (inputAvailable)
+ 		{
+ 			if ( getline(std::cin, buffer).good() )
+ 				if ( cb )
+diff --git a/lib/VCMIDirs.cpp b/lib/VCMIDirs.cpp
+index c0de45a4f..7bd706414 100644
+--- a/lib/VCMIDirs.cpp
++++ b/lib/VCMIDirs.cpp
+@@ -568,6 +568,35 @@ bfs::path VCMIDirsXDG::binaryPath() const
+ #endif // VCMI_WINDOWS, VCMI_UNIX
+ 
+ // Getters for interfaces are separated for clarity.
++#if defined(VCMI_WINDOWS) || defined(VCMI_MAC)
++// A separate distribution can select its own writable profile without changing
++// HOME or the platform paths used by child programs (for example Codex login).
++class VCMIProfileDirs final : public IVCMIDirs
++{
++	const IVCMIDirs & platform;
++	bfs::path root;
++public:
++	VCMIProfileDirs(const IVCMIDirs & platform, bfs::path root)
++		: platform(platform), root(std::move(root))
++	{
++		if(!this->root.is_absolute())
++			throw std::invalid_argument("VCMI_PROFILE_DIR must be an absolute path");
++	}
++	bfs::path userDataPath() const override { return root; }
++	bfs::path userCachePath() const override { return root / "cache"; }
++	bfs::path userConfigPath() const override { return root / "config"; }
++	bfs::path userLogsPath() const override { return root / "logs"; }
++	bfs::path userSavePath() const override { return root / "Saves"; }
++	std::vector<bfs::path> dataPaths() const override { return platform.dataPaths(); }
++	bfs::path clientPath() const override { return platform.clientPath(); }
++	bfs::path mapEditorPath() const override { return platform.mapEditorPath(); }
++	bfs::path serverPath() const override { return platform.serverPath(); }
++	bfs::path binaryPath() const override { return platform.binaryPath(); }
++	// Base init creates only these directories; platform migrations must not
++	// inspect or move the user's installed-game profile for an explicit profile.
++};
++#endif
++
+ namespace VCMIDirs
+ {
+ 	const IVCMIDirs& get()
+@@ -586,9 +615,23 @@ namespace VCMIDirs
+ 			static VCMIDirsIOS singleton;
+ 		#endif
+ 
++		#if defined(VCMI_WINDOWS) || defined(VCMI_MAC)
++			static auto profile = []() -> std::unique_ptr<VCMIProfileDirs> {
++				#ifdef VCMI_WINDOWS
++					const auto * directory = _wgetenv(L"VCMI_PROFILE_DIR");
++				#else
++					const auto * directory = std::getenv("VCMI_PROFILE_DIR");
++				#endif
++				if(!directory) return {};
++				return std::make_unique<VCMIProfileDirs>(singleton, bfs::path(directory));
++			}();
++			static IVCMIDirs & directories = profile ? *profile : static_cast<IVCMIDirs &>(singleton);
++		#else
++			static IVCMIDirs & directories = singleton;
++		#endif
+ 		static std::once_flag flag;
+-		std::call_once(flag, [] { singleton.init(); });
+-		return singleton;
++		std::call_once(flag, [] { directories.init(); });
++		return directories;
+ 	}
+ 
+ 	const std::string & appIdentifier()
+diff --git a/lib/callback/AIFactory.cpp b/lib/callback/AIFactory.cpp
+index 7106f18bf..056234111 100644
 --- a/lib/callback/AIFactory.cpp
 +++ b/lib/callback/AIFactory.cpp
-@@ -25,10 +25,18 @@
+@@ -25,11 +25,19 @@
  #  include "../../AI/MMAI/MMAI.h"
  #endif
  #include "../../AI/EmptyAI/CEmptyAI.h"
@@ -30,17 +204,18 @@
  std::shared_ptr<CGlobalAI> AIFactory::createAdventureAI(const std::string & name)
  {
  	logGlobal->info("Creating adventure AI %s", name);
-+
+ 
 +	if(name == "ExternalAI")
 +	{
 +		auto ret = std::make_shared<ExternalAI>();
 +		ret->dllName = name;
 +		return ret;
 +	}
- 
++
  	if(name == "Nullkiller2")
  	{
-@@ -76,7 +84,7 @@
+ #ifdef ENABLE_NULLKILLER2_AI
+@@ -76,7 +84,7 @@ std::shared_ptr<CBattleGameInterface> AIFactory::createBattleAI(const std::strin
  
  bool AIFactory::isAvailableAdventureAI(const std::string & name)
  {
@@ -49,3 +224,37 @@
  		return true;
  #ifdef ENABLE_NULLKILLER2_AI
  	if(name == "Nullkiller2")
+diff --git a/libFacade/CMakeLists.txt b/libFacade/CMakeLists.txt
+index b4c4828ed..dfe627bc7 100644
+--- a/libFacade/CMakeLists.txt
++++ b/libFacade/CMakeLists.txt
+@@ -32,7 +32,7 @@ if(NOT ENABLE_MINIMAL_LIB)
+ 	target_link_libraries(vcmi PRIVATE vcmiLua)
+ 
+ 	if(ENABLE_CLIENT OR ENABLE_TEST)
+-		target_link_libraries(vcmi PRIVATE EmptyAI)
++		target_link_libraries(vcmi PRIVATE EmptyAI ExternalAI)
+ 
+ 		if(ENABLE_NULLKILLER2_AI)
+ 			target_link_libraries(vcmi PRIVATE Nullkiller2)
+diff --git a/server/NetPacksServer.cpp b/server/NetPacksServer.cpp
+--- a/server/NetPacksServer.cpp
++++ b/server/NetPacksServer.cpp
+@@ -10,6 +10,7 @@
+ #include "StdInc.h"
+ #include "ServerNetPackVisitors.h"
+ 
++#include "../AI/ExternalAI/LocalState.h"
+ #include "CGameHandler.h"
+ #include "battles/BattleProcessor.h"
+ #include "processors/HeroPoolProcessor.h"
+@@ -433,8 +434,7 @@ void ApplyGhNetPackVisitor::visitQueryReply(QueryReply & pack)
+ void ApplyGhNetPackVisitor::visitSaveLocalState(SaveLocalState & pack)
+ {
+ 	gh.throwIfWrongPlayer(connection, &pack);
+-	*gh.gameState().getPlayerState(pack.player)->playerLocalSettings = pack.data;
+-	result = true;
++	result = externalai::applyLocalState(*gh.gameState().getPlayerState(pack.player)->playerLocalSettings, pack.data);
+ }
+ 
+ void ApplyGhNetPackVisitor::visitAdvInterfaceReady(AdvInterfaceReady &pack)

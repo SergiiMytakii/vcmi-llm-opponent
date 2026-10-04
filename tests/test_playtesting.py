@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import sqlite3
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +34,7 @@ class PlaytestingTest(unittest.TestCase):
             "version": 1, "case_id": "trial", "purpose": "integration",
             "engine": str(sys.executable), "profile_template": str(self.profile),
             "map_resource": "Maps/Trial.h3m", "controller": [
-                sys.executable, str(ROOT / "controller/main.py")],
+                sys.executable, str(ROOT / "tests/fixtures/recruit_first.py")],
             "references": {"prompt": str(self.prompt)},
             "players": {"red": "ExternalAI", "blue": "Nullkiller2"},
             "seed": None, "difficulty": "normal", "max_seconds": 60,
@@ -75,6 +76,29 @@ class PlaytestingTest(unittest.TestCase):
         self.assertEqual(json.loads((self.run_dir / "manifest.json").read_text())["run_id"],
                          manifest["run_id"])
 
+    def test_evaluation_freezes_experience_without_touching_the_training_library(self):
+        library = self.root / 'experience.sqlite3'
+        with sqlite3.connect(library) as db:
+            db.execute('CREATE TABLE fixture(value TEXT)')
+            db.execute('INSERT INTO fixture VALUES(?)',('known lesson',))
+        self.settings.update(purpose='evaluation',experience_database=str(library))
+        manifest = self.prepare()
+        self.assertEqual(manifest['experience']['mode'],'read_only')
+        frozen = self.run_dir / manifest['experience']['baseline']['path']
+        before = frozen.read_bytes()
+        with sqlite3.connect(library) as db:
+            db.execute('INSERT INTO fixture VALUES(?)',('later lesson',))
+        self.assertEqual(frozen.read_bytes(),before)
+        self.assertEqual(self.hook(self.request()).returncode,0)
+        frozen.write_bytes(b'corrupted frozen experience')
+        result = self.hook(self.request())
+        self.assertNotEqual(result.returncode,0)
+
+    def test_training_and_integration_use_separate_experience_owners(self):
+        manifest = self.prepare()
+        self.assertEqual(manifest['experience']['database'],str(self.run_dir.resolve()/'experience.sqlite3'))
+        self.assertEqual(manifest['experience']['mode'],'learn')
+
     def test_engine_hook_keeps_protocol_clean_and_records_the_actual_exchange(self):
         self.prepare()
         request = {"protocol": 1, "request_id": "0:1", "observation": {"player": 0, "day": 1},
@@ -97,6 +121,31 @@ class PlaytestingTest(unittest.TestCase):
         self.assertEqual(record["action_id"], "build-0")
         self.assertEqual(record["execution"], "unconfirmed")
         self.assertGreaterEqual(record["duration_seconds"], 0)
+
+    def test_saved_game_requires_an_existing_private_save(self):
+        self.settings['save_resource'] = 'Saves/Missing.vsgm1'
+        self.config.write_text(json.dumps(self.settings))
+        result = self.cli('prepare', '--config', self.config, '--out', self.run_dir)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('save', result.stderr)
+        self.assertFalse(self.run_dir.exists())
+
+    def test_saved_game_snapshot_records_content_and_rejects_escape(self):
+        import hashlib
+        (self.data / 'Saves').mkdir()
+        saved = self.data / 'Saves/Resume.vsgm1'
+        saved.write_bytes(b'private saved state')
+        self.settings['save_resource'] = 'Saves/Resume.vsgm1'
+        manifest = self.prepare()
+        self.assertEqual(manifest['save_sha256'], hashlib.sha256(b'private saved state').hexdigest())
+        saved.write_bytes(b'changed source save')
+        self.assertEqual((self.run_dir / 'profile' / DATA_PATH / 'Saves/Resume.vsgm1').read_bytes(),
+                         b'private saved state')
+        self.settings['save_resource'] = 'Saves/../Maps/Trial.h3m'
+        self.config.write_text(json.dumps(self.settings))
+        result = self.cli('prepare', '--config', self.config, '--out', self.root / 'escaped')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('save_resource', result.stderr)
 
     def test_report_requires_engine_evidence_and_does_not_call_an_exit_a_victory(self):
         self.prepare()

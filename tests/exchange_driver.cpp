@@ -3,15 +3,18 @@
 #include <iterator>
 #include <cstdlib>
 #include <thread>
+#ifdef _WIN32
+#include <boost/locale/encoding_utf.hpp>
+#endif
 
-int main(int argc, char ** argv)
+static int run(const std::vector<std::string> & argv)
 {
-	if(argc < 3)
+	if(argv.size() < 3)
 		return 2;
 	std::atomic<bool> cancelled{false};
 	const auto timeout = std::chrono::milliseconds(std::stoi(argv[1]));
 	const std::string input(std::istreambuf_iterator<char>(std::cin), {});
-	const std::vector<std::string> arguments(argv + 3, argv + argc);
+	const std::vector<std::string> arguments(argv.begin() + 3, argv.end());
 	std::thread cancellation;
 	if(const auto * delay = std::getenv("EXCHANGE_CANCEL_MS"))
 		cancellation = std::thread([&, milliseconds = std::stoi(delay)]()
@@ -28,4 +31,20 @@ int main(int argc, char ** argv)
 		return 1;
 	}
 	std::cout << reply.output;
+	return 0;
 }
+
+#ifdef _WIN32
+int wmain(int argc, wchar_t ** argv)
+{
+	std::vector<std::string> arguments;
+	for(int i = 0; i < argc; ++i)
+		arguments.push_back(boost::locale::conv::utf_to_utf<char>(std::wstring(argv[i])));
+	return run(arguments);
+}
+#else
+int main(int argc, char ** argv)
+{
+	return run({argv, argv + argc});
+}
+#endif

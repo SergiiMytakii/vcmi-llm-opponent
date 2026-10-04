@@ -11,12 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ControllerTest(unittest.TestCase):
     def test_utf8_protocol_is_independent_of_process_locale(self):
-        request = {"protocol": 1, "request_id": "ход-1", "actions": [
+        request = {"protocol": 1, "request_id": "ход-1", "observation": {}, "actions": [
             {"id": "конец", "kind": "end_turn"}]}
         result = subprocess.run(
             [sys.executable, str(ROOT / "controller" / "main.py")],
             input=json.dumps(request, ensure_ascii=False).encode("utf-8"),
-            capture_output=True, timeout=5, env={**os.environ, "PYTHONIOENCODING": "ascii"},
+            capture_output=True, timeout=5, env={**os.environ, "PYTHONIOENCODING": "ascii", "VCMI_CODEX_EXECUTABLE": "/missing/codex"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["action_id"], "конец")
@@ -27,11 +27,12 @@ class ControllerTest(unittest.TestCase):
             input=json.dumps({"protocol": 99, "request_id": "x", "actions": [
                 {"id": "finish", "kind": "end_turn"}]}),
             text=True, capture_output=True, timeout=5,
+            env={**os.environ, "VCMI_CODEX_EXECUTABLE": "/missing/codex"},
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
-    def test_selects_offered_build_before_ending_turn(self):
+    def test_unavailable_codex_ends_turn_without_spending(self):
         request = {
             "protocol": 1,
             "request_id": "turn-7",
@@ -44,10 +45,11 @@ class ControllerTest(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(ROOT / "controller" / "main.py")],
             input=json.dumps(request), text=True, capture_output=True, timeout=5,
+            env={**os.environ, "VCMI_CODEX_EXECUTABLE": "/missing/codex"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {
-            "protocol": 1, "request_id": "turn-7", "action_id": "town-hall",
+            "protocol": 1, "request_id": "turn-7", "action_id": "finish",
         })
 
 

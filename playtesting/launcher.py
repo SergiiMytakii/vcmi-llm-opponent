@@ -90,14 +90,13 @@ def run_game(run):
     child = None
     result = {"started_at": now(), "reason": "setup_failed", "returncode": None}
     try:
-        shim = run / "libPlaytestProfile.dylib"
-        subprocess.run(["/usr/bin/clang++", "-dynamiclib", "-o", str(shim), str(ROOT / "playtesting/profile_shim.cpp")],
-                       check=True, capture_output=True, timeout=30)
         sandbox = run / "profile.sb"
         sandbox.write_text("(version 1)\n(allow default)\n" + "".join(
             f"(deny file-write* (subpath {json.dumps(str(path))}))\n" for path in protected), encoding="utf-8")
         env = os.environ.copy()
-        env.update(VCMI_PLAYTEST_PROFILE=str(run / "profile"), DYLD_INSERT_LIBRARIES=str(shim),
+        env.pop('DYLD_INSERT_LIBRARIES', None)
+        profile = run / 'profile' / DATA
+        env.update(VCMI_PROFILE_DIR=str(profile),
                    VCMI_PLAYTEST_RUN=str(run), VCMI_EXTERNAL_AI_EXECUTABLE=sys.executable,
                    VCMI_EXTERNAL_AI_SCRIPT=str(ROOT / "scripts/playtest_controller.py"))
         settings_path = run / "profile" / DATA / "config/settings.json"
@@ -110,22 +109,32 @@ def run_game(run):
             ai = next(iter(names))
             settings.setdefault("ai", {}).update(adventureAlliedAI=ai, adventureEnemyAI=ai)
         write_json(settings_path, settings)
-        # sandbox-exec is protected by SIP and strips DYLD_* from its environment.
-        # Set the loader variable via env's argv inside the sandbox, after that boundary.
-        prefix = ["/usr/bin/sandbox-exec", "-f", str(sandbox), "/usr/bin/env",
-                  "DYLD_INSERT_LIBRARIES=" + str(shim),
-                  "VCMI_PLAYTEST_PROFILE=" + str(run / "profile"), str(engine)]
+        prefix = ["/usr/bin/sandbox-exec", "-f", str(sandbox), str(engine)]
         help_result = subprocess.run(prefix + ["--help"], env=env, capture_output=True, timeout=10)
         (run / "preflight.stdout.log").write_bytes(help_result.stdout)
         (run / "preflight.stderr.log").write_bytes(help_result.stderr)
-        if help_result.returncode != 0 or ("PLAYTEST_PROFILE " + str(run / "profile")).encode() not in help_result.stderr:
-            raise ValueError("isolated profile did not load; game was not started")
+        # --help does not initialize directories. Refuse an older/stock executable
+        # before --version or game startup can touch its default profile.
+        if help_result.returncode != 0 or b'VCMI_PROFILE_DIR' not in help_result.stdout:
+            raise ValueError('engine lacks native profile isolation; rebuild before launching')
+        version = subprocess.run(prefix + ['--version'], env=env, capture_output=True, timeout=10)
+        (run / 'preflight.stdout.log').write_bytes(help_result.stdout + version.stdout)
+        (run / 'preflight.stderr.log').write_bytes(help_result.stderr + version.stderr)
+        paths = dict(line.strip().split(':', 1) for line in version.stdout.decode('utf-8').splitlines()
+                     if line.strip().startswith('user ') and ':' in line)
+        expected = {'user data': profile, 'user cache': profile / 'cache', 'user config': profile / 'config',
+                    'user logs': profile / 'logs', 'user saves': profile / 'Saves',
+                    'user extracted': profile / 'cache/extracted'}
+        if version.returncode or any(paths.get(key, '').strip() != str(value) for key, value in expected.items()):
+            raise ValueError('engine writable paths do not match the isolated profile')
         with socket.socket() as port_socket:
             port_socket.bind(("127.0.0.1", 0))
             port = port_socket.getsockname()[1]
         logs = run / "engine-logs"
         logs.mkdir()
-        args = ["--nointro", "--disable-video", "--onlyAI", "--testmap", manifest["map_resource"],
+        scenario = (["--testsave", manifest["save_resource"]] if manifest.get("save_resource")
+                    else ["--testmap", manifest["map_resource"]])
+        args = ["--nointro", "--disable-video", "--onlyAI", *scenario,
                 "--savefrequency", "1", "--serverport", str(port), "--logLocation", str(logs)]
         args += ["--headless"] if manifest.get("headless", False) else ["--spectate", "--spectate-skip-battle-result"]
         if len(names) > 1:

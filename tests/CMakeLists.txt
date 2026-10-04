@@ -5,3 +5,5 @@ add_executable(exchange-driver exchange_driver.cpp ../engine/ExternalAI/ProcessE
 target_compile_features(exchange-driver PRIVATE cxx_std_20)
 target_include_directories(exchange-driver PRIVATE ../engine/ExternalAI)
 target_link_libraries(exchange-driver PRIVATE Boost::filesystem)
+add_executable(fake-codex-driver fake_codex_driver.cpp)
+target_compile_features(fake-codex-driver PRIVATE cxx_std_20)
