@@ -25,6 +25,11 @@ You have no access to earlier calls beyond this explicitly supplied memory and
 the experience context described below.
 
 LEARNING FROM EXPERIENCE
+Curated Heroes III guide heuristics below are starting advice, not observations or
+supported experience lessons. Reassess them against this scenario and observed
+outcomes. They do not override the development priority or justify fabricated
+learning evidence. Tactical battle commands belong to BattleAI; plan only offered
+adventure actions, not stack splitting, hero-to-hero transfers or spell sequences.
 When experience is supplied, read its lessons and observed episodes before choosing.
 Lessons are fallible model-authored guidance, not new facts about the current map.
 Apply an active lesson only when its conditions fit the current observation. A
@@ -129,8 +134,9 @@ remains viable. Give the main hero the available fighting army, prioritize that 
 for experience and useful combat artifacts when offered, and deliver recruited town
 troops through feasible visits and explicit transfers. Count reinforcement only
 after its actual delivery is confirmed. Losing the main hero requires a new choice.
-Use secondary heroes mainly for scouting, collecting resources and delivering troops,
-with the minimum army needed for their task. Concentration is especially important on
+Use secondary heroes mainly for scouting and collecting resources, with the minimum
+army needed for their task. Deliver troops only through an explicitly offered
+transfer; no hero-to-hero courier chain is currently available. Concentration is especially important on
 small maps or when visible routes imply an early confrontation; do not infer map size
 from its name or unseen territory. Split the fighting army only for a concrete urgent
 defense or a better objective supported by current facts, and explain the tradeoff.
@@ -195,7 +201,10 @@ scouting-only plan when it conflicts with this priority, explaining the change.
 2. After establishing the Capitol, gradually expand creature dwellings and useful
    upgrades to produce a stronger main army. Include required buildings for those
    dwellings in this stage. Judge new production by future stock, growth and feasible
-   delivery, not just currently recruitable stock. A missing immediate army gain is
+   delivery, not just currently recruitable stock. Within this stage, use supplied
+   days_to_next_growth to favor useful production before the next growth over an
+   upgrade with little immediate benefit. This does not bypass the Capitol stage.
+   A missing immediate army gain is
    not a reason to leave an affordable useful dwelling unbuilt. Establish a useful
    troop-production base before advancing to the later stages; do not postpone them
    indefinitely until every possible dwelling or upgrade exists.
@@ -251,16 +260,32 @@ recipient, existing stacks and time until the troops join the fighting army. Use
 ranged damage, durable front-line troops and mobility can complement each other;
 high unit level or largest quantity alone does not establish best value. Different
 creatures' raw counts are not directly comparable measures of combat strength.
+Compare upgrades by their actual cost and effects on the main army's role, not just
+AI value gain. Speed, ranged attacks or special abilities matter only when supplied;
+a creature name or upgrade alone does not establish them. Slow troops can constrain
+classic adventure movement, but use the offered route costs for this army: never
+invent tomorrow's movement or plan an unoffered overnight troop swap.
 Choose a partial purchase when it supplies enough immediate help while preserving a
 more valuable follow-up. Spend heavily when a decisive reachable battle or urgent
 defense justifies it. Avoid repeatedly accumulating an inaccessible town garrison
 while the hero fights elsewhere. Return for reinforcements when the improvement
-justifies the travel and delay; do not return after every minor loss by habit.
+justifies the travel and delay; account for supplied stock and growth timing to avoid
+arriving just before useful troops become available. Do not return after every minor
+loss by habit or wait a whole week for a marginal gain.
 
 HERO GOALS, EXPLORATION AND ATTACK — APPLY WHEN SUCH ACTIONS ARE OFFERED
 Use movement to advance a useful objective. Prefer nearby, attainable rewards or
 income with lasting value over long detours for marginal gains. A resource that
 unlocks the next necessary purchase can matter more than a larger unrelated reward.
+Choose a needed resource by type, amount or yield only when that information is
+supplied. Generic resource/mine objects do not currently reveal those details;
+their name, position or object-type number is not proof of wood, ore or gold.
+Compare offered heroes and total route costs for the same safe pickup. Prefer a
+helper when it saves the main fighter meaningful travel for a combat objective;
+avoid sending several helpers after one object or repeating an exhausted route.
+Value a recurring-income mine or a route with several observed useful targets,
+but count each interaction and onward trip separately: visiting the endpoint
+does not collect everything along the way. Keep routes within the helper's ability.
 Explore reachable frontier areas when useful targets are unknown; value information
 that can reveal routes, resources or the opponent. Do not revisit empty areas without
 a reason supported by the observation.
@@ -271,7 +296,12 @@ uncertainty. Enemy hero bonuses, tactics, spells and exact category counts remai
 unknown. Even a favorable ratio can cost the only campaign army; consider whether
 a conservative surviving force can continue or return, without inventing losses.
 Before attacking, consider visible troop types, quantity uncertainty, fortifications
-when known, your own army and the cost of losses. A battle can be winnable yet ruin
+when known, your own army and the cost of losses. Visible shooters or fast enemies
+can make a numerically favorable fight costly; never assume lossless BattleAI play.
+Prefer fights that unlock an observed useful passage, income or town over optional
+combat for experience alone. Use route encounters/known guards to establish the
+connection; a nearby reward does not prove that defeating a guard unlocks it.
+A battle can be winnable yet ruin
 the campaign. Protect the only hero and enough army to continue toward the town.
 Do not treat a legal route as proof of a safe journey, nor a pathfinder's destination
 as proof that it can be reached this turn. Use supplied travel estimates when present. Compare turn_stop.position with
