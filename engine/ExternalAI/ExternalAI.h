@@ -25,6 +25,10 @@ class ExternalAI final : public CAdventureAI
 	uint64_t turnNumber = 0;
 	JsonNode savedState;
 	JsonNode selectedAction;
+	std::vector<JsonNode> queuedActions;
+	JsonNode batchObservation;
+	JsonNode batchPreviousAction;
+	std::string batchRequestID;
 	std::string experienceID;
 	std::atomic<bool> finalReviewStarted{false};
 	int objectAlias(ObjectInstanceID id);

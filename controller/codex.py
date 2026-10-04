@@ -9,6 +9,7 @@ import tempfile
 import time
 from strategy import strategy_schema, validate_strategy
 from experience import learning_schema, validate_learning
+from batch import validate_batch
 
 
 ROOT = Path(__file__).resolve().parent
@@ -47,6 +48,8 @@ def validate_request(request):
 
 def validate_reply(request, reply):
     fields = {'protocol', 'request_id', 'action_id'}
+    if isinstance(reply, dict) and 'follow_up_action_ids' in reply:
+        fields.add('follow_up_action_ids')
     if request.get('experience', {}).get('mode') == 'learn':
         fields.add('learning')
     if isinstance(reply, dict) and 'strategy' in reply and 'memory' in request:
@@ -59,6 +62,7 @@ def validate_reply(request, reply):
         raise ValueError('stale request_id')
     if not isinstance(reply['action_id'], str) or reply['action_id'] not in {a['id'] for a in request['actions']}:
         raise ValueError('action was not offered')
+    validate_batch(request, reply)
     if 'strategy' in reply:
         validate_strategy(request, reply['strategy'])
     if 'learning' in reply:
@@ -128,6 +132,14 @@ def choose(request):
         if 'memory' in request:
             schema['required'].append('strategy')
             schema['properties']['strategy'] = strategy_schema(request)
+        limit = request['observation'].get('batch_action_limit', 1)
+        if type(limit) is not int or not 1 <= limit <= 32:
+            raise ValueError('invalid batch action limit')
+        if limit > 1:
+            schema['required'].append('follow_up_action_ids')
+            schema['properties']['follow_up_action_ids'] = {
+                'type': 'array', 'maxItems': limit - 1,
+                'items': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}
         if request.get('experience', {}).get('mode') == 'learn':
             schema['required'].append('learning')
             schema['properties']['learning'] = learning_schema(request['experience'])

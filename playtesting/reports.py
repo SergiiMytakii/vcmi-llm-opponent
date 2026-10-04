@@ -50,27 +50,46 @@ def report(run):
     ids = Counter(d.get("request_id") for d in decisions)
     logfile = run / "engine-logs/VCMI_Client_log.txt"
     assignments, selected = {}, {}
+    execution_ids = Counter()
+    batch_steps = []
     results = {}
     unattributed = 0
     if logfile.is_file():
         with logfile.open(encoding="utf-8", errors="replace") as stream:
             for line in stream:
                 assignments.update(re.findall(r"Player (\w+) will be lead by (\w+)", line))
-                selected.update(re.findall(r"ExternalAI request (\S+) selected (\S+)", line))
+                selections = re.findall(r"ExternalAI request (\S+) selected (\S+)", line)
+                selected.update(selections)
+                execution_ids.update(request_id for request_id, unused in selections)
+                for request_id, action_id, source in re.findall(r"ExternalAI batch step request=(\S+) action=(\S+) source=(\S+)", line):
+                    batch_steps.append({'request_id':request_id, 'action_id':action_id,
+                                        'chosen_in_request':source, 'execution':'engine_selected'})
                 matches = re.findall(r"ExternalAI build result[^\n]*observed=([01]) request=(\S+) action=(\S+)", line)
                 for observed, request_id, action_id in matches:
                     results[(request_id, action_id)] = "build_observed" if observed == "1" else "build_not_observed"
+                for kind, observed, request_id, action_id in re.findall(
+                        r"ExternalAI (move|recruit|transfer|upgrade|hire hero) result[^\n]*observed=([01]) request=(\S+) action=(\S+)", line):
+                    label = kind.replace(' ', '_')
+                    results[(request_id, action_id)] = label + ('_progress_observed' if kind == 'move' and observed == '1'
+                                                              else '_observed' if observed == '1' else '_not_observed')
                 if not matches and re.search(r"ExternalAI build result[^\n]*observed=[01]", line):
                     unattributed += 1
     for decision in decisions:
         request_id, action_id = decision.get("request_id"), decision.get("action_id")
-        if request_id and ids[request_id] == 1:
+        if request_id and ids[request_id] == 1 and execution_ids[request_id] <= 1:
             if (request_id, action_id) in results:
                 decision["execution"] = results[(request_id, action_id)]
             elif selected.get(request_id) == action_id and action_id is not None:
                 decision["execution"] = "engine_selected"
             if decision["status"] != "reply_valid" and selected.get(request_id) == "end":
                 decision["execution"] = "engine_selected_fallback_end"
+        decision['batch_steps'] = [step for step in batch_steps if step['chosen_in_request'] == request_id]
+    for step in batch_steps:
+        # Repeated model IDs after load remain ambiguous, including their queue.
+        if ids[step['chosen_in_request']] == 1 and execution_ids[step['request_id']] == 1:
+            step['execution'] = results.get((step['request_id'],step['action_id']), 'engine_selected')
+        else:
+            step['execution'] = 'unconfirmed'
     timings = sorted(d["duration_seconds"] for d in decisions if "duration_seconds" in d)
     episodes = [read_json(path, {}) for path in sorted((run / "episodes").glob("*.json"))]
     outcome = read_json(run / "outcome.json", {})
@@ -82,6 +101,7 @@ def report(run):
         "assignment_matches": assignments == manifest["players"] if assignments else None,
         "observed_assignments": assignments, "expected_assignments": manifest["players"],
         "counts": counts, "decision_count": len(decisions), "decisions": decisions,
+        "batch_steps":batch_steps,
         "latency_seconds": {"median": statistics.median(timings) if timings else None,
                             "max": max(timings) if timings else None},
         "unattributed_build_results": unattributed,
@@ -93,7 +113,7 @@ def report(run):
     lines = [f"# Playtest {manifest['case_id']}", "", f"Run: `{manifest['run_id']}`",
              f"Outcome: **{value['match_outcome']}** ({value['outcome_source']})",
              f"Launch: `{value['launch']['reason']}`; assignment matches: `{value['assignment_matches']}`",
-             f"Decisions: {len(decisions)}; statuses: `{json.dumps(counts)}`",
+             f"Decisions: {len(decisions)}; batch steps: {len(batch_steps)}; statuses: `{json.dumps(counts)}`",
              f"Latency: `{value['latency_seconds']}`; randomness: {value['randomness']}", "",
              "Selection, confirmed execution, and match outcome are separate evidence.", "",
              "| Decision | Request | Reply | Execution | Seconds | Explanation (controller declaration) |",

@@ -6,6 +6,7 @@
 #include "LocalState.h"
 #include "RouteForecast.h"
 #include "SkillChoice.h"
+#include "TurnBatch.h"
 
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/callback/Calendar.h"
@@ -376,7 +377,9 @@ void ExternalAI::runTurn(uint64_t turn)
 	}
 	// The server owns this state and serializes it into ordinary saves. Loading
 	// rebuilds every candidate; a pending intent is evidence, never a command to replay.
-	for(int attempt = std::clamp<int>(savedState["attempts"].Integer(), 0, 3); attempt < 3 && !stopping; ++attempt)
+	queuedActions.clear(); // A batch is never restored or replayed from a save.
+	for(int attempt = std::clamp<int>(savedState["attempts"].Integer(), 0, externalai::TURN_ACTION_LIMIT);
+		attempt < externalai::TURN_ACTION_LIMIT && !stopping; ++attempt)
 	{
 		savedState["attempts"].Integer() = attempt + 1;
 		if(!persistState()) break;
@@ -471,7 +474,8 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 			request["observation"]["resource_order"].Vector().push_back(JsonNode(std::string(name)));
 		for(const auto * capability : {"build", "recruit", "hire_hero", "transfer", "upgrade", "visit", "attack", "explore", "end_turn"})
 			request["observation"]["capabilities"].Vector().push_back(JsonNode(std::string(capability)));
-		request["observation"]["model_calls_remaining"].Integer() = 3 - attempt;
+		request["observation"]["turn_actions_remaining"].Integer() = externalai::TURN_ACTION_LIMIT - attempt;
+		request["observation"]["batch_action_limit"].Integer() = std::min(externalai::BATCH_ACTION_LIMIT, externalai::TURN_ACTION_LIMIT - attempt);
 		if(!savedState["pending"].isNull()) request["observation"]["previous_unconfirmed_action"] = savedState["pending"];
 		// Only player-visible objects enter factual memory, independent of whether
 		// the hero can currently reach them. Hidden removals never update sightings.
@@ -920,9 +924,27 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 	if(!persistState()) return false;
 
 	std::string actionID = "end";
+	bool fromBatch = false;
+	if(!queuedActions.empty())
+	{
+		if(!externalai::batchSituationChanged(batchObservation, request["observation"], batchPreviousAction))
+			for(const auto & action : request["actions"].Vector())
+				if(externalai::sameCommand(queuedActions.front(), action))
+				{
+					actionID = action["id"].String();
+					fromBatch = true;
+					break;
+				}
+		if(fromBatch) queuedActions.erase(queuedActions.begin());
+		else
+		{
+			logAi->info("ExternalAI batch invalidated request=%s source=%s; replanning", requestID, batchRequestID);
+			queuedActions.clear();
+		}
+	}
 	const auto executable = environmentValue("VCMI_EXTERNAL_AI_EXECUTABLE");
 	const auto script = environmentValue("VCMI_EXTERNAL_AI_SCRIPT");
-	if(!executable.empty() && !script.empty())
+	if(!fromBatch && !executable.empty() && !script.empty())
 	{
 		auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(40), stopping);
 		if(response.error.empty())
@@ -934,13 +956,17 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 				parser.mode = JsonParsingSettings::JsonFormatMode::JSON;
 				const JsonNode reply(response.output.data(), response.output.size(), parser, "ExternalAI reply");
 				const bool hasStrategy = reply.isStruct() && reply.Struct().count("strategy");
-				if(!reply.isStruct() || reply.Struct().size() != (hasStrategy ? 4 : 3) || !reply["protocol"].isNumber()
+				const bool hasBatch = reply.isStruct() && reply.Struct().count("follow_up_action_ids");
+				if(!reply.isStruct() || reply.Struct().size() != 3 + hasStrategy + hasBatch || !reply["protocol"].isNumber()
 					|| reply["protocol"].Float() != 1 || !reply["request_id"].isString()
 					|| reply["request_id"].String() != requestID || !reply["action_id"].isString()
 					|| (reply["action_id"].String() != "end" && !builds.count(reply["action_id"].String()) && !recruits.count(reply["action_id"].String()) && !hires.count(reply["action_id"].String()) && !moves.count(reply["action_id"].String()) && !transfers.count(reply["action_id"].String()) && !upgrades.count(reply["action_id"].String())))
 					throw std::runtime_error("invalid or stale action choice");
 				if(hasStrategy && !externalai::validStrategy(reply["strategy"], request["memory"], request["actions"]))
 					throw std::runtime_error("invalid strategy update");
+				auto choices = externalai::batchChoices(reply, request["actions"]);
+				if(choices.size() > request["observation"]["batch_action_limit"].Integer())
+					throw std::runtime_error("batch exceeds remaining turn budget");
 				if(hasStrategy && !reply["strategy"].isNull())
 				{
 					bool sameIntent = !savedState["memory"]["plan"].isNull();
@@ -955,6 +981,9 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 					savedState["memory"]["plan_updated_day"] = request["observation"]["day"];
 				}
 				actionID = reply["action_id"].String();
+				queuedActions.assign(choices.begin()+1, choices.end());
+				batchRequestID = requestID;
+				logAi->info("ExternalAI batch planned request=%s actions=%d", requestID, static_cast<int>(choices.size()));
 			}
 			catch(const std::exception & error)
 			{
@@ -964,13 +993,20 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 		else
 			logAi->warn("ExternalAI controller failure: %s request=%s", response.error, requestID);
 	}
-	else
+	else if(!fromBatch)
 		logAi->warn("ExternalAI executable/script not configured; ending turn");
 	if(stopping)
 		return false;
 	logAi->info("ExternalAI request %s selected %s", requestID, actionID);
 	for(const auto & action : request["actions"].Vector())
 		if(action["id"].String() == actionID) selectedAction = action;
+	batchObservation = request["observation"];
+	batchPreviousAction = selectedAction;
+	if(fromBatch)
+	{
+		selectedAction["chosen_in_request"].String() = batchRequestID;
+		logAi->info("ExternalAI batch step request=%s action=%s source=%s", requestID, actionID, batchRequestID);
+	}
 	if(actionID != "end")
 	{
 		for(const auto & action : request["actions"].Vector())

@@ -350,6 +350,30 @@ class PlaytestingTest(unittest.TestCase):
         self.assertEqual(report["decision_count"], 2)
         self.assertTrue(all(d["execution"] == "unconfirmed" for d in report["decisions"]))
 
+    def test_reused_batch_step_ids_from_distinct_choices_stay_unconfirmed(self):
+        self.prepare()
+        for request_id in ('0:1:0','0:1:1','0:1:2'):
+            request = {**self.request(), 'request_id':request_id}
+            self.assertEqual(self.hook(request).returncode, 0)
+        logs = self.run_dir / 'engine-logs'
+        logs.mkdir()
+        (logs/'VCMI_Client_log.txt').write_text(
+            'ExternalAI request 0:1:0 selected end\n'
+            'ExternalAI request 0:1:2 selected recruit-0\n'
+            'ExternalAI batch step request=0:1:2 action=recruit-0 source=0:1:0\n'
+            'ExternalAI recruit result observed=0 request=0:1:2 action=recruit-0\n'
+            'ExternalAI request 0:1:1 selected end\n'
+            'ExternalAI request 0:1:2 selected recruit-0\n'
+            'ExternalAI batch step request=0:1:2 action=recruit-0 source=0:1:1\n'
+            'ExternalAI recruit result observed=1 request=0:1:2 action=recruit-0\n'
+            'ExternalAI request 0:1:2 selected end\n')
+        self.assertEqual(self.cli('report','--run',self.run_dir).returncode, 0)
+        report = json.loads((self.run_dir/'report.json').read_text())
+        self.assertEqual(len(report['batch_steps']), 2)
+        self.assertEqual([s['execution'] for s in report['batch_steps']], ['unconfirmed','unconfirmed'])
+        model_after_load = next(d for d in report['decisions'] if d['request_id']=='0:1:2')
+        self.assertEqual(model_after_load['execution'], 'unconfirmed')
+
     def test_replay_uses_recorded_observation_and_comparison_flags_a_different_map(self):
         self.prepare()
         self.assertEqual(self.hook(self.request()).returncode, 0)

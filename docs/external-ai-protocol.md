@@ -19,8 +19,11 @@ runtime verification remains outstanding.
 
 Each request contains `protocol: 1`, `request_id`, `observation`, `memory` and
 `actions`. A request ID includes player, game day and decision index. The engine
-persists the consumed decision count before calling the controller and permits
-at most three calls per turn. A loaded game may reuse a request ID, so the tester
+persists the consumed action count before each step. The turn continues until
+`end_turn`, failure or a runaway guard of 256 action attempts; three calls no
+longer end the turn. `batch_action_limit` allows up to 32 sequential choices per
+model call; `turn_actions_remaining` reports the remaining guard budget.
+A loaded game may reuse a request ID, so the tester
 also assigns a unique recording ID. A controller reply is accepted only in the
 current synchronous exchange; neither request IDs nor action IDs are durable
 object references.
@@ -69,7 +72,21 @@ Illustrative reply:
 {"protocol":1,"request_id":"0:1:0","action_id":"build-0","strategy":null}
 ```
 
-The three identity/choice fields are required. The optional `strategy` field is
+The three identity/choice fields are required. `follow_up_action_ids`, when
+present, lists the remaining offered IDs in execution order after `action_id`.
+All IDs must be distinct and offered in the same request; `end_turn` may only
+appear last. Codex's schema requests this array when batching is available.
+The adapter saves command descriptions in a transient queue, rebuilds the
+observation and offered actions before every step, and resolves fresh IDs by
+command identity and cost. Each step still uses normal server validation.
+After a battle, new/changed external sightings, resource pickup, changed own
+forces or unexpected movement stop, the remainder is discarded and the model
+is asked again in the same day. An unavailable or changed route also replans.
+Failed or unconfirmed commands end the turn. A queue is never saved or replayed
+on load. Batch execution is logged with its originating request; queued results
+include `chosen_in_request`. Only explicit execution results prove completion.
+
+The optional `strategy` field is
 an intention-only update validated against the memory contract; the Codex output
 schema requires it when memory is supplied. `null` retains the previous plan.
 Deterministic fixtures and fallback may omit it. See [party memory](strategy-memory.md)

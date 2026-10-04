@@ -305,7 +305,10 @@ class Experience:
                 self.db.execute('INSERT INTO assessments VALUES(?,?,?,?,?)',(item['episode_id'],lesson_id,
                     item['verdict'],encoded(item['evidence_ids']),item['explanation']))
                 self.db.execute('UPDATE episodes SET assessed=1 WHERE id=?',(item['episode_id'],))
-            action = next(a for a in request['actions'] if a['id'] == reply['action_id'])
+            action = dict(next(a for a in request['actions'] if a['id'] == reply['action_id']))
+            if reply.get('follow_up_action_ids'):
+                offered = {a['id']:a for a in request['actions']}
+                action['planned_follow_ups'] = [offered[i] for i in reply['follow_up_action_ids']]
             self.db.execute('INSERT OR REPLACE INTO decisions VALUES(?,?,?,?,?,?)',(game,request['request_id'],
                 request['observation'].get('day',0),encoded(facts(request)),encoded(action),learning['expectation']))
         return {'lessons_updated':saved,'episodes_assessed':len(learning['assessments']),

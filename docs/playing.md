@@ -55,9 +55,11 @@ Repeat the checked `run` command without `--check`:
   side controls both towns.
 
 The scenario limits both sides to one hero, excludes boats and adventure movement
-spells, and lets the engine execute movement and battles. The model has at most
-three requests per turn, with a 35-second controller deadline for each request.
-A failed request ends the turn. Delays and skipped turns are currently noticeable.
+spells, and lets the engine execute movement and battles. The model can choose
+up to 32 offered actions in one request, with a 35-second controller deadline.
+The engine validates each step and asks again when the situation changes or the
+batch ends. A turn covers useful work for all heroes and towns, with a 256-action
+runaway guard. A failed request ends the turn.
 
 Close the game normally; Ctrl-C in the launcher's terminal also requests cleanup.
 Only one launcher may use a profile at a time. Logs are under `<profile>/logs`,
