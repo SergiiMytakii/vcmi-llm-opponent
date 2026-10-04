@@ -15,7 +15,8 @@ from prompt_context import (compact_json, encode_request, context_parts, bounded
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL = 'gpt-6.1-sol'
+MODEL = 'gpt-5.6-terra'
+REASONING_EFFORT = 'low'
 VERSION = 'codex-cli 0.160.0'
 TIMEOUT = 60  # Leaves room for the recorder (65s) and native exchange (70s).
 LIMIT = 1024 * 1024
@@ -180,7 +181,7 @@ def choose(request):
         (workspace / 'schema.json').write_text(compact_json(schema), encoding='utf-8')
         config = {
             'model_provider': 'openai', 'forced_login_method': 'chatgpt',
-            'model_reasoning_effort': 'medium', 'model_catalog_json': str(ROOT / 'model.json'),
+            'model_reasoning_effort': REASONING_EFFORT, 'model_catalog_json': str(ROOT / 'model.json'),
             'model_instructions_file': str(workspace / 'instructions.txt'),
             'web_search': 'disabled', 'project_doc_max_bytes': 0, 'skills.include_instructions': False,
             'tools.update_plan.enabled': False, 'tools.experimental_request_user_input.enabled': False,
@@ -245,7 +246,7 @@ def choose(request):
         if not completed:
             raise ValueError('Codex turn did not complete')
         reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
-        return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': 'medium',
+        return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': REASONING_EFFORT,
                        'cli': VERSION, 'usage': usage, 'references': references,
                        'input_encoding': encoding,
                        'duration_seconds': round(time.monotonic() - started, 3)}

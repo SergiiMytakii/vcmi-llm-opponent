@@ -152,6 +152,24 @@ class CampaignContractTest(unittest.TestCase):
         self.assertIn('object:4', [o['ref'] for o in projected['memory']['known_objects']])
         self.assertEqual(projected['memory']['campaign_review'], request['memory']['campaign_review'])
 
+    def test_retain_completed_pickup_but_reject_new_or_unconfirmed_absent_target(self):
+        request = campaign_request()
+        request['memory']['campaign'] = campaign_update()['plan']
+        request['memory']['known_objects'][0].update(
+            kind='resource', not_seen_at_last_position=True, collected_by_us=True)
+        request['actions'] = [{'id':'end', 'kind':'end_turn'}]
+        retain = {'decision':'retain', 'reason':'The assigned pickup is complete.',
+                  'evidence_refs':['hero:object:1'], 'plan':None}
+        reply = {**self.reply(request, retain), 'action_id':'end'}
+        self.assertEqual(validate_reply(request, copy.deepcopy(reply)), reply)
+        sys.path.insert(0, str(ROOT))
+        from playtesting.controller import validate_reply as recorded
+        self.assertEqual(recorded(request, json.dumps(reply)), reply)
+        with self.assertRaises(ValueError):
+            validate_reply(request, {**reply, 'campaign':campaign_update()})
+        request['memory']['known_objects'][0]['collected_by_us'] = False
+        with self.assertRaises(ValueError): validate_reply(request, reply)
+
     def test_reply_size_includes_campaign_operational_plan_batch_and_learning(self):
         from test_strategy import PLAN
         from prompt_context import compact_json

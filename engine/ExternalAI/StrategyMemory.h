@@ -347,7 +347,8 @@ inline bool validCampaign(const JsonNode & update, const JsonNode & operational,
         }
     }
     for(const auto & object : memory["known_objects"].Vector())
-        if(object["not_seen_at_last_position"].Bool() && assignedTargets.count(object["ref"].String())) return false;
+        if(object["not_seen_at_last_position"].Bool() && assignedTargets.count(object["ref"].String())
+            && !(retain && object["collected_by_us"].Bool())) return false;
     if(mainCount != (plan["main_hero_ref"].isNull() ? 0 : 1)) return false;
     const auto & next = operational.isNull() ? memory["plan"] : operational;
     if(next["executor_ref"].isString())
@@ -453,7 +454,7 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
     }
     const JsonNode fresh = campaignSnapshot(observation);
     const JsonNode previous = memory["campaign_observed"];
-    std::string recruitedHero;
+    std::string recruitedHero, hiredHero;
     // Only the next observation may acknowledge a confirmed purchase. Match
     // both the delivered creatures and strength; unrelated changes still review.
     const auto & results = static_cast<const JsonNode &>(memory)["recent_results"].Vector();
@@ -461,6 +462,13 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
     {
         const auto & result = results.back();
         const auto & action = result["action"];
+        if(result["sequence"].Integer() > memory["campaign_observed_result_sequence"].Integer()
+            && result["day"].Integer() == day && result["outcome"].String() == "completed"
+            && action["kind"].String() == "hire_hero" && action["hero_type"].isString())
+            for(const auto & hero : observation["heroes"].Vector())
+                if(!previous["heroes"].Struct().count(objectReference(hero["id"]))
+                    && hero["profile"]["hero_type"] == action["hero_type"])
+                    hiredHero = objectReference(hero["id"]);
         if(result["sequence"].Integer() > memory["campaign_observed_result_sequence"].Integer()
             && result["day"].Integer() == day && result["outcome"].String() == "completed"
             && action["kind"].String() == "recruit" && action["destination"].isNumber()
@@ -487,7 +495,7 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
             for(const auto & [ref, strength] : previous["heroes"].Struct())
                 if(!fresh["heroes"].Struct().count(ref)) addReason("hero_no_longer_owned");
             for(const auto & [ref, strength] : fresh["heroes"].Struct())
-                if(!previous["heroes"].Struct().count(ref)) addReason("new_owned_hero");
+                if(!previous["heroes"].Struct().count(ref)) addReason(ref == hiredHero ? "planned_hero_hired" : "new_owned_hero");
                 else if(ref != recruitedHero && strength.isNumber() && previous["heroes"][ref].isNumber()
                     && std::abs(strength.Float() - previous["heroes"][ref].Float()) >= std::max(1.0, previous["heroes"][ref].Float() * .25))
                     addReason("army_strength_changed");
@@ -508,9 +516,10 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
         if(observation["heroes"].isVector() && !fresh["heroes"].Struct().count(assignment["hero_ref"].String()))
             status["status"].String() = "infeasible_executor";
         for(const auto & object : memory["known_objects"].Vector())
-            if(object["ref"] == assignment["target_ref"] && object["not_seen_at_last_position"].Bool())
-                status["status"].String() = "target_absent_at_last_position";
-        if(status["status"].String() != "active") addReason("assignment_infeasible");
+            if(object["ref"] == assignment["target_ref"] && object["not_seen_at_last_position"].Bool()
+                && status["status"].String() == "active")
+                status["status"].String() = object["collected_by_us"].Bool() ? "completed" : "target_absent_at_last_position";
+        if(status["status"].String() != "active" && status["status"].String() != "completed") addReason("assignment_infeasible");
         review["assignments"].Vector().push_back(status);
     }
     // High-water marks are tied to checkable milestone identities. Rewording
@@ -584,7 +593,7 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
     memory["campaign_accessible"] = accessible;
     review["required"].Bool() = !review["reasons"].Vector().empty();
     review["full"].Bool() = std::any_of(review["reasons"].Vector().begin(), review["reasons"].Vector().end(),
-        [](const JsonNode & reason) { return reason.String() != "daily_check"; });
+        [](const JsonNode & reason) { return reason.String() != "daily_check" && reason.String() != "milestone_route_opened" && reason.String() != "planned_hero_hired"; });
 }
 
 inline void acceptCampaign(JsonNode & memory, const JsonNode & update, int day)
@@ -659,6 +668,27 @@ inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonN
 	};
 	for(const auto & item : observation["visible_objects"].Vector())
 		remember(item, objectReference(item["id"]));
+    // Disappearance alone is not collection. Require the acknowledged visit,
+    // current visibility of that tile and the executing hero actually arriving.
+    const auto & recent = static_cast<const JsonNode &>(memory)["recent_results"].Vector();
+    if(!recent.empty())
+    {
+        const auto & result = recent.back();
+        const auto & action = result["action"];
+        const auto found = facts.find(action["target_ref"].String());
+        if(result["sequence"].Integer() > memory["campaign_observed_result_sequence"].Integer()
+            && result["day"].Integer() == day && result["outcome"].String() == "progress_observed"
+            && action["kind"].String() == "visit" && found != facts.end())
+        {
+            const auto & kind = found->second["kind"].String();
+            if((kind == "resource" || kind == "artifact" || kind == "treasure_chest")
+                && found->second["not_seen_at_last_position"].Bool() && found->second["position"] == action["target"])
+                for(const auto & hero : observation["heroes"].Vector())
+                    if(hero["id"] == action["hero"] && hero["position"] == action["target"])
+                        found->second["collected_by_us"].Bool() = true;
+        }
+    }
+
 	for(auto & action : actions.Vector())
 	{
 		if(action["object_id"].isNumber())

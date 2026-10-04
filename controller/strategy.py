@@ -200,7 +200,9 @@ def validate_campaign(request, update, strategy=None):
         raise ValueError('main hero must have exactly its main assignment')
     targets = [a['target_ref'] for a in assignments.values() if a['target_ref'] is not None]
     if len(set(targets)) != len(targets): raise ValueError('heroes compete for one target')
-    absent = {o['ref'] for o in memory.get('known_objects', []) if o.get('not_seen_at_last_position') is True}
+    absent = {o['ref'] for o in memory.get('known_objects', [])
+              if o.get('not_seen_at_last_position') is True
+              and not (update['decision'] == 'retain' and o.get('collected_by_us') is True)}
     if any(target in absent for target in targets):
         raise ValueError('assignment target is absent at its last observed position')
     resources = [r['resource'] for r in plan['reserves']]

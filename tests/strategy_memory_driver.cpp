@@ -159,6 +159,53 @@ int main()
         later["heroes"][0]["strength"]["army_ai_value"].Integer() = 728;
         externalai::observeMemory(recruitmentMemory, later, ownedActions, json("[]"));
         require(recruitmentMemory["campaign_review"]["full"].Bool(), "later army loss did not request review");
+        auto routeMemory = ownedMemory;
+        routeMemory["campaign_accessible"] = json("{}");
+        externalai::observeMemory(routeMemory, campaignObservation, ownedActions, json("[]"));
+        require(routeMemory["campaign_review"]["required"].Bool() && !routeMemory["campaign_review"]["full"].Bool(),
+            "newly available milestone route forced an immediate full rewrite");
+        auto hireMemory = ownedMemory;
+        const auto hireHelper = json(R"({"kind":"hire_hero","hero_type":"core:rashka"})");
+        externalai::recordResult(hireMemory, 1, hireHelper, true);
+        auto hiredObservation = campaignObservation;
+        hiredObservation["heroes"].Vector().push_back(json(R"({"id":9,"profile":{"hero_type":"core:rashka"}})"));
+        externalai::observeMemory(hireMemory, hiredObservation, ownedActions, json("[]"));
+        require(hireMemory["campaign_review"]["required"].Bool() && !hireMemory["campaign_review"]["full"].Bool(),
+            "own planned helper hire forced immediate campaign rewrite");
+        auto pickupMemory = ownedMemory;
+        pickupMemory["campaign"]["assignments"][1]["target_ref"] = JsonNode();
+        auto pickupObservation = campaignObservation;
+        pickupObservation["heroes"][0]["position"] = json("[1,1,0]");
+        pickupObservation["visible_objects"] = json(R"([{"id":4,"kind":"resource","owner":-2,"position":[2,1,0]}])");
+        auto pickupActions = json(R"([{"id":"pickup","kind":"visit","hero":1,"object_id":4,"target":[2,1,0],"route_encounters":[]}])");
+        externalai::observeMemory(pickupMemory, pickupObservation, pickupActions, json("[[1,1,0],[2,1,0]]"));
+        externalai::acceptCampaign(pickupMemory, json(R"({"decision":"retain"})"), 1);
+        auto unconfirmedPickup = pickupMemory;
+        auto interruptedPickup = pickupMemory;
+        externalai::recordResult(pickupMemory, 1, pickupActions[0], true);
+        externalai::recordResult(unconfirmedPickup, 1, pickupActions[0], false);
+        externalai::recordResult(interruptedPickup, 1, pickupActions[0], true);
+        auto collected = pickupObservation;
+        collected["heroes"][0]["position"] = json("[2,1,0]");
+        collected["visible_objects"] = json("[]");
+        auto pickupNoActions = json("[]");
+        externalai::observeMemory(pickupMemory, collected, pickupNoActions, json("[[2,1,0]]"));
+        require(pickupMemory["campaign_review"]["assignments"][0]["status"].String() == "completed"
+            && !pickupMemory["campaign_review"]["full"].Bool(), "own confirmed pickup became infeasible campaign work");
+        const auto retainPickup = json(R"({"decision":"retain","reason":"Assigned pickup completed","evidence_refs":["hero:object:1"],"plan":null})");
+        require(externalai::validCampaign(retainPickup, JsonNode(), pickupMemory, collected, pickupNoActions),
+            "retaining completed pickup rejected the next model choice");
+        auto reassignPickup = update;
+        reassignPickup["plan"] = pickupMemory["campaign"];
+        require(!externalai::validCampaign(reassignPickup, JsonNode(), pickupMemory, collected, pickupNoActions),
+            "new campaign reassigned an already collected target");
+        externalai::observeMemory(unconfirmedPickup, collected, pickupNoActions, json("[[2,1,0]]"));
+        require(unconfirmedPickup["campaign_review"]["full"].Bool(), "unconfirmed disappearance was accepted as collection");
+        require(!externalai::validCampaign(retainPickup, JsonNode(), unconfirmedPickup, collected, pickupNoActions),
+            "retained an unconfirmed absent target");
+        collected["heroes"][0]["position"] = json("[1,1,0]");
+        externalai::observeMemory(interruptedPickup, collected, pickupNoActions, json("[[2,1,0]]"));
+        require(interruptedPickup["campaign_review"]["full"].Bool(), "partial movement was accepted as collection");
         campaignObservation["day"].Integer() = 2;
         externalai::observeMemory(loadedCampaign, campaignObservation, ownedActions, json("[]"));
         require(loadedCampaign["campaign_review"]["required"].Bool() && !loadedCampaign["campaign_review"]["full"].Bool(), "daily check became full rewrite");

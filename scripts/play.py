@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKER = 'external-ai-profile.json'
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'controller'))
-from codex import resolve_executable
+from codex import MODEL, REASONING_EFFORT, resolve_executable
 
 
 @contextmanager
@@ -84,7 +84,7 @@ def play(args):
     with profile_lock(profile):
         env = preflight(engine, profile, codex)
         if args.check:
-            print('Ready: isolated profile, Codex CLI 0.160.0, ChatGPT login, gpt-6.1-sol / medium.')
+            print(f'Ready: isolated profile, Codex CLI 0.160.0, ChatGPT login, {MODEL} / {REASONING_EFFORT}.')
             return 0
         from playtesting.runs import write_json
         settings_path = profile / 'config/settings.json'
