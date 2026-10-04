@@ -411,7 +411,16 @@ inline JsonNode campaignSnapshot(const JsonNode & observation)
 {
     JsonNode snapshot;
     for(const auto & hero : observation["heroes"].Vector())
-        snapshot["heroes"][objectReference(hero["id"])] = hero["strength"]["army_ai_value"];
+    {
+        const auto ref = objectReference(hero["id"]);
+        snapshot["heroes"][ref] = hero["strength"]["army_ai_value"];
+        if(hero["army"].isVector())
+        {
+            snapshot["armies"][ref].Struct();
+            for(const auto & stack : hero["army"].Vector())
+                snapshot["armies"][ref][stack["creature"].String()].Integer() += stack["count"].Integer();
+        }
+    }
     for(const auto & town : observation["towns"].Vector()) snapshot["towns"].Vector().push_back(town["id"]);
     for(const auto & object : observation["visible_objects"].Vector())
         if(object["kind"].String() == "hero" || object["kind"].String() == "town")
@@ -444,6 +453,33 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
     }
     const JsonNode fresh = campaignSnapshot(observation);
     const JsonNode previous = memory["campaign_observed"];
+    std::string recruitedHero;
+    // Only the next observation may acknowledge a confirmed purchase. Match
+    // both the delivered creatures and strength; unrelated changes still review.
+    const auto & results = static_cast<const JsonNode &>(memory)["recent_results"].Vector();
+    if(!results.empty())
+    {
+        const auto & result = results.back();
+        const auto & action = result["action"];
+        if(result["sequence"].Integer() > memory["campaign_observed_result_sequence"].Integer()
+            && result["day"].Integer() == day && result["outcome"].String() == "completed"
+            && action["kind"].String() == "recruit" && action["destination"].isNumber()
+            && action["creature"].isString() && action["amount"].Integer() > 0
+            && action["army_value_gain"].isNumber() && action["army_value_gain"].Float() > 0)
+        {
+            const auto ref = objectReference(action["destination"]);
+            if(previous["armies"][ref].isStruct() && fresh["armies"][ref].isStruct()
+                && previous["heroes"][ref].isNumber() && fresh["heroes"][ref].isNumber())
+            {
+                auto expected = previous["armies"][ref];
+                expected[action["creature"].String()].Integer() += action["amount"].Integer();
+                if(expected == fresh["armies"][ref]
+                    && fresh["heroes"][ref].Float() == previous["heroes"][ref].Float() + action["army_value_gain"].Float())
+                    recruitedHero = ref;
+            }
+        }
+    }
+    memory["campaign_observed_result_sequence"] = memory["result_sequence"];
     if(!previous.isNull())
     {
         if(observation["heroes"].isVector() && fresh["heroes"].Struct() != previous["heroes"].Struct())
@@ -452,7 +488,7 @@ inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, cons
                 if(!fresh["heroes"].Struct().count(ref)) addReason("hero_no_longer_owned");
             for(const auto & [ref, strength] : fresh["heroes"].Struct())
                 if(!previous["heroes"].Struct().count(ref)) addReason("new_owned_hero");
-                else if(strength.isNumber() && previous["heroes"][ref].isNumber()
+                else if(ref != recruitedHero && strength.isNumber() && previous["heroes"][ref].isNumber()
                     && std::abs(strength.Float() - previous["heroes"][ref].Float()) >= std::max(1.0, previous["heroes"][ref].Float() * .25))
                     addReason("army_strength_changed");
         }

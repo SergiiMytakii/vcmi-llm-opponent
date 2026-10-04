@@ -1,5 +1,6 @@
 #include "Global.h"
 #include "StrategyMemory.h"
+#include "TurnBatch.h"
 #include "RouteForecast.h"
 #include "SkillChoice.h"
 #include <iostream>
@@ -107,6 +108,57 @@ int main()
         externalai::observeMemory(loadedCampaign, campaignObservation, ownedActions, json("[]"));
         require(!loadedCampaign["campaign_review"]["required"].Bool(), "ordinary repeated facts rewrote campaign");
         require(loadedCampaign["campaign"] == ownedMemory["campaign"], "campaign changed on save/load");
+        // A confirmed purchase is expected execution, not a new campaign event.
+        auto recruitmentObservation = campaignObservation;
+        recruitmentObservation["heroes"][0]["strength"]["army_ai_value"].Integer() = 728;
+        recruitmentObservation["heroes"][0]["army"] = json(R"([{"creature":"core:gnoll","count":13}])");
+        auto recruitmentMemory = ownedMemory;
+        externalai::observeMemory(recruitmentMemory, recruitmentObservation, ownedActions, json("[]"));
+        const auto recruit = json(R"({"kind":"recruit","destination":1,"creature":"core:lizardman","amount":9,"army_value_gain":1134})");
+        auto reinforced = recruitmentObservation;
+        reinforced["heroes"][0]["army"].Vector().push_back(json(R"({"creature":"core:lizardman","count":9})"));
+        reinforced["heroes"][0]["strength"]["army_ai_value"].Integer() = 1862;
+        externalai::recordResult(recruitmentMemory, 1, recruit, true);
+        auto failedRecruitment = ownedMemory;
+        externalai::observeMemory(failedRecruitment, recruitmentObservation, ownedActions, json("[]"));
+        externalai::recordResult(failedRecruitment, 1, recruit, false);
+        auto unexpectedRecruitment = recruitmentMemory;
+        externalai::observeMemory(recruitmentMemory, reinforced, ownedActions, json("[]"));
+        reinforced["campaign_review"] = recruitmentMemory["campaign_review"];
+        require(!externalai::batchSituationChanged(recruitmentObservation, reinforced, recruit),
+            "confirmed planned recruitment discarded queued continuation");
+        externalai::observeMemory(failedRecruitment, reinforced, ownedActions, json("[]"));
+        require(failedRecruitment["campaign_review"]["full"].Bool(), "unconfirmed purchase suppressed army review");
+        auto unexpected = reinforced;
+        unexpected["heroes"][0]["army"][0]["count"].Integer() = 1;
+        externalai::observeMemory(unexpectedRecruitment, unexpected, ownedActions, json("[]"));
+        require(unexpectedRecruitment["campaign_review"]["full"].Bool(), "unrelated army change hidden by purchase");
+        auto threatened = reinforced;
+        threatened["enemy_players"] = json("[1]");
+        threatened["visible_objects"].Vector().push_back(json(R"({"id":9,"kind":"hero","owner":1})"));
+        auto threatMemory = recruitmentMemory;
+        externalai::observeMemory(threatMemory, threatened, ownedActions, json("[]"));
+        require(threatMemory["campaign_review"]["full"].Bool(), "new threat did not cancel recruitment continuation");
+        const auto secondRecruit = json(R"({"kind":"recruit","destination":1,"creature":"core:gnoll","amount":12,"army_value_gain":672})");
+        externalai::recordResult(recruitmentMemory, 1, secondRecruit, true);
+        auto twiceReinforced = reinforced;
+        twiceReinforced["heroes"][0]["army"][0]["count"].Integer() = 25;
+        twiceReinforced["heroes"][0]["strength"]["army_ai_value"].Integer() = 2534;
+        externalai::observeMemory(recruitmentMemory, twiceReinforced, ownedActions, json("[]"));
+        twiceReinforced["campaign_review"] = recruitmentMemory["campaign_review"];
+        require(!externalai::batchSituationChanged(reinforced, twiceReinforced, secondRecruit),
+            "second confirmed recruitment discarded queued movement");
+        // Reusing the latest completed purchase cannot excuse another increase.
+        auto unexplained = twiceReinforced;
+        unexplained["heroes"][0]["army"][0]["count"].Integer() = 37;
+        unexplained["heroes"][0]["strength"]["army_ai_value"].Integer() = 3206;
+        auto reuseMemory = recruitmentMemory;
+        externalai::observeMemory(reuseMemory, unexplained, ownedActions, json("[]"));
+        require(reuseMemory["campaign_review"]["full"].Bool(), "old purchase excused a later unexplained gain");
+        auto later = reinforced;
+        later["heroes"][0]["strength"]["army_ai_value"].Integer() = 728;
+        externalai::observeMemory(recruitmentMemory, later, ownedActions, json("[]"));
+        require(recruitmentMemory["campaign_review"]["full"].Bool(), "later army loss did not request review");
         campaignObservation["day"].Integer() = 2;
         externalai::observeMemory(loadedCampaign, campaignObservation, ownedActions, json("[]"));
         require(loadedCampaign["campaign_review"]["required"].Bool() && !loadedCampaign["campaign_review"]["full"].Bool(), "daily check became full rewrite");
