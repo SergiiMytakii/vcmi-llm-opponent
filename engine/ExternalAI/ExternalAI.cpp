@@ -5,6 +5,7 @@
 #include "StrategyMemory.h"
 #include "LocalState.h"
 #include "RouteForecast.h"
+#include "SkillChoice.h"
 
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/callback/Calendar.h"
@@ -372,6 +373,25 @@ bool ExternalAI::persistState()
 	{
 		std::shared_lock gsLock(CGameState::mutex, std::defer_lock);
 		if(!lockState(gsLock, stopping) || !cb->isPlayerMakingTurn(playerID)) return false;
+		const JsonNode memory = savedState["memory"];
+		const auto & plan = memory["plan"];
+		std::string targetKind;
+		for(const auto & target : memory["known_objects"].Vector())
+			if(target["ref"] == plan["target_ref"]) targetKind = target["kind"].String();
+		const CGHeroInstance * mainHero = nullptr;
+		for(const auto * hero : cb->getHeroesInfo())
+			if(hero->tempOwner == playerID && (!mainHero || hero->getArmyStrength() > mainHero->getArmyStrength())) mainHero = hero;
+		std::map<ObjectInstanceID, bool> goals;
+		for(const auto * hero : cb->getHeroesInfo())
+			if(hero->tempOwner == playerID)
+			{
+				const bool executor = plan["executor_ref"].isString() && externalai::objectReference(JsonNode(objectAlias(hero->id))) == plan["executor_ref"].String();
+				goals[hero->id] = executor ? targetKind != "frontier" && targetKind != "mine" && targetKind != "resource" && targetKind != "artifact" && targetKind != "treasure_chest" : hero == mainHero;
+			}
+		{
+			std::lock_guard lock(requestMutex);
+			developmentCombatGoals = std::move(goals);
+		}
 		savedState["schema"].Integer() = 1;
 		cb->saveLocalState(externalai::localStateUpdate(savedState));
 	}
@@ -486,6 +506,16 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 			for(int skill = 0; skill < 4; ++skill)
 				item["primary_skills"].Vector().push_back(JsonNode(hero->getPrimSkillLevel(PrimarySkill(skill))));
 			item["mana"].Integer() = hero->mana;
+			item["level"].Integer() = hero->level;
+			item["secondary_skills"].Vector();
+			for(const auto & [skill, level] : hero->secSkills)
+				if(skill != SecondarySkill::NONE)
+				{
+					JsonNode known;
+					known["skill"].String() = SecondarySkill::encode(skill.getNum());
+					known["level"].Integer() = level;
+					item["secondary_skills"].Vector().push_back(known);
+				}
 
 			request["observation"]["heroes"].Vector().push_back(item);
 		}
@@ -530,6 +560,17 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 			townInfo["id"].Integer() = objectAlias(town->id);
 			townInfo["army"] = armyJSON(town);
 			townInfo["strength"].Float() = town->getArmyStrength();
+			townInfo["fort_level"].Integer() = town->fortLevel();
+			townInfo["stationed_heroes"].Vector();
+			for(const auto * hero : {town->getVisitingHero(), town->getGarrisonHero()})
+				if(hero && hero->tempOwner == playerID)
+				{
+					JsonNode presence;
+					presence["hero"].Integer() = objectAlias(hero->id);
+					presence["army_ai_value"].Float() = hero->getArmyStrength();
+					presence["role"].String() = hero == town->getGarrisonHero() ? "garrison" : "visiting";
+					townInfo["stationed_heroes"].Vector().push_back(presence);
+				}
 			townInfo["daily_income"] = resourcesJSON(town->dailyIncome());
 			townInfo["position"] = positionJSON(town->visitablePos());
 			for(const auto & [id, building] : town->getTown()->buildings)
@@ -668,6 +709,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 				action["hero"].Integer() = objectAlias(hero->id);
 				action["target"] = positionJSON(pos);
 				action["travel_turns"].Float() = path.lastNode().cost;
+				action["route_steps"].Integer() = path.nodes.size() - 1;
 				action["arrival_turn_offset"].Integer() = path.lastNode().turns;
 				JsonNode route;
 				for(auto node = path.nodes.rbegin() + 1; node != path.nodes.rend(); ++node)
@@ -807,6 +849,16 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 			}
 			for(const auto & [sector, frontier] : frontiers) addMove(frontier.second, "explore", nullptr);
 		}
+		std::set<int> enemies;
+		const JsonNode & currentSightings = request["observation"]["visible_objects"];
+		const JsonNode & oldSightings = static_cast<const JsonNode &>(savedState)["memory"]["known_objects"];
+		for(const auto * sightings : {&currentSightings, &oldSightings})
+			for(const auto & sighting : sightings->Vector())
+				if(sighting["owner"].isNumber() && sighting["owner"].Integer() >= 0 && sighting["owner"].Integer() < PlayerColor::PLAYER_LIMIT.getNum()
+					&& cb->getPlayerRelations(playerID, PlayerColor(sighting["owner"].Integer())) == PlayerRelations::ENEMIES)
+					enemies.insert(sighting["owner"].Integer());
+		for(auto & town : request["observation"]["towns"].Vector())
+			town["defense"] = externalai::townDefense(town, request["observation"], savedState["memory"], request["actions"], visiblePositions, enemies);
 		externalai::observeMemory(savedState["memory"], request["observation"], request["actions"], visiblePositions);
 		request["memory"] = savedState["memory"];
 		request["memory"]["experience_id"].String() = experienceID;
@@ -1056,7 +1108,26 @@ void ExternalAI::showMarketWindow(const IMarket *, const CGHeroInstance *, Query
 void ExternalAI::showUniversityWindow(const IMarket *, const CGHeroInstance *, QueryID id) { answer(id, 0); }
 void ExternalAI::showTavernWindow(const CGObjectInstance *, const CGHeroInstance *, QueryID id) { answer(id, 0); }
 
-void ExternalAI::heroGotLevel(const CGHeroInstance *, PrimarySkill, std::vector<SecondarySkill> &, QueryID id) { answer(id, 0); }
+void ExternalAI::heroGotLevel(const CGHeroInstance * hero, PrimarySkill, std::vector<SecondarySkill> & offered, QueryID id)
+{
+	double total = 0, ranged = 0;
+	bool combatGoal = true;
+	if(hero && hero->tempOwner == playerID)
+	{
+		for(const auto & [slot, stack] : hero->Slots())
+		{
+			const auto value = static_cast<double>(stack->getCreature()->getAIValue()) * stack->getCount();
+			total += value;
+			if(stack->getCreature()->getBaseShots() > 0) ranged += value;
+		}
+		std::lock_guard lock(requestMutex);
+		if(const auto found = developmentCombatGoals.find(hero->id); found != developmentCombatGoals.end()) combatGoal = found->second;
+	}
+	const auto choice = externalai::chooseSecondarySkill(offered, total, ranged, combatGoal);
+	if(!offered.empty()) logAi->info("ExternalAI secondary skill choice=%d skill=%s goal=%s ranged_value=%f army_value=%f", choice,
+		SecondarySkill::encode(offered[choice].getNum()), combatGoal ? "combat" : "travel", ranged, total);
+	answer(id, choice);
+}
 void ExternalAI::commanderGotLevel(const CCommanderInstance *, std::vector<ui32>, QueryID id) { answer(id, 0); }
 void ExternalAI::showBlockingDialog(const std::string &, const std::vector<Component> &, QueryID id, int, bool selection, bool cancel, bool safeToAutoaccept)
 {

@@ -94,8 +94,12 @@ build/recruit/transfer/upgrade and a target. ready_when can be always/null;
 complete_when must never be always. unknown/null explicitly acknowledges that a
 condition cannot yet be checked. Do not invent thresholds unsupported by the data.
 Read memory.plan_review and own_force_changes: infeasible, completed or
-requires_revision calls for an evidence-based replacement. The engine tracks actual
-position/army/target changes; text progress is not proof. Waiting for a known future
+requires_revision calls for an evidence-based replacement. The engine tracks shorter
+known routes, new army-strength high-water marks and relevant target information.
+Movement alone, returning to a previous distance, or losing and restoring the same
+army does not refresh progress. Missing routes remain unknown. Reassess a repeated
+return/exploration loop against the objective and choose a useful alternative.
+Text progress is not proof. Waiting for a known future
 growth day can be useful. A confirmed_action condition refers to a new confirmed
 result since that operational plan began; unconfirmed results never complete it. Create an initial plan when useful
 actions exist and memory.plan is null. Use an offered target_ref or a remembered
@@ -133,11 +137,21 @@ defense or a better objective supported by current facts, and explain the tradeo
 Avoid several weak combat armies or idle town troops while the main hero lacks strength.
 
 DECISION PROCEDURE
-1. Identify immediate opportunities and threats from visible information. Prefer a
+1. Inspect each own town's defense separately from the hero's stop_threats. Use
+   defense.threats with their age and last observed distance, fort_level, town army
+   and stationed heroes. Enemy arrival is unknown; proximity is not a route or a
+   guaranteed attack. Use return_options only as offered own-hero routes, and check
+   their encounters, timing, and actual delivery before relying on reinforcement.
+   Weigh a funded recruit action or timely return against the offensive objective.
+   Explain any urgent town reserve in strategy.reserves; preserve the concentrated
+   main army unless current evidence justifies splitting it. Missing return routes
+   and unseen threats remain unknown, and separate force values must not be added
+   blindly because a garrison hero can share the town's army.
+2. Identify immediate opportunities and threats from visible information. Prefer a
    feasible winning capture over an upgrade whose benefit would arrive later. If a
    known threat can take your town or destroy your only effective army, consider
    reinforcement, interception or return before distant optional rewards.
-2. Compare at least two appropriate alternatives when offered: attack, reinforcement,
+3. Compare at least two appropriate alternatives when offered: attack, reinforcement,
    interception, defense or useful scouting. For a return, compare army_value_gain
    actually deliverable to this hero, travel there, separate command budget, growth
    date and onward travel. Onward travel is unknown until replanned, never free.
@@ -148,10 +162,10 @@ DECISION PROCEDURE
    useful troops, reveal a useful area, return for reinforcement, or approach/attack
    the enemy. Compare total travel, spending, likely losses and time to benefit.
    If those values are unavailable, use a cautious qualitative comparison.
-3. Compare the offered actions for that objective. Reserve what the next necessary
+4. Compare the offered actions for that objective. Reserve what the next necessary
    step needs. Preserve a viable ongoing objective when supplied unless new information
    makes a different one better. Avoid oscillating between distant targets.
-4. Check the chosen action's exact effects and the remaining decision budget. When
+5. Check the chosen action's exact effects and the remaining decision budget. When
    model_calls_remaining is supplied, it includes this request. A final purchase may
    leave no decision for hero movement this turn; weigh that lost movement. Do not
    assume another call will repair an incomplete sequence. Return one offered ID.

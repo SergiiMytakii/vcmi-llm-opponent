@@ -1,6 +1,7 @@
 #include "Global.h"
 #include "StrategyMemory.h"
 #include "RouteForecast.h"
+#include "SkillChoice.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -21,6 +22,11 @@ int main()
 {
 	try
 	{
+		require(externalai::chooseSecondarySkill({SecondarySkill::EAGLE_EYE, SecondarySkill::ARCHERY}, 1000, 800, true) == 1,
+			"ranged main hero took the first offered skill instead of Archery");
+		require(externalai::chooseSecondarySkill({SecondarySkill::ARCHERY, SecondarySkill::OFFENCE}, 1000, 100, true) == 1, "melee army ignored Offence");
+		require(externalai::chooseSecondarySkill({SecondarySkill::ARCHERY, SecondarySkill::LOGISTICS}, 1000, 1000, false) == 1, "travel task ignored Logistics");
+		require(externalai::chooseSecondarySkill({SecondarySkill::ARCHERY, SecondarySkill::LOGISTICS}, 1000, 1000, true) == 0, "ranged combat task ignored Archery");
 		JsonNode experienceState, otherExperienceState;
 		const auto experienceID = externalai::initializeExperience(experienceState);
 		require(!experienceID.empty(), "missing player-game experience identity");
@@ -84,6 +90,50 @@ int main()
 		require(oldIntent["attempts"].Integer() == 2 && oldIntent["memory"]["recent_results"].Vector().size() == 1,
 			"plan migration reset execution or budget");
 		JsonNode checked;
+		JsonNode loop;
+		auto loopObservation = json(R"({"day":1,"player":0,"heroes":[{"id":7,"position":[1,1,0],"strength":{"army_ai_value":100}}],"visible_objects":[{"id":42,"kind":"mine","owner":255,"position":[9,1,0]}]})");
+		auto loopActions = json(R"([{"id":"move","kind":"visit","hero":7,"object_id":42,"route_steps":8}])");
+		externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		loop["plan"] = json(R"({"goal":"Take mine","target_ref":"object:42","executor_ref":"object:7","ready_when":{"kind":"always","value":null},"complete_when":{"kind":"target_owned","value":null},"rationale":"income","steps":["move"],"reserves":"gold","reconsider_if":["loss"],"progress":"ready","change_reason":"initial"})");
+		externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		for(int day = 2; day <= 4; ++day)
+		{
+			loopObservation["day"].Integer() = day;
+			loopObservation["heroes"][0]["position"][0].Integer() = day % 2 == 0 ? 2 : 1;
+			loopActions[0]["route_steps"].Integer() = day % 2 == 0 ? 7 : 8;
+			externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		}
+		require(loop["plan_review"]["status"].String() == "requires_revision", "walking back and forth counted as new goal progress");
+		loopObservation["day"].Integer() = 5;
+		loopActions[0]["route_steps"].Integer() = 6;
+		loopObservation["heroes"][0]["strength"]["army_ai_value"].Integer() = 120;
+		externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		require(loop["plan_review"]["status"].String() == "active", "shorter path and delivered reinforcement did not advance goal");
+		loopObservation["day"].Integer() = 6;
+		loopObservation["heroes"][0]["strength"]["army_ai_value"].Integer() = 100;
+		externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		loopObservation["day"].Integer() = 7;
+		loopObservation["heroes"][0]["strength"]["army_ai_value"].Integer() = 120;
+		externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		require(loop["plan_review"]["status"].String() == "requires_revision", "restoring the same army counted as a new reinforcement");
+		loopObservation["visible_objects"][0]["position"][0].Integer() = 15;
+		for(int day = 8; day <= 10; ++day)
+		{
+			loopObservation["day"].Integer() = day;
+			loopActions[0]["route_steps"].Integer() = 20-day;
+			externalai::observeMemory(loop, loopObservation, loopActions, json("[]"));
+		}
+		require(loop["plan_review"]["status"].String() == "active", "approaching a newly observed target position compared against its old distance");
+		auto defenseTown = json(R"({"id":9,"position":[5,5,0],"strength":100,"fort_level":1,"stationed_heroes":[]})");
+		auto defenseMemory = json(R"({"known_objects":[{"id":7,"kind":"hero","owner":1,"position":[7,5,0],"last_seen_day":1}]})");
+		auto defenseObservation = json(R"({"day":4,"visible_objects":[]})");
+		auto defense = externalai::townDefense(defenseTown, defenseObservation, defenseMemory, json("[]"), json("[]"), {1});
+		require(defense["threats"].Vector().size() == 1 && defense["threats"][0]["age_days"].Integer() == 3, "aged city threat lost its observation age");
+		require(defense["threats"][0]["arrival_turn_offset"].isNull(), "invented an enemy arrival time");
+		defense = externalai::townDefense(defenseTown, defenseObservation, defenseMemory, json("[]"), json("[[7,5,0]]"), {1});
+		require(defense["threats"].Vector().empty(), "visible absence retained city threat");
+		defense = externalai::townDefense(defenseTown, defenseObservation, defenseMemory, json("[]"), json("[]"), {2});
+		require(defense["threats"].Vector().empty(), "allied hero counted as city threat");
 		auto checkedActions = json("[]");
 		auto own = json(R"({"day":1,"player":0,"heroes":[{"id":7,"position":[1,1,0],"strength":{"army_ai_value":100}}],"visible_objects":[{"id":42,"kind":"mine","owner":255,"position":[2,1,0]}]})");
 		externalai::observeMemory(checked, own, checkedActions, json("[]"));

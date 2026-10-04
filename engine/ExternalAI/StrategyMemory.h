@@ -119,7 +119,7 @@ inline bool validStrategy(const JsonNode & plan, const JsonNode & memory, const 
 		&& knownTargets(memory, actions).count(plan["target_ref"].String()));
 }
 
-inline void reviewPlan(JsonNode & memory, const JsonNode & observation)
+inline void reviewPlan(JsonNode & memory, const JsonNode & observation, const JsonNode & actions)
 {
 	const auto & plan = static_cast<const JsonNode &>(memory)["plan"];
 	if(plan.isNull()) return;
@@ -152,25 +152,83 @@ inline void reviewPlan(JsonNode & memory, const JsonNode & observation)
 	};
 	JsonNode signature;
 	for(const auto * key : {"target_ref", "executor_ref", "ready_when", "complete_when"}) signature[key] = plan[key];
-	JsonNode progress;
-	progress["position"] = ownedExecutor["position"];
-	progress["army"] = ownedExecutor["army"];
-	progress["target_position"] = knownTarget["position"];
-	progress["target_owner"] = knownTarget["owner"];
+	auto & tracking = memory["plan_tracking"];
+	const auto oldReady = static_cast<const JsonNode &>(tracking)["ready"].String();
+	const bool initial = tracking["signature"] != signature || tracking["basis"].String() != "goal_progress_v1";
+	if(initial)
+	{
+		tracking = JsonNode();
+		tracking["signature"] = signature;
+		tracking["basis"].String() = "goal_progress_v1";
+	}
+	bool progressed = initial;
+	// Distances to different observed positions are not comparable.
+	if(tracking["route_target_position"] != knownTarget["position"])
+	{
+		tracking.Struct().erase("best_route_steps");
+		tracking["route_target_position"] = knownTarget["position"];
+	}
+	// Keep high-water marks: returning to a previously reached distance or army
+	// size cannot refresh an unchanged objective. Missing routes remain unknown.
+	for(const auto & action : actions.Vector())
+		if(action["target_ref"] == plan["target_ref"] && plan["executor_ref"].isString()
+			&& action["hero"].isNumber() && objectReference(action["hero"]) == plan["executor_ref"].String()
+			&& action["route_steps"].isNumber())
+		{
+			const auto steps = action["route_steps"].Integer();
+			if(!tracking["best_route_steps"].isNumber() || steps < tracking["best_route_steps"].Integer())
+			{
+				progressed |= !initial;
+				tracking["best_route_steps"].Integer() = steps;
+			}
+		}
+	const auto & strength = ownedExecutor["strength"]["army_ai_value"];
+	if(strength.isNumber() && (!tracking["best_army_value"].isNumber() || strength.Float() > tracking["best_army_value"].Float()))
+	{
+		progressed |= !initial && tracking["best_army_value"].isNumber();
+		tracking["best_army_value"] = strength;
+	}
+	if(!knownTarget.isNull() && !knownTarget["stale"].Bool())
+	{
+		JsonNode information;
+		for(const auto * key : {"position", "owner", "not_seen_at_last_position"}) information[key] = knownTarget[key];
+		if(knownTarget["owner"] != observation["player"]) information["army"] = knownTarget["army"];
+		if(tracking["target_information"] != information)
+		{
+			progressed = true;
+			tracking["target_information"] = information;
+		}
+	}
 	for(const auto & town : observation["towns"].Vector())
 		if(plan["target_ref"].isString() && objectReference(town["id"]) == plan["target_ref"].String())
 		{
-			progress["town"] = town;
-			for(auto & stock : progress["town"]["stock"].Vector()) stock.Struct().erase("days_to_next_growth");
+			if(town["strength"].isNumber() && (!tracking["best_town_army_value"].isNumber() || town["strength"].Float() > tracking["best_town_army_value"].Float()))
+			{
+				progressed |= !initial && tracking["best_town_army_value"].isNumber();
+				tracking["best_town_army_value"] = town["strength"];
+			}
+			for(const auto & building : town["buildings"].Vector())
+				if(std::find(tracking["buildings"].Vector().begin(), tracking["buildings"].Vector().end(), building) == tracking["buildings"].Vector().end())
+				{
+					progressed = true;
+					tracking["buildings"].Vector().push_back(building);
+				}
 		}
-	if(plan["executor_ref"].isNull()) progress["resources"] = observation["resources"];
-	auto & tracking = memory["plan_tracking"];
-	const auto oldReady = static_cast<const JsonNode &>(tracking)["ready"].String();
-	if(tracking["signature"] != signature || tracking["snapshot"] != progress)
+	if(plan["executor_ref"].isNull())
+	{
+		auto & best = tracking["best_resources"].Vector();
+		const auto & current = observation["resources"].Vector();
+		if(best.size() < current.size()) best.resize(current.size());
+		for(size_t index = 0; index < current.size(); ++index)
+			if(current[index].isNumber() && (!best[index].isNumber() || current[index].Float() > best[index].Float()))
+			{
+				progressed |= !initial && best[index].isNumber();
+				best[index] = current[index];
+			}
+	}
+	if(progressed)
 	{
 		tracking["last_change_day"] = observation["day"];
-		tracking["signature"] = signature;
-		tracking["snapshot"] = progress;
 	}
 	const auto ready = conditionStatus(plan["ready_when"]);
 	const auto complete = conditionStatus(plan["complete_when"]);
@@ -283,7 +341,7 @@ inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonN
 	});
 	if(ordered.size() > 128) ordered.resize(128);
 	memory["known_objects"].Vector() = std::move(ordered);
-	reviewPlan(memory, observation);
+	reviewPlan(memory, observation, actions);
 }
 
 inline void recordResult(JsonNode & memory, int day, const JsonNode & action, bool confirmed)

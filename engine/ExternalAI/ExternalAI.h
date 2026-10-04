@@ -19,6 +19,9 @@ class ExternalAI final : public CAdventureAI
 	bool battleBlocked = false;
 	std::set<QueryID> pendingQueries;
 	std::map<int, QueryID> queryRequests;
+	// Published by the turn worker under requestMutex; level-up callbacks never
+	// read worker-owned savedState while a battle is unwinding.
+	std::map<ObjectInstanceID, bool> developmentCombatGoals;
 	uint64_t turnNumber = 0;
 	JsonNode savedState;
 	JsonNode selectedAction;
