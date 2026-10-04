@@ -10,7 +10,7 @@ The engine writes one UTF-8 JSON object to stdin and closes stdin. Input is
 limited to 256 KiB; stdout must contain one JSON reply, at most 8 KiB, followed
 by successful process exit. Diagnostics belong on stderr. The native adapter
 discards stderr; the playtesting recorder preserves it separately. The native
-process deadline is 40 seconds including launch; polling and cleanup can add
+process deadline is 70 seconds including launch; polling and cleanup can add
 approximately 220 ms. Shutdown cancels an in-flight request. Windows launches
 suspended, assigns the process to its owned Job Object, then resumes it; Windows
 runtime verification remains outstanding.
@@ -144,9 +144,13 @@ restored, and the next day reset the budget. Saves during battles and unacknowle
 actions still require separate acceptance; see the runtime verification report.
 
 Codex uses pinned CLI 0.160.0, `gpt-6.1-sol`, medium reasoning, ChatGPT login and a
-restricted model profile with tools disabled. Its internal deadline is 35 seconds,
-with a 37-second recorder limit and 40-second native deadline. There is no API-key fallback.
-Missing authentication, unsupported CLI, timeout or invalid output produces an
+restricted model profile with tools disabled. Its internal deadline is 60 seconds,
+with a 65-second recorder limit and 70-second native deadline. There is no API-key fallback.
+A timeout emits no action and exits with code 75, which the recorder forwards.
+The native turn loop allows one fresh request retry per game day, using the same
+60-second request budget. The consumed retry and attempt budget survive save/load;
+neither an unanswered action nor a learning decision is fabricated.
+Missing authentication, unsupported CLI or invalid output produces an
 offered end-turn response with separate `provider: fallback` diagnostics. The
 current no-tools wire proof and native runtime limits are documented in the local
 verification evidence; Windows still needs independent verification.

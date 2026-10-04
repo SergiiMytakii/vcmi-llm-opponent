@@ -15,7 +15,7 @@ from batch import validate_batch
 ROOT = Path(__file__).resolve().parent
 MODEL = 'gpt-6.1-sol'
 VERSION = 'codex-cli 0.160.0'
-TIMEOUT = 35  # Leaves room for the recorder (37s) and native exchange (40s).
+TIMEOUT = 60  # Leaves room for the recorder (65s) and native exchange (70s).
 LIMIT = 1024 * 1024
 DISABLED = '''shell_tool unified_exec shell_snapshot apps plugins remote_plugin memories
 multi_agent multi_agent_v2 goals browser_use browser_use_external computer_use image_generation
@@ -188,6 +188,8 @@ def choose(request):
                     for name in ('events.jsonl', 'stderr.log'):
                         with (workspace / name).open('rb') as stream:
                             (Path(decision_dir) / ('codex-' + name)).write_bytes(stream.read(LIMIT))
+        if time.monotonic() - started >= TIMEOUT:
+            raise TimeoutError('Codex decision deadline exceeded')
         events_path = workspace / 'events.jsonl'
         answer_path = workspace / 'answer.json'
         if events_path.stat().st_size > LIMIT or answer_path.stat().st_size > 8192:
@@ -202,8 +204,10 @@ def choose(request):
                 raise ValueError('unexpected Codex item: ' + str(item.get('type')))
             if event.get('type') == 'turn.completed':
                 completed, usage = True, event.get('usage')
-        if not completed or time.monotonic() - started >= TIMEOUT:
-            raise ValueError('Codex turn did not complete before deadline')
+        if time.monotonic() - started >= TIMEOUT:
+            raise TimeoutError('Codex decision deadline exceeded')
+        if not completed:
+            raise ValueError('Codex turn did not complete')
         reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
         return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': 'medium',
                        'cli': VERSION, 'usage': usage, 'references': references,

@@ -278,7 +278,7 @@ void ExternalAI::gameOver(PlayerColor player, const EVictoryLossCheckResult & re
 	request["actions"].Vector().push_back(end);
 	// A bounded final reflection runs before this callback returns. Its reply
 	// never executes a game command or changes a saved operational plan.
-	auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(40), stopping);
+	auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(70), stopping);
 	logAi->info("ExternalAI final experience review player=%d outcome=%s delivered=%d", playerID.getNum(),
 		result.victory() ? "win" : "loss", response.error.empty());
 }
@@ -402,6 +402,7 @@ void ExternalAI::runTurn(uint64_t turn)
 	{
 		savedState["day"].Integer() = day;
 		savedState["attempts"].Integer() = 0;
+		savedState["timeout_retries"].Integer() = 0;
 	}
 	// The server owns this state and serializes it into ordinary saves. Loading
 	// rebuilds every candidate; a pending intent is evidence, never a command to replay.
@@ -412,6 +413,16 @@ void ExternalAI::runTurn(uint64_t turn)
 		savedState["attempts"].Integer() = attempt + 1;
 		if(!persistState()) break;
 		const bool confirmed = runDecision(day, attempt);
+		if(decisionTimedOut && !stopping && savedState["timeout_retries"].Integer() < 1
+			&& attempt + 1 < externalai::TURN_ACTION_LIMIT)
+		{
+			// Retry only an unanswered request, never a dispatched game action.
+			// Save the per-day retry budget before rebuilding fresh candidates.
+			++savedState["timeout_retries"].Integer();
+			if(!persistState()) break;
+			logAi->warn("ExternalAI timed-out decision will retry once day=%d attempt=%d", day, attempt);
+			continue;
+		}
 		externalai::recordResult(savedState["memory"], day, selectedAction, confirmed);
 		if(confirmed) savedState.Struct().erase("pending");
 		if(!persistState()) break;
@@ -490,6 +501,7 @@ bool ExternalAI::waitForRequest(int seconds)
 bool ExternalAI::runDecision(uint64_t turn, int attempt)
 {
 	selectedAction = JsonNode();
+	decisionTimedOut = false;
 	std::map<std::string, BuildChoice> builds;
 	std::map<std::string, RecruitChoice> recruits;
 	std::map<std::string, HeroHireChoice> hires;
@@ -989,7 +1001,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 	const auto script = environmentValue("VCMI_EXTERNAL_AI_SCRIPT");
 	if(!fromBatch && !executable.empty() && !script.empty())
 	{
-		auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(40), stopping);
+		auto response = externalai::exchange(executable, {script}, request.toCompactString(), std::chrono::seconds(70), stopping);
 		if(response.error.empty())
 		{
 			try
@@ -1034,7 +1046,14 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 			}
 		}
 		else
+		{
 			logAi->warn("ExternalAI controller failure: %s request=%s", response.error, requestID);
+			if(response.error == "timeout")
+			{
+				decisionTimedOut = true;
+				return false;
+			}
+		}
 	}
 	else if(!fromBatch)
 		logAi->warn("ExternalAI executable/script not configured; ending turn");

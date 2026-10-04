@@ -130,7 +130,7 @@ Reply exchange(const std::string & executable, const std::vector<std::string> & 
 				{
 					exited = true;
 					if(child.exit_code() != 0)
-						reply.error = "controller exited unsuccessfully";
+						reply.error = child.exit_code() == 75 ? "timeout" : "controller exited unsuccessfully";
 					std::error_code groupError;
 					group.terminate(groupError); // Close pipes inherited by surviving descendants.
 				}

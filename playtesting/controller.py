@@ -104,7 +104,8 @@ def exchange(run, raw, engine_owned=False):
                     result["status"] = "stderr_limit"
                     break
                 if child.poll() is not None:
-                    result["status"] = "controller_exit" if child.returncode else "received"
+                    result["status"] = ("timeout" if child.returncode == 75 else
+                                        "controller_exit" if child.returncode else "received")
                     break
                 if time.monotonic() >= deadline:
                     result["status"] = "timeout"
@@ -166,7 +167,7 @@ def main():
         output, result = exchange(os.environ["VCMI_PLAYTEST_RUN"], raw, engine_owned=True)
         if result["status"] != "reply_valid":
             print("playtest controller: " + result["status"], file=sys.stderr)
-            sys.exit(1)
+            sys.exit(75 if result["status"] == "timeout" else 1)
         sys.stdout.buffer.write(output)
         sys.stdout.buffer.flush()
     except (OSError, ValueError, KeyError) as error:

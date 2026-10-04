@@ -63,6 +63,12 @@ class ProcessExchangeTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
+    def test_retryable_controller_exit_is_a_timeout_without_an_action(self):
+        result = self.exchange("import sys; sys.stdin.read(); sys.exit(75)")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('timeout', result.stderr)
+
     def test_early_exit_while_receiving_large_request_does_not_kill_host(self):
         result = self.exchange("import sys; sys.exit(7)", request="x" * 200000)
         self.assertEqual(result.returncode, 1, result.stderr)

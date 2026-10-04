@@ -236,6 +236,16 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         self.assertEqual(record["status"], "timeout")
         self.assertLess(record["duration_seconds"], 2)
 
+    def test_model_timeout_is_forwarded_as_retryable_without_an_end_turn_reply(self):
+        self.settings['controller'] = [sys.executable, '-c', 'import sys; sys.exit(75)']
+        self.prepare()
+        result = self.hook(self.request())
+        self.assertEqual(result.returncode, 75)
+        self.assertEqual(result.stdout, '')
+        record = json.loads(next((self.run_dir / 'decisions').glob('*/result.json')).read_text())
+        self.assertEqual(record['status'], 'timeout')
+        self.assertEqual(record['returncode'], 75)
+
     def test_stale_reply_is_rejected_and_stderr_is_retained(self):
         self.settings["controller"] = [sys.executable, "-c",
             'import sys; print("debug", file=sys.stderr); '

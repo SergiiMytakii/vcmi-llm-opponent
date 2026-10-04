@@ -88,8 +88,8 @@ def prepare(config_path, out):
     if config.get("purpose") not in ("integration", "training", "evaluation") or not config.get("case_id"):
         raise ValueError("case_id and purpose (integration/training/evaluation) are required")
     finite_positive(config["max_seconds"], "max_seconds")
-    config.setdefault("decision_timeout_seconds", 37)
-    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 37)
+    config.setdefault("decision_timeout_seconds", 65)
+    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 65)
     controller = config["controller"]
     if not isinstance(controller, list) or not controller or any(not isinstance(a, str) for a in controller):
         raise ValueError("controller must be an argv array, without a shell")

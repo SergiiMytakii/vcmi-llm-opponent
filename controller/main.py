@@ -32,31 +32,40 @@ def main():
         experience = None
     try:
         reply, metadata = choose(request)
-    except (OSError, ValueError, TypeError, TimeoutError, subprocess.SubprocessError) as error:
+    except (TimeoutError, subprocess.TimeoutExpired) as error:
+        reply = None
+        metadata = {'provider': 'fallback', 'reason': str(error), 'retryable': True,
+                    'duration_seconds': round(time.monotonic() - started, 3)}
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
         action = next(a for a in request['actions'] if a['kind'] == 'end_turn')
         reply = {'protocol': 1, 'request_id': request['request_id'], 'action_id': action['id']}
         metadata = {'provider': 'fallback', 'reason': str(error),
                     'duration_seconds': round(time.monotonic() - started, 3)}
     if experience:
         try:
-            if 'learning' in reply:
+            if reply is not None and 'learning' in reply:
                 metadata['experience'] = experience.accept(request, reply)
             else:
-                if metadata['provider'] == 'fallback':
+                if reply is not None and metadata['provider'] == 'fallback':
                     experience.record_fallback(request, reply)
                 metadata['experience'] = {'lessons_supplied':len(request['experience']['lessons'])}
         except (OSError, ValueError, TypeError, sqlite3.Error) as error:
             experience_error = str(error)
         finally:
             experience.close()
-    reply.pop('learning', None)
+    if reply is not None:
+        reply.pop('learning', None)
     if experience_error:
         metadata['experience_error'] = experience_error
-    metadata.update(request_id=request['request_id'], action_id=reply['action_id'])
+    metadata.update(request_id=request['request_id'], action_id=reply['action_id'] if reply else None)
     print(json.dumps(metadata), file=sys.stderr)
     decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
     if decision_dir:
         (Path(decision_dir) / 'explanation.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
+    if reply is None:
+        # EX_TEMPFAIL reaches the engine through the recorder. No game command
+        # or learning episode is fabricated for an unanswered model request.
+        raise SystemExit(75)
     sys.stdout.buffer.write((json.dumps(reply, ensure_ascii=False) + "\n").encode('utf-8'))
     sys.stdout.buffer.flush()
 

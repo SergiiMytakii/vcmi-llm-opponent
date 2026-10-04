@@ -26,6 +26,7 @@ class ExternalAI final : public CAdventureAI
 	uint64_t turnNumber = 0;
 	JsonNode savedState;
 	JsonNode selectedAction;
+	bool decisionTimedOut = false;
 	std::vector<JsonNode> queuedActions;
 	JsonNode batchObservation;
 	JsonNode batchPreviousAction;
