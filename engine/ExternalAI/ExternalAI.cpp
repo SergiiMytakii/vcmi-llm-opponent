@@ -13,6 +13,14 @@
 #include "../../lib/callback/Calendar.h"
 #include "../../lib/entities/building/CBuilding.h"
 #include "../../lib/entities/faction/CTown.h"
+#include "../../lib/entities/faction/CFaction.h"
+#include "../../lib/entities/artifact/CArtifact.h"
+#include "../../lib/entities/artifact/CArtifactInstance.h"
+#include "../../lib/modding/CModHandler.h"
+#include "../../lib/modding/ModDescription.h"
+#include "../../lib/modding/CModVersion.h"
+#include "../../lib/mapping/CMapHeader.h"
+#include "../../lib/spells/CSpellHandler.h"
 #include "../../lib/entities/hero/CHero.h"
 #include "../../lib/IGameSettings.h"
 #include "../../lib/gameState/CGameState.h"
@@ -218,6 +226,78 @@ JsonNode armyJSON(const CArmedInstance * army)
 		result.Vector().push_back(item);
 	}
 	return result;
+}
+
+// Descriptions are public rules, not executable instructions. Oversized mod
+// prose is explicitly unknown rather than risking an invalid UTF-8 truncation.
+std::string strategicDescription(const std::string & text)
+{
+    return text.size() <= 320 ? text : "unknown_description_exceeds_budget";
+}
+
+std::string buildingAvailability(EBuildingState state)
+{
+    switch(state)
+    {
+        case EBuildingState::ALLOWED: return "allowed_now";
+        case EBuildingState::ALREADY_PRESENT: return "built";
+        case EBuildingState::FORBIDDEN: return "forbidden";
+        case EBuildingState::NO_RESOURCES: return "insufficient_resources";
+        case EBuildingState::CANT_BUILD_TODAY: return "daily_limit";
+        case EBuildingState::PREREQUIRES: return "missing_prerequisites";
+        case EBuildingState::MISSING_BASE: return "missing_base";
+        case EBuildingState::HAVE_CAPITAL: return "another_capitol_exists";
+        case EBuildingState::NO_WATER: return "no_water";
+        case EBuildingState::ADD_MAGES_GUILD: return "mage_guild_required";
+        default: return "unknown";
+    }
+}
+
+JsonNode factionRules(const CTown * town)
+{
+    JsonNode rules;
+    rules["primary_resource"].String() = GameConstants::RESOURCE_NAMES[town->primaryRes.getNum()];
+    for(const auto & tier : town->creatures)
+    {
+        JsonNode line;
+        for(const auto & id : tier)
+        {
+            const auto * creature = id.toCreature();
+            JsonNode unit;
+            unit["creature"].String() = creature->getJsonKey();
+            unit["recruit_cost"] = resourcesJSON(creature->getFullRecruitCost());
+            unit["base_growth"].Integer() = creature->getGrowth();
+            unit["unit_ai_value"].Integer() = creature->getAIValue();
+            unit["hit_points"].Integer() = creature->getBaseHitPoints();
+            unit["speed"].Integer() = creature->getBaseSpeed();
+            unit["ranged"].Bool() = creature->getBaseShots() > 0;
+            unit["flying"].Bool() = creature->hasBonusOfType(BonusType::FLYING);
+            unit["other_effects"].String() = "unknown_not_interpreted";
+            line.Vector().push_back(unit);
+        }
+        rules["creature_lineup"].Vector().push_back(line);
+    }
+    for(const auto & [id, building] : town->buildings)
+        if(building->mode == CBuilding::BUILD_NORMAL)
+        {
+            JsonNode entry;
+            entry["building"].String() = building->getJsonKey();
+            entry["cost"] = resourcesJSON(building->resources);
+            entry["production"] = resourcesJSON(building->produce);
+            entry["description"].String() = strategicDescription(building->getDescriptionTranslated());
+            entry["requirements"] = building->requirements.toJson([&](const BuildingID & required) {
+                const auto found = town->buildings.find(required);
+                return JsonNode(found == town->buildings.end() ? "unknown_building" : found->second->getJsonKey());
+            });
+            if(building->upgrade != BuildingID::NONE)
+            {
+                const auto found = town->buildings.find(building->upgrade);
+                entry["upgrade_of"].String() = found == town->buildings.end() ? "unknown_building" : found->second->getJsonKey();
+            }
+            rules["buildings"].Vector().push_back(entry);
+        }
+    rules["future_commands"].String() = "conditional_not_offered";
+    return rules;
 }
 
 int creatureCount(const CArmedInstance * army, CreatureID creature)
@@ -452,7 +532,11 @@ bool ExternalAI::persistState()
 			if(hero->tempOwner == playerID)
 			{
 				const bool executor = plan["executor_ref"].isString() && externalai::objectReference(JsonNode(objectAlias(hero->id))) == plan["executor_ref"].String();
-				goals[hero->id] = executor ? targetKind != "frontier" && targetKind != "mine" && targetKind != "resource" && targetKind != "artifact" && targetKind != "treasure_chest" : hero == mainHero;
+				const auto ref = externalai::objectReference(JsonNode(objectAlias(hero->id)));
+                const JsonNode * assignment = nullptr;
+                for(const auto & task : memory["campaign"]["assignments"].Vector())
+                    if(task["hero_ref"].String() == ref) assignment = &task;
+                goals[hero->id] = assignment ? ((*assignment)["role"].String() == "main" || (*assignment)["role"].String() == "defender") : executor ? targetKind != "frontier" && targetKind != "mine" && targetKind != "resource" && targetKind != "artifact" && targetKind != "treasure_chest" : hero == mainHero;
 			}
 		{
 			std::lock_guard lock(requestMutex);
@@ -520,6 +604,46 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 		request["observation"]["player"].Integer() = playerID.getNum();
 		request["observation"]["day"].Integer() = cb->getCalendar().getCurrentDay();
 		request["observation"]["resources"] = resourcesJSON(cb->getResourceAmount());
+        request["observation"]["rules"]["engine_version"].String() = GameConstants::VCMI_VERSION;
+        request["observation"]["rules"]["engine_revision"].String() = GameConstants::GIT_SHA1;
+        for(const auto & mod : LIBRARY->modh->getActiveMods())
+        {
+            JsonNode ruleMod;
+            ruleMod["id"].String() = mod;
+            ruleMod["version"].String() = LIBRARY->modh->getModInfo(mod).getVersion().toString();
+            request["observation"]["rules"]["mods"].Vector().push_back(ruleMod);
+        }
+        // Classify only supported generic predicates. Never serialize an event's
+        // object IDs, instance names, positions or hidden values. Icons alone
+        // cannot distinguish conquest from a custom map using the same icon.
+        const auto * header = cb->getMapHeader();
+        std::set<std::string> victoryKinds;
+        if(header)
+            for(const auto & event : header->triggeredEvents)
+                if(event.effect.type == EventEffect::VICTORY)
+                {
+                    const JsonNode predicate = event.trigger.toJson([](const EventCondition & condition) {
+                        if(condition.condition == EventCondition::STANDARD_WIN) return JsonNode("conquest");
+                        if((condition.condition == EventCondition::CONTROL || condition.condition == EventCondition::CONTROL_CURRENT)
+                            && condition.objectType.as<MapObjectID>() == MapObjectID(Obj::TOWN)
+                            && !condition.objectID.hasValue() && condition.objectInstanceName.empty()
+                            && condition.position == int3(-1, -1, -1)) return JsonNode("control_all_towns");
+                        return JsonNode("unsupported_special");
+                    });
+                    victoryKinds.insert(predicate.isString() ? predicate.String() : "unsupported_special");
+                }
+        const bool supported = victoryKinds.size() == 1 && !victoryKinds.count("unsupported_special");
+        const auto victoryKind = supported ? *victoryKinds.begin() : "unsupported_special";
+        request["observation"]["victory"]["kind"].String() = victoryKind;
+        request["observation"]["victory"]["supported"].Bool() = supported;
+        request["observation"]["victory"]["description"].String() = victoryKind == "conquest"
+            ? "Defeat all hostile teams; one captured town need not end the game."
+            : victoryKind == "control_all_towns" ? "Control all towns as required by this scenario. One captured town alone does not prove victory."
+            : "Special public victory condition is not implemented by this adapter.";
+        request["observation"]["enemy_players"].Vector();
+        for(int color = 0; color < PlayerColor::PLAYER_LIMIT.getNum(); ++color)
+            if(cb->getPlayerRelations(playerID, PlayerColor(color)) == PlayerRelations::ENEMIES)
+                request["observation"]["enemy_players"].Vector().push_back(JsonNode(color));
 		request["observation"]["hero_limits"]["on_map_count"].Integer() = cb->getHeroCount(playerID, false);
 		request["observation"]["hero_limits"]["total_count"].Integer() = cb->getHeroCount(playerID, true);
 		request["observation"]["hero_limits"]["on_map_cap"].Integer() = cb->getSettings().getInteger(EGameSettings::HEROES_PER_PLAYER_ON_MAP_CAP);
@@ -594,6 +718,30 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 				item["primary_skills"].Vector().push_back(JsonNode(hero->getPrimSkillLevel(PrimarySkill(skill))));
 			item["mana"].Integer() = hero->mana;
 			item["level"].Integer() = hero->level;
+            item["profile"]["hero_type"].String() = hero->getHeroType()->getJsonKey();
+            item["profile"]["specialty"]["name"].String() = hero->getHeroType()->getSpecialtyNameTranslated();
+            item["profile"]["specialty"]["description"].String() = strategicDescription(hero->getHeroType()->getSpecialtyDescriptionTranslated());
+            item["profile"]["specialty"]["effects"].String() = "description_only_unmodeled_effects_unknown";
+            item["profile"]["known_spells"].Vector();
+            for(const auto spell : hero->getSpellsInSpellbook())
+            {
+                JsonNode magic;
+                magic["spell"].String() = spell.toSpell()->getJsonKey();
+                magic["castable_with_current_equipment"].Bool() = hero->canCastThisSpell(spell.toSpell());
+                magic["mana_cost"].Integer() = hero->getSpellCost(spell.toSpell());
+                magic["execution"].String() = "BattleAI_only_no_adventure_command";
+                item["profile"]["known_spells"].Vector().push_back(magic);
+            }
+            item["profile"]["equipped_artifacts"].Vector();
+            for(const auto & [slot, info] : hero->artifactsWorn)
+                if(const auto * artifact = info.getArt(); artifact && !info.locked)
+                {
+                    JsonNode equipment;
+                    equipment["artifact"].String() = artifact->getType()->getJsonKey();
+                    equipment["description"].String() = strategicDescription(artifact->getType()->getDescriptionTranslated());
+                    equipment["effects"].String() = "description_only_unmodeled_effects_unknown";
+                    item["profile"]["equipped_artifacts"].Vector().push_back(equipment);
+                }
 			item["secondary_skills"].Vector();
 			for(const auto & [skill, level] : hero->secSkills)
 				if(skill != SecondarySkill::NONE)
@@ -671,6 +819,13 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 			addUpgrades(town);
 			JsonNode townInfo;
 			townInfo["id"].Integer() = objectAlias(town->id);
+            const auto faction = town->getTown()->faction->getJsonKey();
+            townInfo["faction"].String() = faction;
+            if(request["observation"]["rules"]["factions"][faction].isNull())
+                request["observation"]["rules"]["factions"][faction] = factionRules(town->getTown());
+            for(const auto & [id, building] : town->getTown()->buildings)
+                if(building->mode == CBuilding::BUILD_NORMAL)
+                    townInfo["development"][building->getJsonKey()].String() = buildingAvailability(cb->canBuildStructure(town, id));
 			townInfo["army"] = armyJSON(town);
 			townInfo["strength"].Float() = town->getArmyStrength();
 			townInfo["fort_level"].Integer() = town->fortLevel();
@@ -974,6 +1129,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 		for(auto & town : request["observation"]["towns"].Vector())
 			town["defense"] = externalai::townDefense(town, request["observation"], savedState["memory"], request["actions"], visiblePositions, enemies);
 		externalai::observeMemory(savedState["memory"], request["observation"], request["actions"], visiblePositions);
+		request["observation"]["campaign_review"] = savedState["memory"]["campaign_review"];
 		request["memory"] = savedState["memory"];
 		request["memory"]["experience_id"].String() = experienceID;
 	}
@@ -1012,15 +1168,28 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 				parser.mode = JsonParsingSettings::JsonFormatMode::JSON;
 				const JsonNode reply(response.output.data(), response.output.size(), parser, "ExternalAI reply");
 				const bool hasStrategy = reply.isStruct() && reply.Struct().count("strategy");
+				const bool hasCampaign = reply.isStruct() && reply.Struct().count("campaign");
 				const bool hasBatch = reply.isStruct() && reply.Struct().count("follow_up_action_ids");
-				if(!reply.isStruct() || reply.Struct().size() != 3 + hasStrategy + hasBatch || !reply["protocol"].isNumber()
+				if(!reply.isStruct() || reply.Struct().size() != 3 + hasStrategy + hasBatch + hasCampaign || !reply["protocol"].isNumber()
 					|| reply["protocol"].Float() != 1 || !reply["request_id"].isString()
 					|| reply["request_id"].String() != requestID || !reply["action_id"].isString()
 					|| (reply["action_id"].String() != "end" && !builds.count(reply["action_id"].String()) && !recruits.count(reply["action_id"].String()) && !hires.count(reply["action_id"].String()) && !moves.count(reply["action_id"].String()) && !transfers.count(reply["action_id"].String()) && !upgrades.count(reply["action_id"].String())))
 					throw std::runtime_error("invalid or stale action choice");
 				if(hasStrategy && !externalai::validStrategy(reply["strategy"], request["memory"], request["actions"]))
 					throw std::runtime_error("invalid strategy update");
-				auto choices = externalai::batchChoices(reply, request["actions"]);
+				if(hasCampaign && !externalai::validCampaign(reply["campaign"], reply["strategy"], request["memory"], request["observation"], request["actions"]))
+                    throw std::runtime_error("invalid campaign update");
+                if(!request["memory"]["campaign"].isNull() && (!hasCampaign || reply["campaign"].isNull()) && hasStrategy && !reply["strategy"].isNull())
+                {
+                    JsonNode retained;
+                    retained["decision"].String() = "retain";
+                    retained["reason"].String() = "Operational alignment";
+                    retained["evidence_refs"].Vector().push_back(JsonNode("observation:day"));
+                    retained["plan"] = JsonNode();
+                    if(!externalai::validCampaign(retained, reply["strategy"], request["memory"], request["observation"], request["actions"]))
+                        throw std::runtime_error("operational goal conflicts with campaign");
+                }
+                auto choices = externalai::batchChoices(reply, request["actions"]);
 				if(choices.size() > request["observation"]["batch_action_limit"].Integer())
 					throw std::runtime_error("batch exceeds remaining turn budget");
 				if(hasStrategy && !reply["strategy"].isNull())
@@ -1036,7 +1205,8 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 					savedState["memory"]["plan"] = reply["strategy"];
 					savedState["memory"]["plan_updated_day"] = request["observation"]["day"];
 				}
-				actionID = reply["action_id"].String();
+				if(hasCampaign) externalai::acceptCampaign(savedState["memory"], reply["campaign"], request["observation"]["day"].Integer());
+                actionID = reply["action_id"].String();
 				queuedActions.assign(choices.begin()+1, choices.end());
 				batchRequestID = requestID;
 				logAi->info("ExternalAI batch planned request=%s actions=%d", requestID, static_cast<int>(choices.size()));
@@ -1337,6 +1507,8 @@ void ExternalAI::showBlockingDialog(const std::string &, const std::vector<Compo
 	answer(id, cancel || !selection ? 0 : 1);
 }
 void ExternalAI::showTeleportDialog(const CGHeroInstance *, TeleportChannelID, TTeleportExitsList, bool, QueryID id) { answer(id, 0); }
+// A hero encounter only closes the existing engine dialog; it never transfers armies.
+void ExternalAI::heroExchangeStarted(ObjectInstanceID, ObjectInstanceID, QueryID id) { answer(id, 0); }
 void ExternalAI::showGarrisonDialog(const CArmedInstance *, const CGHeroInstance *, bool, QueryID id, const MetaString &) { answer(id, 0); }
 void ExternalAI::showMapObjectSelectDialog(QueryID id, const Component &, const MetaString &, const MetaString &, const std::vector<ObjectInstanceID> &) { answer(id, 0); }
 std::optional<BattleAction> ExternalAI::makeSurrenderRetreatDecision(const BattleID &, const BattleStateInfoForRetreat &) { return std::nullopt; }

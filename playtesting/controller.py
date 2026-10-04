@@ -37,10 +37,19 @@ def validate_reply(request, raw):
     fields = {"protocol", "request_id", "action_id"}
     if isinstance(reply, dict) and 'follow_up_action_ids' in reply:
         fields.add('follow_up_action_ids')
+    if isinstance(reply, dict) and 'campaign' in reply and 'campaign' in request.get('memory', {}):
+        from controller.strategy import validate_campaign
+        validate_campaign(request, reply['campaign'], reply.get('strategy'))
+        fields.add('campaign')
     if isinstance(reply, dict) and 'strategy' in reply and 'memory' in request:
         from controller.strategy import validate_strategy
         validate_strategy(request, reply['strategy'])
         fields.add('strategy')
+    if (isinstance(reply, dict) and request.get('memory', {}).get('campaign')
+            and reply.get('strategy') is not None and not reply.get('campaign')):
+        from controller.strategy import validate_campaign
+        validate_campaign(request, {'decision':'retain', 'reason':'Operational alignment',
+                                   'evidence_refs':['observation:day'], 'plan':None}, reply['strategy'])
     if not isinstance(reply, dict) or set(reply) != fields:
         raise ValueError("invalid reply fields")
     if type(reply["protocol"]) is not int or reply["protocol"] != request["protocol"]:

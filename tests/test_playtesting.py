@@ -84,6 +84,17 @@ class PlaytestingTest(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout, b'')
 
+    def test_off_comparison_never_opens_or_changes_the_lesson_library(self):
+        library = self.root / 'lessons.sqlite3'
+        library.write_bytes(b'unchanged private library')
+        self.settings.update(experience_mode='off', experience_database=str(library))
+        manifest = self.prepare()
+        self.assertEqual(manifest['experience']['mode'], 'off')
+        result = self.hook(self.request())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(library.read_bytes(), b'unchanged private library')
+        self.assertFalse((self.run_dir / 'experience.sqlite3').exists())
+
     def test_prepares_private_snapshot_and_refuses_to_overwrite_a_run(self):
         manifest = self.prepare()
         self.assertEqual(manifest["case_id"], "trial")
@@ -214,6 +225,27 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         result = self.cli('prepare', '--config', self.config, '--out', self.root / 'escaped')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('save_resource', result.stderr)
+
+    def test_report_keeps_campaign_declarations_separate_from_confirmed_progress(self):
+        self.prepare()
+        decision = self.run_dir / 'decisions/one'
+        decision.mkdir()
+        request = self.request()
+        request['memory'] = {'campaign':{'main_hero_ref':'object:7'},
+                             'campaign_review':{'required':True,'reasons':['visible_threat_changed']},
+                             'recent_results':[{'sequence':1,'day':1,'outcome':'completed',
+                                                'action':{'kind':'transfer','destination':7,'amount':20}}]}
+        (decision/'request.json').write_text(json.dumps(request))
+        (decision/'result.json').write_text(json.dumps({'status':'reply_valid','request_id':'0:1','action_id':'end'}))
+        (decision/'stdout.bin').write_text(json.dumps({'protocol':1,'request_id':'0:1','action_id':'end',
+             'campaign':{'decision':'retain','reason':'Army delivered','evidence_refs':['result:1'],'plan':None}}))
+        (decision/'explanation.json').write_text(json.dumps({'provider':'codex','usage':{'input_tokens':100,'output_tokens':30}}))
+        self.assertEqual(self.cli('report','--run',self.run_dir).returncode,0)
+        report = json.loads((self.run_dir/'report.json').read_text())
+        self.assertEqual(report['decisions'][0]['campaign']['decision'], 'retain')
+        self.assertEqual(report['campaign_metrics']['confirmed_reinforcements'][0]['amount'],20)
+        self.assertEqual(report['model_metrics']['usage']['input_tokens'],100)
+        self.assertEqual(report['match_outcome'],'unconfirmed')
 
     def test_report_requires_engine_evidence_and_does_not_call_an_exit_a_victory(self):
         self.prepare()
@@ -451,6 +483,26 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         self.assertEqual([s['execution'] for s in report['batch_steps']], ['unconfirmed','unconfirmed'])
         model_after_load = next(d for d in report['decisions'] if d['request_id']=='0:1:2')
         self.assertEqual(model_after_load['execution'], 'unconfirmed')
+
+    def test_comparison_requires_resolved_frozen_experience_to_match(self):
+        from unittest.mock import patch
+        sys.path.insert(0, str(ROOT))
+        from playtesting.reports import compare
+        summaries = [{'run_id':str(i), 'match_outcome':'llm_loss', 'assignment_matches':True,
+                      'counts':{}, 'latency_seconds':{}, 'model_metrics':{},
+                      'campaign_metrics':{}, 'references':{}} for i in range(2)]
+        manifests = [{'experience_mode':'read_only',
+                      'experience':{'mode':'read_only','baseline':{'sha256':str(i)}}} for i in range(2)]
+        with patch('playtesting.reports.load', side_effect=manifests), patch('playtesting.reports.report', side_effect=summaries):
+            result = compare(['a', 'b'])
+        self.assertFalse(result['same_start_conditions'])
+        self.assertFalse(result['comparable_for_strategy'])
+        manifests[1]['experience']['baseline']['sha256'] = '0'
+        with patch('playtesting.reports.load', side_effect=manifests), patch('playtesting.reports.report', side_effect=summaries):
+            self.assertTrue(compare(['a', 'b'])['comparable_for_strategy'])
+        for manifest in manifests: manifest['experience']['mode'] = 'learn'
+        with patch('playtesting.reports.load', side_effect=manifests), patch('playtesting.reports.report', side_effect=summaries):
+            self.assertFalse(compare(['a', 'b'])['comparable_for_strategy'])
 
     def test_replay_uses_recorded_observation_and_comparison_flags_a_different_map(self):
         self.prepare()

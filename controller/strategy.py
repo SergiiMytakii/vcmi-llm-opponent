@@ -82,3 +82,144 @@ def strategy_schema(request):
     fields['target_ref'] = {'type': ['string', 'null'], 'enum': [None, *known_targets(request)]}
     return {'anyOf': [{'type': 'null'}, {'type': 'object', 'additionalProperties': False,
                                       'required': sorted(FIELDS), 'properties': fields}]}
+
+
+# Intent budgets leave room for the operational plan, batch and learning under
+# the native 8 KiB reply cap. These are storage limits, never hero-count limits.
+CAMPAIGN_BYTES = 4096
+APPROACHES = ('economy', 'expansion', 'breakthrough', 'defense', 'conquest')
+ROLES = ('main', 'defender', 'scout', 'collector', 'reinforcement')
+RESOURCES = ('wood', 'mercury', 'ore', 'sulfur', 'crystal', 'gems', 'gold')
+
+
+def campaign_evidence(request):
+    observation = request['observation']
+    refs = ['observation:' + key for key in ('day', 'resources', 'victory', 'rules') if key in observation]
+    refs += ['hero:object:' + str(h['id']) for h in observation.get('heroes', [])]
+    refs += ['town:object:' + str(t['id']) for t in observation.get('towns', [])]
+    refs += ['target:' + ref for ref in known_targets(request)]
+    refs += ['result:' + str(r['sequence']) for r in request.get('memory', {}).get('recent_results', [])
+             if r.get('outcome') in ('completed', 'progress_observed') and type(r.get('sequence')) is int]
+    return sorted(set(refs))
+
+
+def _object(properties):
+    return {'type': 'object', 'additionalProperties': False, 'required': sorted(properties), 'properties': properties}
+
+
+def campaign_schema(request):
+    text = {'type': 'string', 'minLength': 1, 'maxLength': 160}
+    target = {'type': ['string', 'null'], 'enum': [None, *known_targets(request)]}
+    hero = {'type': 'string', 'enum': owned_executors(request)}
+    # Empty enum is invalid JSON Schema. No hero is assignable when none is owned.
+    if not hero['enum']: hero = {'type': 'string', 'pattern': '^$'}
+    nullable_hero = {'type': ['string', 'null'], 'enum': [None, *owned_executors(request)]}
+    evidence = {'type': 'string', 'enum': campaign_evidence(request)}
+    day = request['observation'].get('day', 0)
+    approach = {'type': 'string', 'enum': list(APPROACHES)}
+    array = lambda item, minimum, maximum: {'type': 'array', 'minItems': minimum, 'maxItems': maximum, 'items': item}
+    plan = _object({
+        'victory_method': text, 'approach': approach, 'main_hero_ref': nullable_hero,
+        'horizon_day': {'type': 'integer', 'minimum': day + 3, 'maximum': day + 7},
+        'advantages': array(_object({'fact_ref': evidence, 'benefit': text, 'constraint': text}), 2, 3),
+        'milestones': array(_object({'target_ref': target, 'executor_ref': nullable_hero,
+                                    'due_day': {'type': 'integer', 'minimum': day, 'maximum': day + 7}, 'expected': text}), 1, 6),
+        'assignments': array(_object({'hero_ref': hero, 'role': {'type': 'string', 'enum': list(ROLES)},
+                                     'target_ref': target, 'task': text}), 0, 16),
+        'reserves': array(_object({'resource': {'type': 'string', 'enum': list(RESOURCES)},
+                                  'amount': {'type': 'integer', 'minimum': 0, 'maximum': 2**31-1},
+                                  'purpose': text, 'release_if': text}), 0, 7),
+        'alternatives': array(_object({'approach': approach, 'benefit': text, 'cost': text,
+                                      'risk': text, 'abandon_if': text}), 2, 3)})
+    return {'anyOf': [{'type': 'null'}, _object({
+        'decision': {'type': 'string', 'enum': ['retain', 'revise']}, 'reason': text,
+        'evidence_refs': array(evidence, 1, 4), 'plan': {'anyOf': [{'type': 'null'}, plan]}})]}
+
+
+def _validate_shape(value, schema):
+    """Small closed-schema validator shared by all bounded campaign records."""
+    if 'anyOf' in schema:
+        for option in schema['anyOf']:
+            try:
+                _validate_shape(value, option)
+                return
+            except ValueError:
+                pass
+        raise ValueError('invalid campaign record')
+    if 'enum' in schema and value not in schema['enum']:
+        raise ValueError('unknown campaign reference or value')
+    kind = schema.get('type')
+    if isinstance(kind, list):
+        if value is None and 'null' in kind: return
+        kind = next(k for k in kind if k != 'null')
+    if kind == 'null':
+        if value is not None: raise ValueError('campaign value must be null')
+    elif kind == 'object':
+        if not isinstance(value, dict) or set(value) != set(schema['required']):
+            raise ValueError('campaign contains missing or factual fields')
+        for key, item in value.items(): _validate_shape(item, schema['properties'][key])
+    elif kind == 'array':
+        if not isinstance(value, list) or not schema['minItems'] <= len(value) <= schema['maxItems']:
+            raise ValueError('campaign array exceeds budget')
+        for item in value: _validate_shape(item, schema['items'])
+    elif kind == 'string':
+        if not isinstance(value, str) or not value or len(value.encode('utf-8')) > schema.get('maxLength', 160):
+            raise ValueError('campaign text exceeds UTF-8 budget')
+    elif kind == 'integer':
+        if type(value) is not int or not schema['minimum'] <= value <= schema['maximum']:
+            raise ValueError('campaign integer exceeds bounds')
+
+
+def validate_campaign(request, update, strategy=None):
+    if update is None: return  # Fallback or no assessment never acknowledges review.
+    _validate_shape(update, campaign_schema(request))
+    if len(json.dumps(update, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) > CAMPAIGN_BYTES:
+        raise ValueError('campaign exceeds byte budget')
+    memory = request.get('memory', {})
+    if update['decision'] == 'retain':
+        if update['plan'] is not None or not memory.get('campaign'):
+            raise ValueError('retain requires an existing campaign and null plan')
+        plan = memory['campaign']
+    else:
+        plan = update['plan']
+        if plan is None: raise ValueError('revise requires a complete campaign')
+        if len({a['approach'] for a in plan['alternatives']}) != len(plan['alternatives']):
+            raise ValueError('campaign alternatives must differ')
+        if plan['approach'] not in {a['approach'] for a in plan['alternatives']}:
+            raise ValueError('chosen approach must be compared')
+        if any(m['due_day'] > plan['horizon_day'] for m in plan['milestones']):
+            raise ValueError('milestone exceeds campaign horizon')
+    heroes = owned_executors(request)
+    if plan['main_hero_ref'] is not None and plan['main_hero_ref'] not in heroes:
+        raise ValueError('campaign main hero is no longer owned')
+    assignments = {a['hero_ref']: a for a in plan['assignments']}
+    if len(assignments) != len(plan['assignments']) or any(h not in heroes for h in assignments):
+        raise ValueError('hero has duplicate assignments or is no longer owned')
+    main = [a['hero_ref'] for a in assignments.values() if a['role'] == 'main']
+    if main != ([plan['main_hero_ref']] if plan['main_hero_ref'] else []):
+        raise ValueError('main hero must have exactly its main assignment')
+    targets = [a['target_ref'] for a in assignments.values() if a['target_ref'] is not None]
+    if len(set(targets)) != len(targets): raise ValueError('heroes compete for one target')
+    absent = {o['ref'] for o in memory.get('known_objects', []) if o.get('not_seen_at_last_position') is True}
+    if any(target in absent for target in targets):
+        raise ValueError('assignment target is absent at its last observed position')
+    resources = [r['resource'] for r in plan['reserves']]
+    if len(resources) != len(set(resources)): raise ValueError('reserve is counted twice')
+    promised_targets = {}
+    for milestone in plan['milestones']:
+        executor, target = milestone['executor_ref'], milestone['target_ref']
+        if executor is None: continue
+        if executor not in assignments:
+            raise ValueError('milestone executor has no assignment')
+        if target is not None and any(a['hero_ref'] != executor and a['target_ref'] == target for a in assignments.values()):
+            raise ValueError('milestone competes with another hero assignment')
+        if target is not None:
+            key = (target, milestone['due_day'])
+            if key in promised_targets and promised_targets[key] != executor:
+                raise ValueError('heroes promise the same milestone target')
+            promised_targets[key] = executor
+    operational = strategy if strategy is not None else memory.get('plan')
+    if operational and operational['executor_ref'] is not None:
+        assignment = assignments.get(operational['executor_ref'])
+        if assignment is None or assignment['target_ref'] != operational['target_ref']:
+            raise ValueError('operational objective conflicts with campaign assignment')

@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from strategy import strategy_schema, validate_strategy
+from strategy import strategy_schema, validate_strategy, campaign_schema, validate_campaign
 from experience import learning_schema, validate_learning
 from batch import validate_batch
 from prompt_context import (compact_json, encode_request, context_parts, bounded_history,
@@ -56,6 +56,8 @@ def validate_reply(request, reply):
         fields.add('learning')
     if isinstance(reply, dict) and 'strategy' in reply and 'memory' in request:
         fields.add('strategy')
+    if isinstance(reply, dict) and 'campaign' in reply and 'campaign' in request.get('memory', {}):
+        fields.add('campaign')
     if not isinstance(reply, dict) or set(reply) != fields:
         raise ValueError('invalid reply shape')
     if type(reply['protocol']) is not int or reply['protocol'] != 1:
@@ -67,8 +69,16 @@ def validate_reply(request, reply):
     validate_batch(request, reply)
     if 'strategy' in reply:
         validate_strategy(request, reply['strategy'])
+    if 'campaign' in reply:
+        validate_campaign(request, reply['campaign'], reply.get('strategy'))
+    if request.get('memory', {}).get('campaign') and reply.get('strategy') is not None and not reply.get('campaign'):
+        validate_campaign(request, {'decision':'retain', 'reason':'Operational alignment',
+                                   'evidence_refs':['observation:day'], 'plan':None}, reply['strategy'])
     if 'learning' in reply:
         validate_learning(request['experience'], reply['learning'])
+    wire_reply = {k:v for k,v in reply.items() if k != 'learning'}
+    if len((compact_json(wire_reply) + '\n').encode('utf-8')) > 8192:
+        raise ValueError('reply exceeds native transport limit')
     return reply
 
 
@@ -153,6 +163,9 @@ def choose(request):
         if 'memory' in request:
             schema['required'].append('strategy')
             schema['properties']['strategy'] = strategy_schema(request)
+        if 'campaign' in request.get('memory', {}):
+            schema['required'].append('campaign')
+            schema['properties']['campaign'] = campaign_schema(request)
         limit = request['observation'].get('batch_action_limit', 1)
         if type(limit) is not int or not 1 <= limit <= 32:
             raise ValueError('invalid batch action limit')

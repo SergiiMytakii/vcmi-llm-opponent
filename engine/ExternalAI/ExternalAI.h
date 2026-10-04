@@ -53,6 +53,7 @@ public:
 	void battleEnded() override;
 	void gameOver(PlayerColor player, const EVictoryLossCheckResult & result) override;
 	void queryResolved(QueryID id) override;
+	void heroExchangeStarted(ObjectInstanceID, ObjectInstanceID, QueryID id) override;
 	void showInfoDialog(EInfoWindowMode, const std::string &, const std::vector<Component> &, int) override;
 	void showRecruitmentDialog(const CGDwelling *, const CArmedInstance *, int, QueryID id) override;
 	void showMarketWindow(const IMarket *, const CGHeroInstance *, QueryID id) override;

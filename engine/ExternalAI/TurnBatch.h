@@ -57,6 +57,7 @@ inline JsonNode externalSightings(const JsonNode & observation)
 
 inline bool batchSituationChanged(const JsonNode & before, const JsonNode & after, const JsonNode & executed)
 {
+	if(after["campaign_review"]["full"].Bool() && after["campaign_review"]["required"].Bool()) return true;
 	if(before["day"] != after["day"] || externalSightings(before) != externalSightings(after)) return true;
 	if(before["heroes"].Vector().size() != after["heroes"].Vector().size()
 		|| before["towns"].Vector().size() != after["towns"].Vector().size()) return true;

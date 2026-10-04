@@ -67,7 +67,7 @@ def main():
         # EX_TEMPFAIL reaches the engine through the recorder. No game command
         # or learning episode is fabricated for an unanswered model request.
         raise SystemExit(75)
-    sys.stdout.buffer.write((json.dumps(reply, ensure_ascii=False) + "\n").encode('utf-8'))
+    sys.stdout.buffer.write((json.dumps(reply, ensure_ascii=False, separators=(',', ':')) + "\n").encode('utf-8'))
     sys.stdout.buffer.flush()
 
 

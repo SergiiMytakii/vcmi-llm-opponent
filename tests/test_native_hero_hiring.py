@@ -75,7 +75,7 @@ class NativeHeroHiringTest(unittest.TestCase):
         hired = [result for result in final['memory']['recent_results'] if result['action']['kind'] == 'hire_hero']
         self.assertEqual(len(hired), 2)
         self.assertTrue(all(r['outcome'] == 'completed' for r in hired))
-        day1 = next(r for r in requests if r['observation']['day'] == 1 and len(r['observation']['heroes']) == 2)
+        day1 = next(r for r in requests if r['request_id'] == '0:1:1')
         self.assertEqual(first['observation']['resources'][6] - day1['observation']['resources'][6], 2500)
         self.assertFalse(any(a['kind'] == 'hire_hero' for a in day1['actions']), 'occupied town must not offer a second hire')
 

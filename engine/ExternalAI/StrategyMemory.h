@@ -76,11 +76,13 @@ inline void initializePlanSchema(JsonNode & state)
 {
 	auto & memory = state["memory"];
 	if(memory.isNull()) return;
+	if(!memory.Struct().count("campaign")) memory["campaign"] = JsonNode();
 	if(memory["schema"].Integer() != 2)
 	{
 		// Only incompatible intentions are reset: observations, outcomes, object
 		// aliases, pending execution evidence and consumed decisions survive load.
 		memory["plan"] = JsonNode();
+		memory["campaign"] = JsonNode();
 		memory.Struct().erase("plan_tracking");
 		memory["plan_review"]["status"].String() = "legacy_intent_reset";
 		memory["schema"].Integer() = 2;
@@ -261,6 +263,317 @@ inline void reviewPlan(JsonNode & memory, const JsonNode & observation, const Js
 	tracking["ready"].String() = ready;
 }
 
+// Campaign intentions share the existing player-local memory and update boundary.
+inline bool campaignText(const JsonNode & value)
+{
+    return value.isString() && !value.String().empty() && value.String().size() <= 160;
+}
+
+inline bool campaignFields(const JsonNode & value, std::initializer_list<const char *> fields)
+{
+    if(!value.isStruct() || value.Struct().size() != fields.size()) return false;
+    for(const auto * field : fields) if(!value.Struct().count(field)) return false;
+    return true;
+}
+
+inline bool campaignInteger(const JsonNode & value, int minimum, int maximum)
+{
+    return value.getType() == JsonNode::JsonType::DATA_INTEGER && value.Integer() >= minimum && value.Integer() <= maximum;
+}
+
+inline bool campaignApproach(const JsonNode & value)
+{
+    if(!value.isString()) return false;
+    for(const auto * approach : {"economy", "expansion", "breakthrough", "defense", "conquest"})
+        if(value.String() == approach) return true;
+    return false;
+}
+
+inline std::set<std::string> campaignEvidence(const JsonNode & memory, const JsonNode & observation, const JsonNode & actions)
+{
+    std::set<std::string> refs;
+    for(const auto * key : {"day", "resources", "victory", "rules"})
+        if(observation.Struct().count(key)) refs.insert(std::string("observation:") + key);
+    for(const auto & hero : observation["heroes"].Vector()) refs.insert("hero:" + objectReference(hero["id"]));
+    for(const auto & town : observation["towns"].Vector()) refs.insert("town:" + objectReference(town["id"]));
+    for(const auto & ref : knownTargets(memory, actions)) refs.insert("target:" + ref);
+    for(const auto & result : memory["recent_results"].Vector())
+        if(result["sequence"].getType() == JsonNode::JsonType::DATA_INTEGER
+            && (result["outcome"].String() == "completed" || result["outcome"].String() == "progress_observed"))
+            refs.insert("result:" + std::to_string(result["sequence"].Integer()));
+    return refs;
+}
+
+inline bool validCampaign(const JsonNode & update, const JsonNode & operational, const JsonNode & memory,
+    const JsonNode & observation, const JsonNode & actions)
+{
+    if(update.isNull()) return true;
+    if(!campaignFields(update, {"decision", "reason", "evidence_refs", "plan"})
+        || update.toCompactString().size() > 4096 || !campaignText(update["reason"])) return false;
+    const auto evidence = campaignEvidence(memory, observation, actions);
+    if(!update["evidence_refs"].isVector() || update["evidence_refs"].Vector().empty() || update["evidence_refs"].Vector().size() > 4) return false;
+    for(const auto & ref : update["evidence_refs"].Vector())
+        if(!ref.isString() || !evidence.count(ref.String())) return false;
+    if(!update["decision"].isString()) return false;
+    const bool retain = update["decision"].String() == "retain";
+    if(!retain && update["decision"].String() != "revise") return false;
+    if(retain && (!update["plan"].isNull() || memory["campaign"].isNull())) return false;
+    const auto & plan = retain ? memory["campaign"] : update["plan"];
+    if(!campaignFields(plan, {"victory_method", "approach", "main_hero_ref", "horizon_day", "advantages", "milestones", "assignments", "reserves", "alternatives"})) return false;
+    std::set<std::string> heroes;
+    for(const auto & hero : observation["heroes"].Vector()) heroes.insert(objectReference(hero["id"]));
+    const auto targets = knownTargets(memory, actions);
+    auto validHero = [&](const JsonNode & ref) { return ref.isNull() || (ref.isString() && heroes.count(ref.String())); };
+    auto validTarget = [&](const JsonNode & ref) { return ref.isNull() || (ref.isString() && targets.count(ref.String())); };
+    if(!validHero(plan["main_hero_ref"])) return false;
+    std::map<std::string, JsonNode> assignments;
+    std::set<std::string> assignedTargets;
+    int mainCount = 0;
+    if(!plan["assignments"].isVector() || plan["assignments"].Vector().size() > 16) return false;
+    for(const auto & assignment : plan["assignments"].Vector())
+    {
+        if(!campaignFields(assignment, {"hero_ref", "role", "target_ref", "task"})
+            || !assignment["hero_ref"].isString() || !validHero(assignment["hero_ref"])
+            || !validTarget(assignment["target_ref"]) || !campaignText(assignment["task"])) return false;
+        if(!assignment["role"].isString()) return false;
+        const auto role = assignment["role"].String();
+        if(role != "main" && role != "defender" && role != "scout" && role != "collector" && role != "reinforcement") return false;
+        if(!assignments.emplace(assignment["hero_ref"].String(), assignment).second) return false;
+        if(assignment["target_ref"].isString() && !assignedTargets.insert(assignment["target_ref"].String()).second) return false;
+        if(role == "main")
+        {
+            ++mainCount;
+            if(assignment["hero_ref"] != plan["main_hero_ref"]) return false;
+        }
+    }
+    for(const auto & object : memory["known_objects"].Vector())
+        if(object["not_seen_at_last_position"].Bool() && assignedTargets.count(object["ref"].String())) return false;
+    if(mainCount != (plan["main_hero_ref"].isNull() ? 0 : 1)) return false;
+    const auto & next = operational.isNull() ? memory["plan"] : operational;
+    if(next["executor_ref"].isString())
+    {
+        const auto found = assignments.find(next["executor_ref"].String());
+        if(found == assignments.end() || found->second["target_ref"] != next["target_ref"]) return false;
+    }
+    std::map<std::pair<std::string, int>, std::string> promisedTargets;
+    for(const auto & milestone : plan["milestones"].Vector())
+        if(milestone["executor_ref"].isString())
+        {
+            const auto executor = milestone["executor_ref"].String();
+            const auto found = assignments.find(executor);
+            if(found == assignments.end()) return false;
+            for(const auto & [hero, assignment] : assignments)
+                if(hero != executor && milestone["target_ref"].isString() && assignment["target_ref"] == milestone["target_ref"]) return false;
+            if(milestone["target_ref"].isString())
+            {
+                if(!milestone["due_day"].isNumber()) return false;
+                const auto key = std::make_pair(milestone["target_ref"].String(), static_cast<int>(milestone["due_day"].Integer()));
+                const auto prior = promisedTargets.find(key);
+                if(prior != promisedTargets.end() && prior->second != executor) return false;
+                promisedTargets[key] = executor;
+            }
+        }
+    if(retain) return true;
+    const int day = observation["day"].Integer();
+    if(!campaignText(plan["victory_method"]) || !campaignApproach(plan["approach"])
+        || !campaignInteger(plan["horizon_day"], day + 3, day + 7)) return false;
+    if(!plan["advantages"].isVector() || plan["advantages"].Vector().size() < 2 || plan["advantages"].Vector().size() > 3) return false;
+    for(const auto & advantage : plan["advantages"].Vector())
+        if(!campaignFields(advantage, {"fact_ref", "benefit", "constraint"}) || !advantage["fact_ref"].isString()
+            || !evidence.count(advantage["fact_ref"].String()) || !campaignText(advantage["benefit"]) || !campaignText(advantage["constraint"])) return false;
+    if(!plan["milestones"].isVector() || plan["milestones"].Vector().empty() || plan["milestones"].Vector().size() > 6) return false;
+    for(const auto & milestone : plan["milestones"].Vector())
+        if(!campaignFields(milestone, {"target_ref", "executor_ref", "due_day", "expected"})
+            || !validTarget(milestone["target_ref"]) || !validHero(milestone["executor_ref"])
+            || !campaignInteger(milestone["due_day"], day, plan["horizon_day"].Integer()) || !campaignText(milestone["expected"])) return false;
+    std::set<std::string> resources;
+    if(!plan["reserves"].isVector() || plan["reserves"].Vector().size() > 7) return false;
+    for(const auto & reserve : plan["reserves"].Vector())
+    {
+        if(!campaignFields(reserve, {"resource", "amount", "purpose", "release_if"}) || !reserve["resource"].isString()
+            || !campaignInteger(reserve["amount"], 0, 2147483647) || !campaignText(reserve["purpose"]) || !campaignText(reserve["release_if"])) return false;
+        const auto resource = reserve["resource"].String();
+        const std::set<std::string> allowedResources{"wood", "mercury", "ore", "sulfur", "crystal", "gems", "gold"};
+        if(!allowedResources.count(resource) || !resources.insert(resource).second) return false;
+    }
+    std::set<std::string> alternatives;
+    if(!plan["alternatives"].isVector() || plan["alternatives"].Vector().size() < 2 || plan["alternatives"].Vector().size() > 3) return false;
+    for(const auto & alternative : plan["alternatives"].Vector())
+    {
+        if(!campaignFields(alternative, {"approach", "benefit", "cost", "risk", "abandon_if"}) || !campaignApproach(alternative["approach"])) return false;
+        for(const auto * key : {"benefit", "cost", "risk", "abandon_if"}) if(!campaignText(alternative[key])) return false;
+        if(!alternatives.insert(alternative["approach"].String()).second) return false;
+    }
+    return alternatives.count(plan["approach"].String());
+}
+
+inline JsonNode campaignSnapshot(const JsonNode & observation)
+{
+    JsonNode snapshot;
+    for(const auto & hero : observation["heroes"].Vector())
+        snapshot["heroes"][objectReference(hero["id"])] = hero["strength"]["army_ai_value"];
+    for(const auto & town : observation["towns"].Vector()) snapshot["towns"].Vector().push_back(town["id"]);
+    for(const auto & object : observation["visible_objects"].Vector())
+        if(object["kind"].String() == "hero" || object["kind"].String() == "town")
+            if(std::find(observation["enemy_players"].Vector().begin(), observation["enemy_players"].Vector().end(), object["owner"]) != observation["enemy_players"].Vector().end())
+                snapshot["threats"][objectReference(object["id"])] = object;
+    return snapshot;
+}
+
+inline void reviewCampaign(JsonNode & memory, const JsonNode & observation, const JsonNode & actions)
+{
+    if(!memory.Struct().count("campaign")) memory["campaign"] = JsonNode();
+    const JsonNode campaign = static_cast<const JsonNode &>(memory)["campaign"];
+    auto & review = memory["campaign_review"];
+    auto addReason = [&](const std::string & reason) {
+        auto & reasons = review["reasons"].Vector();
+        if(std::find(reasons.begin(), reasons.end(), JsonNode(reason)) == reasons.end()) reasons.push_back(JsonNode(reason));
+    };
+    const int day = observation["day"].Integer();
+    if(campaign.isNull()) addReason("initial_campaign");
+    else
+    {
+        if(day != memory["campaign_checked_day"].Integer()) addReason("daily_check");
+        if(day - memory["campaign_full_review_day"].Integer() >= 3) addReason("three_day_review");
+        if(day % 7 == 0 && memory["campaign_full_review_day"].Integer() < day) addReason("before_weekly_growth");
+        if(day > campaign["horizon_day"].Integer()) addReason("horizon_elapsed");
+        const auto planStatus = memory["plan_review"]["status"].String();
+        if(memory["campaign_plan_status"].String() != planStatus && (planStatus == "completed" || planStatus == "infeasible" || planStatus == "requires_revision"))
+            addReason("operational_" + planStatus);
+        memory["campaign_plan_status"].String() = planStatus;
+    }
+    const JsonNode fresh = campaignSnapshot(observation);
+    const JsonNode previous = memory["campaign_observed"];
+    if(!previous.isNull())
+    {
+        if(observation["heroes"].isVector() && fresh["heroes"].Struct() != previous["heroes"].Struct())
+        {
+            for(const auto & [ref, strength] : previous["heroes"].Struct())
+                if(!fresh["heroes"].Struct().count(ref)) addReason("hero_no_longer_owned");
+            for(const auto & [ref, strength] : fresh["heroes"].Struct())
+                if(!previous["heroes"].Struct().count(ref)) addReason("new_owned_hero");
+                else if(strength.isNumber() && previous["heroes"][ref].isNumber()
+                    && std::abs(strength.Float() - previous["heroes"][ref].Float()) >= std::max(1.0, previous["heroes"][ref].Float() * .25))
+                    addReason("army_strength_changed");
+        }
+        if(observation["towns"].isVector() && fresh["towns"] != previous["towns"]) addReason("owned_towns_changed");
+        for(const auto & [ref, threat] : fresh["threats"].Struct())
+            if(previous["threats"][ref] != threat) addReason("visible_threat_changed");
+    }
+    // Only changed facts raise an event. Repeated observations cannot consume it.
+    memory["campaign_observed"] = fresh;
+    review["assignments"].Vector().clear();
+    for(const auto & assignment : campaign["assignments"].Vector())
+    {
+        JsonNode status;
+        status["hero_ref"] = assignment["hero_ref"];
+        status["target_ref"] = assignment["target_ref"];
+        status["status"].String() = "active";
+        if(observation["heroes"].isVector() && !fresh["heroes"].Struct().count(assignment["hero_ref"].String()))
+            status["status"].String() = "infeasible_executor";
+        for(const auto & object : memory["known_objects"].Vector())
+            if(object["ref"] == assignment["target_ref"] && object["not_seen_at_last_position"].Bool())
+                status["status"].String() = "target_absent_at_last_position";
+        if(status["status"].String() != "active") addReason("assignment_infeasible");
+        review["assignments"].Vector().push_back(status);
+    }
+    // High-water marks are tied to checkable milestone identities. Rewording
+    // intentions, oscillating routes and recovering lost strength are not progress.
+    auto & progress = memory["campaign_progress"];
+    if(!progress["last_change_day"].isNumber()) progress["last_change_day"] = observation["day"];
+    bool changed = false;
+    review["milestones"].Vector().clear();
+    for(const auto & milestone : campaign["milestones"].Vector())
+    {
+        const auto key = milestone["target_ref"].toCompactString() + ":" + milestone["executor_ref"].toCompactString();
+        auto & tracking = progress["milestones"][key];
+        const bool initial = tracking.isNull();
+        JsonNode status;
+        status["target_ref"] = milestone["target_ref"];
+        status["executor_ref"] = milestone["executor_ref"];
+        status["due_day"] = milestone["due_day"];
+        status["due"].Bool() = day >= milestone["due_day"].Integer();
+        status["target_owned"].String() = "unknown";
+        for(const auto & object : memory["known_objects"].Vector())
+            if(object["ref"] == milestone["target_ref"] && !object["stale"].Bool() && !object["not_seen_at_last_position"].Bool())
+            {
+                status["target_owned"].String() = object["owner"] == observation["player"] ? "yes" : "no";
+                if(object["owner"] == observation["player"] && !tracking["owned_once"].Bool())
+                {
+                    tracking["owned_once"].Bool() = true;
+                    changed |= !initial;
+                }
+            }
+        for(const auto & action : actions.Vector())
+            if(action["target_ref"] == milestone["target_ref"] && action["hero"].isNumber()
+                && objectReference(action["hero"]) == milestone["executor_ref"].String() && action["route_steps"].isNumber())
+                if(!tracking["best_route_steps"].isNumber() || action["route_steps"].Integer() < tracking["best_route_steps"].Integer())
+                {
+                    tracking["best_route_steps"] = action["route_steps"];
+                    changed |= !initial;
+                }
+        for(const auto & hero : observation["heroes"].Vector())
+            if(objectReference(hero["id"]) == milestone["executor_ref"].String() && hero["strength"]["army_ai_value"].isNumber())
+                if(!tracking["best_army"].isNumber() || hero["strength"]["army_ai_value"].Float() > tracking["best_army"].Float())
+                {
+                    tracking["best_army"] = hero["strength"]["army_ai_value"];
+                    changed |= !initial;
+                }
+        for(const auto & result : memory["recent_results"].Vector())
+            if(result["action"]["target_ref"] == milestone["target_ref"] && result["outcome"].String() == "completed"
+                && result["sequence"].Integer() > memory["campaign_result_cursor"].Integer())
+                if(std::find(tracking["confirmed_commands"].Vector().begin(), tracking["confirmed_commands"].Vector().end(), result["action"]["kind"]) == tracking["confirmed_commands"].Vector().end())
+                {
+                    tracking["confirmed_commands"].Vector().push_back(result["action"]["kind"]);
+                    changed = true;
+                }
+        tracking["initialized"].Bool() = true;
+        review["milestones"].Vector().push_back(status);
+        if(status["due"].Bool() && memory["campaign_checked_day"].Integer() < day) addReason("milestone_due");
+    }
+    if(changed) progress["last_change_day"] = observation["day"];
+    review["last_observed_progress_day"] = progress["last_change_day"];
+    if(!campaign.isNull() && day - progress["last_change_day"].Integer() >= 2
+        && memory["campaign_checked_day"].Integer() < day) addReason("campaign_no_observed_progress");
+    // A previously absent route to a current milestone can alter the campaign.
+    JsonNode accessible;
+    for(const auto & milestone : campaign["milestones"].Vector())
+        for(const auto & action : actions.Vector())
+            if(action["target_ref"] == milestone["target_ref"] && milestone["target_ref"].isString()
+                && action["hero"].isNumber() && objectReference(action["hero"]) == milestone["executor_ref"].String())
+                accessible[milestone["target_ref"].String()].Bool() = true;
+    if(memory["campaign_accessible"].isStruct())
+        for(const auto & [ref, value] : accessible.Struct())
+            if(!memory["campaign_accessible"][ref].Bool()) addReason("milestone_route_opened");
+    memory["campaign_accessible"] = accessible;
+    review["required"].Bool() = !review["reasons"].Vector().empty();
+    review["full"].Bool() = std::any_of(review["reasons"].Vector().begin(), review["reasons"].Vector().end(),
+        [](const JsonNode & reason) { return reason.String() != "daily_check"; });
+}
+
+inline void acceptCampaign(JsonNode & memory, const JsonNode & update, int day)
+{
+    if(update.isNull()) return;
+    if(update["decision"].String() == "revise")
+    {
+        std::set<std::string> retained;
+        for(const auto & milestone : update["plan"]["milestones"].Vector())
+            retained.insert(milestone["target_ref"].toCompactString() + ":" + milestone["executor_ref"].toCompactString());
+        auto & tracking = memory["campaign_progress"]["milestones"].Struct();
+        for(auto it = tracking.begin(); it != tracking.end(); )
+            if(!retained.count(it->first)) it = tracking.erase(it); else ++it;
+        memory["campaign"] = update["plan"];
+        memory["campaign_result_cursor"] = memory["result_sequence"];
+    }
+    for(const auto * key : {"decision", "reason", "evidence_refs"}) memory["campaign_assessment"][key] = update[key];
+    memory["campaign_checked_day"].Integer() = day;
+    if(memory["campaign_review"]["full"].Bool() || update["decision"].String() == "revise")
+        memory["campaign_full_review_day"].Integer() = day;
+    memory["campaign_review"]["reasons"].Vector().clear();
+    memory["campaign_review"]["required"].Bool() = false;
+    memory["campaign_review"]["full"].Bool() = false;
+}
+
 inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonNode & actions,
 	const JsonNode & visiblePositions)
 {
@@ -332,8 +645,13 @@ inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonN
 	for(const auto & [ref, item] : facts) ordered.push_back(item);
 	const auto & plan = static_cast<const JsonNode &>(memory)["plan"];
 	const auto target = plan["target_ref"].isString() ? plan["target_ref"].String() : std::string{};
+    std::set<std::string> campaignTargets;
+    const auto & campaign = static_cast<const JsonNode &>(memory)["campaign"];
+    for(const auto * key : {"assignments", "milestones"})
+        for(const auto & item : campaign[key].Vector())
+            if(item["target_ref"].isString()) campaignTargets.insert(item["target_ref"].String());
 	std::sort(ordered.begin(), ordered.end(), [&](const JsonNode & a, const JsonNode & b) {
-		const bool ap = a["ref"].String() == target, bp = b["ref"].String() == target;
+		const bool ap = a["ref"].String() == target || campaignTargets.count(a["ref"].String()), bp = b["ref"].String() == target || campaignTargets.count(b["ref"].String());
 		if(ap != bp) return ap;
 		if(a["last_seen_day"].Integer() != b["last_seen_day"].Integer())
 			return a["last_seen_day"].Integer() > b["last_seen_day"].Integer();
@@ -342,6 +660,7 @@ inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonN
 	if(ordered.size() > 128) ordered.resize(128);
 	memory["known_objects"].Vector() = std::move(ordered);
 	reviewPlan(memory, observation, actions);
+	reviewCampaign(memory, observation, actions);
 }
 
 inline void recordResult(JsonNode & memory, int day, const JsonNode & action, bool confirmed)

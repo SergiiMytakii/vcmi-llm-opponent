@@ -88,6 +88,9 @@ def prepare(config_path, out):
     if config.get("purpose") not in ("integration", "training", "evaluation") or not config.get("case_id"):
         raise ValueError("case_id and purpose (integration/training/evaluation) are required")
     finite_positive(config["max_seconds"], "max_seconds")
+    experience_mode = config.get('experience_mode', 'learn')
+    if experience_mode not in ('off', 'read_only', 'learn'):
+        raise ValueError('experience_mode must be off, read_only or learn')
     config.setdefault("decision_timeout_seconds", 65)
     finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 65)
     controller = config["controller"]
@@ -127,13 +130,17 @@ def prepare(config_path, out):
         # Live matches learn; integration keeps its own library. Offline replay
         # consumes the frozen initial baseline without changing live experience.
         library = absolute(config.get('experience_database',str(ROOT / '.build/experience.sqlite3')),base)
-        experience = {'mode':'learn','database':str(out / 'experience.sqlite3' if config['purpose'] == 'integration' else library),
+        experience = {'mode':experience_mode,'database':str(out / 'experience.sqlite3' if config['purpose'] == 'integration' else library),
                       'baseline':None}
-        if config['purpose'] in ('training','evaluation') and library.is_file():
+        if experience_mode != 'off' and (config['purpose'] in ('training','evaluation') or experience_mode == 'read_only') and library.is_file():
             snapshot_path = out / 'experience-before.sqlite3'
             with sqlite3.connect(library.as_uri()+'?mode=ro',uri=True) as source, sqlite3.connect(snapshot_path) as target:
                 source.backup(target)
             experience['baseline'] = {'path':snapshot_path.name,'sha256':digest(snapshot_path)}
+        if experience_mode == 'read_only':
+            if experience['baseline'] is None:
+                raise ValueError('read_only experience requires an existing lesson library')
+            experience['database'] = str(out / experience['baseline']['path'])
         manifest = {
             **config, "run_id": uuid.uuid4().hex, "created_at": now(), "status": "prepared",
             "engine": str(engine), "engine_sha256": digest(engine),

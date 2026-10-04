@@ -80,6 +80,8 @@ def bounded_history(request):
 
     references(request['actions'])
     references(memory.get('plan', {}))
+    references(memory.get('campaign', {}))
+    references(memory.get('campaign_review', {}))
     references(observation.get('previous_unconfirmed_action', {}))
     for item in memory.get('recent_results', []):
         if item.get('outcome') == 'unconfirmed':

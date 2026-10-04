@@ -175,3 +175,31 @@ Own heroes include `level` and known `secondary_skills`. Level-up callbacks choo
 
 Blocking visits stop before their interaction tile. Equal-cost replanning may choose another visible reachable neighbouring tile; `turn_stop.possible_positions` gives that conditional envelope, and `interaction_position` remains separate. Threat proximity uses the minimum over possible stops. Native proof compares actual stopping with the envelope, rather than claiming one exact approach.
 Build effects also include the player-visible building description and fortification component; these are game data, not instructions.
+
+## Карточка стратегии и кампания
+
+Observation содержит `rules` (версия/ревизия движка, активные моды с версиями,
+публичные определения собственных фракций), `victory`, `enemy_players` и
+`campaign_review`. В собственном городе `faction` ссылается на уникальный справочник
+в rules.factions, а `development` показывает текущие ограничения построек.
+Справочник содержит линейки существ, цены, базовый прирост, стрелков/полёт,
+полезные обычные здания с ценами, производством и логическими зависимостями.
+Он не создаёт будущих команд. Рост/наличие войск и доступные команды проверяются
+отдельно для собственного города.
+
+Собственный hero.profile содержит тип и описание специальности, известные
+заклинания с текущей проверкой снаряжения/ценой маны и надетые артефакты.
+Описания не означают полную интерпретацию bonuses; неохваченные эффекты явно
+неизвестны. Магией управляет BattleAI, приключенческие команды не добавлены.
+Скрытые заклинания городов, будущие события и чужие экземпляры не экспортируются.
+
+Поддержаны обычное `conquest` (победа над всеми враждебными командами) и проверенное
+`control_all_towns` (владение всеми городами). Остальные условия —
+`unsupported_special`. Значок карты сам по себе не определяет условие победы.
+Из событий допускается только классификация этих общих предикатов; их скрытые
+ссылки, имена экземпляров, значения и координаты не сериализуются.
+
+Необязательное поле ответа `campaign` и его независимая проверка описаны в
+[памяти стратегии](strategy-memory.md). Невалидное совместное обновление не
+исполняет даже первую команду. Отсутствие поля сохраняет прежнее намерение для
+резервных/диагностических контроллеров и не подтверждает проверку курса.

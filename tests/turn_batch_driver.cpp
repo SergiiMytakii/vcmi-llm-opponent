@@ -60,7 +60,11 @@ int main()
 		auto battle = batch[2];
 		battle["kind"].String() = "attack";
 		require(externalai::batchSituationChanged(before, before, battle), "battle retained stale queue");
-		std::cout << "PASS: ordered multi-town/hero actions, validation, fresh IDs, costs, movement, sightings, losses, pickups, battle replanning\n";
+		auto reviewRequired = before;
+        reviewRequired["campaign_review"]["required"].Bool() = true;
+        reviewRequired["campaign_review"]["full"].Bool() = true;
+        require(externalai::batchSituationChanged(before, reviewRequired, batch[0]), "campaign review did not cancel batch");
+        std::cout << "PASS: ordered multi-town/hero actions, validation, fresh IDs, costs, movement, sightings, losses, pickups, battle replanning\n";
 	}
 	catch(const std::exception & error)
 	{
