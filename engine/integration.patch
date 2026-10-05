@@ -989,7 +989,7 @@ index 17f79e8f3..03b449dc7 100644
  	if(obj->tempOwner.isValidPlayer() && cb->getPlayerRelations(obj->tempOwner, aiNk->playerID) != PlayerRelations::ENEMIES) //owned or allied objects don't pose any threat
  		return 0;
 diff --git a/AI/Nullkiller2/Engine/Nullkiller.cpp b/AI/Nullkiller2/Engine/Nullkiller.cpp
-index c2adab572..a2dc6d870 100644
+index c2adab572..bae74e8c0 100644
 --- a/AI/Nullkiller2/Engine/Nullkiller.cpp
 +++ b/AI/Nullkiller2/Engine/Nullkiller.cpp
 @@ -9,6 +9,9 @@
@@ -1286,7 +1286,7 @@ index c2adab572..a2dc6d870 100644
  
  		// TODO: Mircea: Should merge recruiting from DefenseBehavior
  		decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
-@@ -883,14 +981,17 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
+@@ -883,14 +981,20 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
  
  bool Nullkiller::executeTask(const Goals::TTask & task)
  {
@@ -1297,6 +1297,9 @@ index c2adab572..a2dc6d870 100644
  
  	makingTurnInterruption.interruptionPoint();
  	logAi->debug("Trying to realize %s (value %2.3f)", taskDescr, task->priority);
++	if (std::getenv("VCMI_TURN_REVIEW_INTERVAL_DAYS"))
++		logAi->info("TURN_REVIEW_TASK player=%d day=%d priority=%f task=%s",
++			playerID.getNum(), cc->getCalendar().getCurrentDay(), task->priority, taskDescr);
  
  	try
  	{
@@ -1304,7 +1307,7 @@ index c2adab572..a2dc6d870 100644
  		task->accept(aiGw);
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
-@@ -898,20 +999,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
+@@ -898,20 +1002,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
  	{
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
@@ -1353,7 +1356,7 @@ index c2adab572..a2dc6d870 100644
  	freeRes.positive();
  	return freeRes;
  }
-@@ -923,6 +1051,7 @@ void Nullkiller::lockResources(const TResources & res)
+@@ -923,6 +1054,7 @@ void Nullkiller::lockResources(const TResources & res)
  
  std::shared_ptr<const CPathsInfo> Nullkiller::getPathsInfo(const CGHeroInstance * h) const
  {
@@ -2186,20 +2189,21 @@ index 33789867f..decace23a 100644
  
  	assert(!isActive());
 diff --git a/clientapp/EntryPoint.cpp b/clientapp/EntryPoint.cpp
-index 5d9b824e7..e05c51780 100644
+index 5d9b824e7..e0fdb892e 100644
 --- a/clientapp/EntryPoint.cpp
 +++ b/clientapp/EntryPoint.cpp
-@@ -136,6 +136,9 @@ static void prog_help(const po::options_description &opts)
+@@ -136,6 +136,10 @@ static void prog_help(const po::options_description &opts)
  	printf("warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n");
  	printf("\n");
  	std::cout << opts;
++	std::cout << "\nVCMI_TURN_REVIEW_INTERVAL_DAYS / VCMI_TURN_REVIEW_DIRECTORY: optional private turn-review mode.\n";
 +#if defined(VCMI_WINDOWS) || defined(VCMI_MAC)
 +	std::cout << "\nVCMI_PROFILE_DIR: absolute directory for a separate writable profile.\n";
 +#endif
  }
  
  #if defined(VCMI_WINDOWS) && !defined(__GNUC__) && defined(VCMI_WITH_DEBUG_CONSOLE)
-@@ -282,6 +285,12 @@ int main(int argc, char * argv[])
+@@ -282,6 +286,12 @@ int main(int argc, char * argv[])
  			s->Integer() = defaultValue;
  	};
  
@@ -2389,3 +2393,318 @@ index d10044eb2..c0306262d 100644
  }
  
  void ApplyGhNetPackVisitor::visitAdvInterfaceReady(AdvInterfaceReady &pack)
+diff --git a/server/CGameHandler.cpp b/server/CGameHandler.cpp
+index 820061ae5..fa37a7160 100644
+--- a/server/CGameHandler.cpp
++++ b/server/CGameHandler.cpp
+@@ -806,6 +806,7 @@ void CGameHandler::start(bool resume)
+ 
+ void CGameHandler::tick(int millisecondsPassed)
+ {
++	turnOrder->tickTurnReview();
+ 	turnTimerHandler->update(millisecondsPassed);
+ }
+ 
+@@ -1824,12 +1825,11 @@ void pruneAutosaves(const ResourcePath & currentAutosave, int countLimit)
+ 
+ }
+ 
+-void CGameHandler::save(const std::string & filename, PlayerColor playerToNotifyOnSuccess, int autosaveCountLimit)
++bool CGameHandler::save(const std::string & filename, PlayerColor playerToNotifyOnSuccess, int autosaveCountLimit)
+ {
+ 	logGlobal->info("Saving to %s", filename);
+ 	ResourcePath savePath(filename, EResType::SAVEGAME);
+ 	const auto savefname = savePath.getOriginalName() + ".vsgm1";
+-	CResourceHandler::get("local")->createResource(savefname);
+ 
+ 	std::string filenameWithoutPath;
+ 	auto pos = filename.find_last_of("/\\");
+@@ -1842,6 +1842,8 @@ void CGameHandler::save(const std::string & filename, PlayerColor playerToNotify
+ 
+ 	try
+ 	{
++		if (!CResourceHandler::get("local")->createResource(savefname))
++			throw std::runtime_error("Cannot create save file");
+ 		CSaveFile save;
+ 		gameState().saveGame(save);
+ 		logGlobal->info("Saving server state");
+@@ -1858,6 +1860,7 @@ void CGameHandler::save(const std::string & filename, PlayerColor playerToNotify
+ 			sendAndApply(iw);
+ 		}
+ 		logGlobal->info("Game has been successfully saved!");
++		return true;
+ 	}
+ 	catch(std::exception &e)
+ 	{
+@@ -1868,6 +1871,7 @@ void CGameHandler::save(const std::string & filename, PlayerColor playerToNotify
+ 			sendAndApply(iw);
+ 		}
+ 		logGlobal->error("Failed to save game: %s", e.what());
++		return false;
+ 	}
+ }
+ 
+diff --git a/server/CGameHandler.h b/server/CGameHandler.h
+index dbed70025..06990b25f 100644
+--- a/server/CGameHandler.h
++++ b/server/CGameHandler.h
+@@ -250,7 +250,7 @@ public:
+ 	bool bulkMergeStacks(SlotID slotSrc, ObjectInstanceID srcOwner);
+ 	bool bulkSplitAndRebalanceStack(SlotID slotSrc, ObjectInstanceID srcOwner);
+ 	bool responseStatistic(PlayerColor player);
+-	void save(const std::string &fname, PlayerColor playerToNotifyOnSuccess, int autosaveCountLimit = 0);
++	bool save(const std::string &fname, PlayerColor playerToNotifyOnSuccess, int autosaveCountLimit = 0);
+ 	void load(const StartInfo &info);
+ 
+ 	void onPlayerTurnStarted(PlayerColor which);
+diff --git a/server/processors/TurnOrderProcessor.cpp b/server/processors/TurnOrderProcessor.cpp
+index 14bec1a93..3c58b3027 100644
+--- a/server/processors/TurnOrderProcessor.cpp
++++ b/server/processors/TurnOrderProcessor.cpp
+@@ -9,6 +9,10 @@
+  */
+ #include "StdInc.h"
+ #include "TurnOrderProcessor.h"
++#include <filesystem>
++#include <fstream>
++#include <charconv>
++#include "../../lib/json/JsonNode.h"
+ #include "PlayerMessageProcessor.h"
+ 
+ #include "../queries/QueriesProcessor.h"
+@@ -274,6 +278,11 @@ void TurnOrderProcessor::doStartNewDay()
+ 	std::swap(actedPlayers, awaitingPlayers);
+ 
+ 	updateAndNotifyContactStatus();
++	if (reviewIntervalDays && gameHandler->gameInfo().getCalendar().getCurrentDay() >= nextReviewDay)
++	{
++		pauseForTurnReview();
++		return;
++	}
+ 	tryStartTurnsForPlayers();
+ }
+ 
+@@ -287,6 +296,8 @@ void TurnOrderProcessor::doStartPlayerTurn(PlayerColor which)
+ 	actingPlayers.insert(which);
+ 	awaitingPlayers.erase(which);
+ 
++	recordReviewTurn(which, "start");
++
+ 	PlayerStartsTurn pst;
+ 	pst.player = which;
+ 
+@@ -328,6 +339,7 @@ void TurnOrderProcessor::doEndPlayerTurn(PlayerColor which)
+ 	assert(isPlayerMakingTurn(which));
+ 	assert(gameHandler->gameInfo().getPlayerStatus(which) == EPlayerStatus::INGAME);
+ 
++	recordReviewTurn(which, "end");
+ 	actingPlayers.erase(which);
+ 	actedPlayers.insert(which);
+ 
+@@ -337,7 +349,7 @@ void TurnOrderProcessor::doEndPlayerTurn(PlayerColor which)
+ 
+ 	resumeTurnOrder();
+ 
+-	assert(!actingPlayers.empty());
++	assert(!actingPlayers.empty() || reviewPaused);
+ }
+ 
+ void TurnOrderProcessor::addPlayer(PlayerColor which)
+@@ -354,6 +366,8 @@ void TurnOrderProcessor::removePlayer(PlayerColor which)
+ 
+ void TurnOrderProcessor::resumeTurnOrder()
+ {
++	if (reviewPaused)
++		return;
+ 	if (!awaitingPlayers.empty())
+ 		tryStartTurnsForPlayers();
+ 
+@@ -393,6 +407,7 @@ bool TurnOrderProcessor::onPlayerEndsTurn(PlayerColor which)
+ 
+ void TurnOrderProcessor::onGameStarted()
+ {
++	configureTurnReview();
+ 	if(gameHandler->gameInfo().getMapHeader()->battleOnly)
+ 	{
+ 		auto towns = gameHandler->gameState().getMap().getObjects<CGTownInstance>();
+@@ -421,6 +436,8 @@ void TurnOrderProcessor::onGameStarted()
+ 
+ void TurnOrderProcessor::tryStartTurnsForPlayers()
+ {
++	if (reviewPaused)
++		return;
+ 	auto awaitingPlayersCopy = awaitingPlayers;
+ 	for (auto player : awaitingPlayersCopy)
+ 	{
+@@ -453,3 +470,137 @@ void TurnOrderProcessor::setMaxSimturnsDuration(int days)
+ {
+ 	simturnsMaxDurationDays = gameHandler->gameInfo().getCalendar().getCurrentDay() + days;
+ }
++
++// The server remains responsive during review: no sleeping thread or held game lock.
++void TurnOrderProcessor::configureTurnReview()
++{
++	const char * interval = std::getenv("VCMI_TURN_REVIEW_INTERVAL_DAYS");
++	const char * directory = std::getenv("VCMI_TURN_REVIEW_DIRECTORY");
++	const char * runId = std::getenv("VCMI_TURN_REVIEW_RUN_ID");
++	if (!interval && !directory && !runId)
++		return;
++	if (!interval || !directory || !runId)
++		throw std::runtime_error("Turn review requires interval, private control directory and run identity");
++	std::string value(interval);
++	auto parsed = std::from_chars(value.data(), value.data() + value.size(), reviewIntervalDays);
++	if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size() || reviewIntervalDays < 1 || reviewIntervalDays > 365)
++		throw std::runtime_error("Invalid turn review interval");
++	if (!std::filesystem::path(directory).is_absolute() || !std::filesystem::is_directory(directory))
++		throw std::runtime_error("Turn review requires an existing absolute private directory");
++	std::string identity(runId);
++	if (identity.size() != 32 || identity.find_first_not_of("0123456789abcdef") != std::string::npos)
++		throw std::runtime_error("Invalid turn review run identity");
++	reviewSavePrefix = "Saves/turn-review-" + identity + "-day-";
++	reviewDirectory = directory;
++	nextReviewDay = gameHandler->gameInfo().getCalendar().getCurrentDay() + reviewIntervalDays;
++	writeReviewState("running");
++}
++
++void TurnOrderProcessor::writeReviewState(const std::string & status)
++{
++	JsonNode state;
++	int day = gameHandler->gameInfo().getCalendar().getCurrentDay();
++	state["status"].String() = status;
++	state["completed_day"].Integer() = day - 1;
++	state["next_day"].Integer() = day;
++	state["interval_days"].Integer() = reviewIntervalDays;
++	state["save_resource"].String() = reviewSavePrefix + std::to_string(day - 1) + ".vsgm1";
++	std::filesystem::path destination = std::filesystem::path(reviewDirectory) / "native-state.json";
++	{
++		std::ofstream out(destination.string() + ".tmp", std::ios::trunc);
++		out.exceptions(std::ios::failbit | std::ios::badbit);
++		out << state.toCompactString() << std::endl;
++	}
++	std::filesystem::rename(destination.string() + ".tmp", destination);
++}
++
++void TurnOrderProcessor::pauseForTurnReview()
++{
++	assert(actingPlayers.empty());
++	reviewPaused = true;
++	int day = gameHandler->gameInfo().getCalendar().getCurrentDay();
++	std::string name = reviewSavePrefix + std::to_string(day - 1);
++	reviewSaveComplete = gameHandler->save(name, PlayerColor::CANNOT_DETERMINE);
++	writeReviewState(reviewSaveComplete ? "paused" : "save_failed");
++	logGlobal->info("TURN_REVIEW completed_day=%d next_day=%d saved=%d", day - 1, day, reviewSaveComplete);
++}
++
++void TurnOrderProcessor::tickTurnReview()
++{
++	if (!reviewPaused || !reviewSaveComplete)
++		return;
++	int day = gameHandler->gameInfo().getCalendar().getCurrentDay();
++	auto permit = std::filesystem::path(reviewDirectory) / ("continue-" + std::to_string(day));
++	if (!std::filesystem::exists(permit))
++		return;
++	std::filesystem::remove(permit);
++	reviewPaused = false;
++	nextReviewDay = day + reviewIntervalDays;
++	writeReviewState("running");
++	tryStartTurnsForPlayers();
++}
++
++void TurnOrderProcessor::recordReviewTurn(PlayerColor player, const std::string & phase)
++{
++	if (!reviewIntervalDays)
++		return;
++	const auto * owner = gameHandler->gameInfo().getPlayerState(player);
++	JsonNode state;
++	state["phase"].String() = phase;
++	state["day"].Integer() = gameHandler->gameInfo().getCalendar().getCurrentDay();
++	state["player"].Integer() = player.getNum();
++	state["resources"].Vector();
++	for (int i = 0; i < GameConstants::RESOURCE_QUANTITY; ++i)
++		state["resources"].Vector().emplace_back(owner->resources[GameResID(i)]);
++	state["heroes"].Vector();
++	state["towns"].Vector();
++	state["owned_objects"].Vector();
++	auto army = [](const CCreatureSet * source)
++	{
++		JsonNode result;
++		result.Vector();
++		for (const auto & [slot, stack] : source->Slots())
++		{
++			JsonNode unit;
++			unit["slot"].Integer() = slot.getNum();
++			unit["creature"].Integer() = stack->getCreatureID().getNum();
++			unit["count"].Integer() = stack->getCount();
++			result.Vector().push_back(unit);
++		}
++		return result;
++	};
++	for (const auto * hero : owner->getHeroes())
++	{
++		JsonNode item;
++		item["id"].Integer() = hero->id.getNum();
++		item["name"].String() = hero->getNameTextID();
++		item["x"].Integer() = hero->visitablePos().x;
++		item["y"].Integer() = hero->visitablePos().y;
++		item["z"].Integer() = hero->visitablePos().z;
++		item["movement"].Integer() = hero->movementPointsRemaining();
++		item["mana"].Integer() = hero->mana;
++		item["army"] = army(hero);
++		item["army_value"].Integer() = hero->estimateCombatValue();
++		state["heroes"].Vector().push_back(item);
++	}
++	for (const auto * town : owner->getTowns())
++	{
++		JsonNode item;
++		item["id"].Integer() = town->id.getNum();
++		item["name"].String() = town->getNameTextID();
++		item["army"] = army(town->getUpperArmy());
++		item["buildings"].Vector();
++		for (const auto & [id, building] : town->getTown()->buildings)
++			if (town->hasBuilt(id)) item["buildings"].Vector().emplace_back(id.getNum());
++		state["towns"].Vector().push_back(item);
++	}
++	for (const auto * object : gameHandler->gameState().getMap().getObjects())
++		if (object->getOwner() == player)
++			state["owned_objects"].Vector().emplace_back(object->id.getNum());
++	std::ofstream out(std::filesystem::path(reviewDirectory) / "turns.jsonl", std::ios::app);
++	out.exceptions(std::ios::failbit | std::ios::badbit);
++	std::string record = state.toCompactString();
++	std::erase(record, '\n');
++	std::erase(record, '\r');
++	out << record << std::endl;
++}
+diff --git a/server/processors/TurnOrderProcessor.h b/server/processors/TurnOrderProcessor.h
+index 515d5b65f..d492815a6 100644
+--- a/server/processors/TurnOrderProcessor.h
++++ b/server/processors/TurnOrderProcessor.h
+@@ -17,6 +17,18 @@ class TurnOrderProcessor : boost::noncopyable
+ {
+ 	CGameHandler * gameHandler;
+ 
++	// Test controls are deliberately not serialized into ordinary game saves.
++	int reviewIntervalDays = 0;
++	int nextReviewDay = 0;
++	bool reviewPaused = false;
++	bool reviewSaveComplete = false;
++	std::string reviewDirectory;
++	std::string reviewSavePrefix;
++	void configureTurnReview();
++	void pauseForTurnReview();
++	void writeReviewState(const std::string & status);
++
++
+ 	struct PlayerPair
+ 	{
+ 		PlayerColor a;
+@@ -79,6 +91,10 @@ class TurnOrderProcessor : boost::noncopyable
+ public:
+ 	TurnOrderProcessor(CGameHandler * owner);
+ 
++	/// Optional private tester controls; polled on the server event loop.
++	void tickTurnReview();
++	void recordReviewTurn(PlayerColor player, const std::string & phase);
++
+ 	bool isContactAllowed(PlayerColor left, PlayerColor right) const;
+ 	bool isPlayerMakingTurn(PlayerColor which) const;
+ 

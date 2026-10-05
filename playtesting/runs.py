@@ -113,6 +113,9 @@ def prepare(config_path, out):
     elif "nk3_mode" in config:
         raise ValueError("nk3_mode requires a Nullkiller3 player")
     finite_positive(config["max_seconds"], "max_seconds")
+    interval = config.setdefault('review_interval_days', 0)
+    if type(interval) is not int or not 0 <= interval <= 365:
+        raise ValueError('review_interval_days must be an integer from 0 (off) to 365')
     experience_mode = config.get('experience_mode', 'learn')
     if experience_mode not in ('off', 'read_only', 'learn'):
         raise ValueError('experience_mode must be off, read_only or learn')

@@ -144,6 +144,14 @@ def run_game(run):
         env = os.environ.copy()
         env.pop('DYLD_INSERT_LIBRARIES', None)
         env.pop('VCMI_NK3_MODE', None)
+        for name in ('VCMI_TURN_REVIEW_INTERVAL_DAYS', 'VCMI_TURN_REVIEW_DIRECTORY', 'VCMI_TURN_REVIEW_RUN_ID'):
+            env.pop(name, None)
+        interval = manifest.get('review_interval_days', 0)
+        if interval:
+            (run / 'turn-review').mkdir()
+            env.update(VCMI_TURN_REVIEW_INTERVAL_DAYS=str(interval),
+                       VCMI_TURN_REVIEW_DIRECTORY=str(run / 'turn-review'),
+                       VCMI_TURN_REVIEW_RUN_ID=manifest['run_id'])
         if "nk3_mode" in manifest:
             env['VCMI_NK3_MODE'] = manifest['nk3_mode']
         profile = run / 'profile' / DATA
@@ -168,6 +176,8 @@ def run_game(run):
         # before --version or game startup can touch its default profile.
         if help_result.returncode != 0 or b'VCMI_PROFILE_DIR' not in help_result.stdout:
             raise ValueError('engine lacks native profile isolation; rebuild before launching')
+        if interval and b'VCMI_TURN_REVIEW_INTERVAL_DAYS' not in help_result.stdout:
+            raise ValueError('engine lacks native turn-review mode; rebuild before launching')
         version = subprocess.run(prefix + ['--version'], env=env, capture_output=True, timeout=10)
         (run / 'preflight.stdout.log').write_bytes(help_result.stdout + version.stdout)
         (run / 'preflight.stderr.log').write_bytes(help_result.stderr + version.stderr)
@@ -204,13 +214,26 @@ def run_game(run):
             result.update(pid=child.pid, reason="deadline")
             write_json(run / "launch.json", result)
             deadline = time.monotonic() + manifest["max_seconds"]
+            previous_tick = time.monotonic()
             log_offset, partial, assignments = 0, b"", {}
-            while time.monotonic() < deadline:
+            while True:
+                current_tick = time.monotonic()
+                paused = False
+                if interval:
+                    from .turn_review import sync_review
+                    review = sync_review(run)
+                    paused = bool(review and review['status'] in ('paused', 'save_failed'))
+                    if paused:
+                        # The gameplay time limit excludes time spent analysing a checkpoint.
+                        deadline += current_tick - previous_tick
+                previous_tick = current_tick
                 if (run / "STOP").exists():
                     result["reason"] = "requested_stop"
                     break
                 if child.poll() is not None:
                     result["reason"] = "process_exit"
+                    break
+                if not paused and current_tick >= deadline:
                     break
                 logfile = logs / "VCMI_Client_log.txt"
                 if logfile.is_file():
