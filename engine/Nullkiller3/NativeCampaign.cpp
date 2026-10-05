@@ -882,6 +882,7 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
             world["goal_statuses"]=campaign.statuses();
             continue;
         }
+        if(kind=="defend_area" && unchangedHoldingAttempt(persisted["memory"],goal["id"].String(),campaign.plan()["revision"].Integer(),executionSnapshot(ai))) continue;
         const auto * target = resolve(ai, goal["target_ref"]);
         const auto * actor = dynamic_cast<const CGHeroInstance *>(resolve(ai, goal["actor_ref"]));
         if(kind=="defend_area" && actor && target && actor->visitablePos()==target->visitablePos())
@@ -1293,6 +1294,7 @@ JsonNode NativeCampaign::executionSnapshot(NK2AI::Nullkiller & ai)
     for(const auto * hero:ai.cc->getHeroesInfo())
     {
         JsonNode item;item["ref"].String()=reference(hero);item["position"]=coordinate(hero->visitablePos());
+        item["movement"].Integer()=hero->movementPointsRemaining();item["mana"].Integer()=hero->mana;
         item["army_value"].Integer()=hero->estimateCombatValue();item["in_boat"].Bool()=hero->inBoat();snapshot["heroes"].Vector().push_back(item);
     }
     for(const auto * town:ai.cc->getTownsInfo())
@@ -1331,6 +1333,7 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
     pending["before"]=executionSnapshot(ai);
     auto & action=pending["action"];
     action["goal_id"].String()=goalID;
+    action["campaign_revision"]=campaign.plan()["revision"];
     action["native_goal_type"].Integer()=goalType;
     if(goal && !goal->strategicStabilizationReason.empty()) action["stabilization"].String()=goal->strategicStabilizationReason;
     using namespace NK2AI::Goals;

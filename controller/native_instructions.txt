@@ -108,6 +108,8 @@ last_own_decision_in_game is historical own rules, not fresh map observation.
 Missing or omitted history proves nothing.
 
 # Output
+Compare alternatives by their concrete benefits, costs and uncertainties. Different
+operations may share an approach category; never repeat an identical alternative.
 Use short complete sentences (up to 160 characters per explanation field); do
 not cut a sentence mid-word to fill the limit.
 Return revise with a complete newer plan, or retain with plan=null when the accepted

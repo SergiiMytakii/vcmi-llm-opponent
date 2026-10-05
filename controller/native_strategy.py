@@ -86,9 +86,9 @@ def reply_schema(request):
     objects = world['objects']
     targets = {
         'develop_town':town_refs,
-        'secure_resource':[o['ref'] for o in objects if o.get('kind') in ('mine','resource')],
+        'secure_resource':[o['ref'] for o in objects if o.get('kind') in ('mine','resource') and (o.get('kind')!='mine' or o.get('owner')!=world['player'] or o.get('visible') is not True)],
         'reinforce_hero':own_refs,
-        'capture_target':[o['ref'] for o in objects if o.get('kind') in ('town','mine')],
+        'capture_target':[o['ref'] for o in objects if o.get('kind') in ('town','mine') and (o.get('owner')!=world['player'] or o.get('visible') is not True)],
         'defend_area':town_refs,'scout_frontier':world['frontiers'],'preserve_force':town_refs}
     supported_buildings = sorted({b['id'] for t in world['towns'] for b in t.get('building_options',[]) if b.get('supported') is True})
     completions = {'develop_town':['building_present'],'secure_resource':['target_owned','reserve_at_least'],
@@ -173,6 +173,8 @@ def validate_reply(request, reply, wire=False):
     by_ref = {o['ref']:o for o in request['observation']['objects']}
     for g in goals.values():
         kind, predicate = g['kind'], g['complete_when']
+        if reply['decision']=='revise' and predicate['kind']=='target_owned' and by_ref.get(g['target_ref'],{}).get('visible') is True and by_ref.get(g['target_ref'],{}).get('owner')==request['observation']['player']:
+            raise ValueError('new_capture_target_already_owned')
         if kind=='develop_town' and predicate['value'] != g['building_id']:raise ValueError('building predicate does not prove goal')
         if kind=='reinforce_hero' and (g['actor_ref']==g['target_ref'] or predicate['value']<g['min_army_value']):
             raise ValueError('invalid reinforcement predicate or participants')
@@ -211,8 +213,8 @@ def validate_reply(request, reply, wire=False):
         if actor is not None and (actor not in assigned or goal['id'] not in assigned[actor]['goal_ids']):
             raise ValueError('goal actor has no consistent role')
     if any(c['goal_id'] not in goals for c in reply['reconsider_when']): raise ValueError('unknown reconsideration goal')
-    if len({a['approach'] for a in reply['alternatives']}) != len(reply['alternatives']):
-        raise ValueError('strategic alternatives must differ')
+    if len({json.dumps(a,sort_keys=True,ensure_ascii=False) for a in reply['alternatives']}) != len(reply['alternatives']):
+        raise ValueError('strategic alternatives must differ in content')
     if len(json.dumps(reply,ensure_ascii=False,separators=(',',':')).encode('utf-8')) > 7600:
         raise ValueError('strategy exceeds native reply budget')
     if 'learning' in reply:

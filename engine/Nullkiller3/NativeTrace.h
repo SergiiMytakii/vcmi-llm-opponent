@@ -9,6 +9,17 @@
 
 namespace nullkiller3
 {
+// Holding remains active, but repeating an acknowledged visit with unchanged own
+// state cannot help. A new day or any fresh own effect permits another attempt.
+inline bool unchangedHoldingAttempt(const JsonNode & memory,const std::string & goalID,int64_t revision,const JsonNode & current)
+{
+    const auto & results=memory["recent_results"].Vector();
+    for(auto it=results.rbegin();it!=results.rend();++it)
+        if((*it)["action"]["goal_id"].String()==goalID)
+            return (*it)["action"]["campaign_revision"].Integer()==revision && (*it)["outcome"].String()=="no_change_observed" && (*it)["action"]["after"]==current;
+    return false;
+}
+
 inline JsonNode coordinate(const int3 & pos)
 {
     JsonNode result;

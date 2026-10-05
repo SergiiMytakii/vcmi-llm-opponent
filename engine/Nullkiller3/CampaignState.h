@@ -262,6 +262,7 @@ public:
             else if(kind == "capture_target" || kind == "secure_resource")
             {
                 if(hero.isNull() || object.isNull()) return reject("unknown_capture_target");
+                if(object["visible"].Bool() && object["owner"]==world["player"] && (object["kind"].String()=="town" || object["kind"].String()=="mine")) return reject("new_capture_target_already_owned");
                 if(kind == "capture_target" && object["kind"].String() != "town" && object["kind"].String() != "mine") return reject("unsupported_capture_target");
                 if(kind == "secure_resource" && object["kind"].String() != "mine" && object["kind"].String() != "resource") return reject("unsupported_resource_target");
             }

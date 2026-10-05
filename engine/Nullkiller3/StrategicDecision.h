@@ -284,7 +284,7 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     std::set<std::string> compared;
     for(const auto & alternative : alternatives.Vector())
         if(!shape(alternative, {"approach", "benefit", "cost", "uncertainty"}) || !text(alternative["approach"])
-            || !approaches.count(alternative["approach"].String()) || !compared.insert(alternative["approach"].String()).second
+            || !approaches.count(alternative["approach"].String()) || !compared.insert(alternative.toCompactString()).second
             || !text(alternative["benefit"],640) || !text(alternative["cost"],640) || !text(alternative["uncertainty"],640))
             return reject("invalid_strategic_alternative");
     const auto & conditions = reply["reconsider_when"];
