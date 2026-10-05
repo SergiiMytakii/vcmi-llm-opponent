@@ -1175,13 +1175,19 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
     };
     if(urgent(task,0)) return 100000.0f+std::max(0.0f,nativeScore);
     if(!task->strategicGoalID.empty())
-        for(const auto & goal : campaign.plan()["goals"].Vector())
+        for(size_t order=0; order<campaign.plan()["goals"].Vector().size(); ++order)
+        {
+            const auto & goal=campaign.plan()["goals"][order];
             if(goal["id"].String() == task->strategicGoalID
                 && (world["goal_statuses"][goal["id"].String()]["state"].String() == "ready"
                     || (goal["kind"].String()=="preserve_force"
                         && campaign.requiresStabilization(goal["id"].String()))))
+            {
+                task->asTask()->nativeRank.goalOrder=static_cast<int>(order);
                 return (world["goal_statuses"][goal["id"].String()]["state"].String()=="blocked" ? 95000.0f : 50000.0f)
                     + goal["priority"].Integer();
+            }
+        }
     // Keep independently useful opportunities, but do not divert a committed
     // hero to an unrelated operation before its current obligation completes.
     if(task->hero && !role(task->hero).empty()) return 0;

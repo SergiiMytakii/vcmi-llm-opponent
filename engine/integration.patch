@@ -989,7 +989,7 @@ index 17f79e8f3..03b449dc7 100644
  	if(obj->tempOwner.isValidPlayer() && cb->getPlayerRelations(obj->tempOwner, aiNk->playerID) != PlayerRelations::ENEMIES) //owned or allied objects don't pose any threat
  		return 0;
 diff --git a/AI/Nullkiller2/Engine/Nullkiller.cpp b/AI/Nullkiller2/Engine/Nullkiller.cpp
-index c2adab572..f946b70ac 100644
+index c2adab572..cde8db0b2 100644
 --- a/AI/Nullkiller2/Engine/Nullkiller.cpp
 +++ b/AI/Nullkiller2/Engine/Nullkiller.cpp
 @@ -9,6 +9,9 @@
@@ -1060,15 +1060,76 @@ index c2adab572..f946b70ac 100644
  	baseGraph.reset();
  	priorityEvaluator.reset(new PriorityEvaluator(this));
  	priorityEvaluators.reset(
-@@ -218,6 +237,7 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+@@ -176,7 +195,7 @@ void TaskPlan::mergeAndFilter(const TSubgoal & task)
+ 		{
+ 			if(task == item.task || task->asTask()->isObjectAffected(objid) || (task->asTask()->getHero() != nullptr && task->asTask()->getHero() == item.task->asTask()->getHero()))
+ 			{
+-				if(item.task->asTask()->priority >= task->asTask()->priority)
++				if(!nullkiller3::prefersTask(*task->asTask(), *item.task->asTask()))
+ 					return;
+ 
+ 				blockers.push_back(item.task);
+@@ -216,8 +235,24 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+ 
+ 	for(const TSubgoal & task : tasks)
  	{
- 		if(task->asTask()->priority <= 0)
+-		if(task->asTask()->priority <= 0)
++		task->asTask()->nativeRank = {};
++		if(strategicCampaign && !task->strategicGoalID.empty())
++		{
++			const auto context = priorityEvaluator->buildEvaluationContext(task);
++			setNativeTaskRank(task, *priorityEvaluator, context, true);
++			task->asTask()->priority = priorityEvaluator->evaluate(task, PriorityEvaluator::BUILDINGS, context);
++		}
++		else if(task->asTask()->priority <= 0)
  			task->asTask()->priority = priorityEvaluator->evaluate(task);
 +		if(strategicCampaign) task->asTask()->priority = strategicCampaign->priority(*this, task, task->asTask()->priority);
++	}
++
++	if(strategicCampaign)
++	{
++		const auto best = std::max_element(tasks.begin(), tasks.end(), [](const auto & a, const auto & b) {
++			return nullkiller3::prefersTask(*b->asTask(), *a->asTask());
++		});
++		return taskptr(**best);
  	}
  
  	auto bestTask = *vstd::maxElementByFun(tasks, [](const Goals::TSubgoal& task) -> float
-@@ -269,6 +289,7 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
+@@ -228,6 +263,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+ 	return taskptr(*bestTask);
+ }
+ 
++void Nullkiller::setNativeTaskRank(const Goals::TSubgoal & task, PriorityEvaluator & evaluator,
++                                  const EvaluationContext & context, bool priorityPass) const
++{
++	auto & rank = task->asTask()->nativeRank;
++	rank = {};
++	const int first = priorityPass ? PriorityEvaluator::BUILDINGS : PriorityEvaluator::INSTAKILL;
++	const int last = priorityPass ? PriorityEvaluator::BUILDINGS : PriorityEvaluator::MAX_PRIORITY_TIER;
++	for(int tier = first; tier <= last; ++tier)
++	{
++		const float score = evaluator.evaluate(task, tier, context);
++		if(std::isfinite(score) && score > 0)
++		{
++			rank.tier = tier;
++			rank.score = score;
++			break;
++		}
++	}
++}
++
+ Nullkiller::EvaluationContextMap Nullkiller::buildEvaluationContexts(const TGoalVec & tasks) const
+ {
+ 	std::vector<std::optional<EvaluationContext>> contexts(tasks.size());
+@@ -264,22 +318,27 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
+ 			for(size_t i = r.begin(); i != r.end(); i++)
+ 			{
+ 				const auto & task = tasks[i];
++				task->asTask()->nativeRank = {};
++				if(strategicCampaign && !task->strategicGoalID.empty())
++					setNativeTaskRank(task, *evaluator, evaluationContexts.at(task.get()), false);
+ 				if(task->asTask()->priority <= 0 || priorityTier != PriorityEvaluator::PriorityTier::BUILDINGS)
+ 					task->asTask()->priority = evaluator->evaluate(
  						task,
  						priorityTier,
  						evaluationContexts.at(task.get()));
@@ -1076,7 +1137,26 @@ index c2adab572..f946b70ac 100644
  			}
  		}
  	);
-@@ -325,6 +346,7 @@ void Nullkiller::invalidatePathfinderData()
+ 
+-	std::ranges::sort(
+-		tasks,
+-		[](const TSubgoal & g1, const TSubgoal & g2) -> bool
+-		{
+-			return g2->asTask()->priority < g1->asTask()->priority;
+-		}
+-	);
++	if(strategicCampaign)
++		std::stable_sort(tasks.begin(), tasks.end(), [](const auto & a, const auto & b) {
++			return nullkiller3::prefersTask(*a->asTask(), *b->asTask());
++		});
++	else
++		std::ranges::sort(tasks, [](const TSubgoal & a, const TSubgoal & b) {
++			return a->asTask()->priority > b->asTask()->priority;
++		});
+ 
+ 	for(const TSubgoal & task : tasks)
+ 	{
+@@ -325,6 +384,7 @@ void Nullkiller::invalidatePathfinderData()
  
  void Nullkiller::updateState()
  {
@@ -1084,7 +1164,7 @@ index c2adab572..f946b70ac 100644
  	const auto start = std::chrono::high_resolution_clock::now();
  	auto startMethod = start;
  	std::map<std::string, uint64_t> methodToElapsedMs = {};
-@@ -336,6 +358,8 @@ void Nullkiller::updateState()
+@@ -336,6 +396,8 @@ void Nullkiller::updateState()
  	activeHero = nullptr;
  	setTargetObject(-1);
  	decomposer->reset();
@@ -1093,7 +1173,7 @@ index c2adab572..f946b70ac 100644
  
  	buildAnalyzer->update();
  	methodToElapsedMs.emplace("buildAnalyzer->update", timeElapsed(startMethod));
-@@ -397,6 +421,7 @@ void Nullkiller::updateState()
+@@ -397,6 +459,7 @@ void Nullkiller::updateState()
  	startMethod = std::chrono::high_resolution_clock::now();
  	armyManager->update();
  	methodToElapsedMs.emplace("armyManager->update()", timeElapsed(startMethod));
@@ -1101,7 +1181,7 @@ index c2adab572..f946b70ac 100644
  
  	if(const auto timeElapsedMs = timeElapsed(start); timeElapsedMs > 250)
  	{
-@@ -607,6 +632,7 @@ void Nullkiller::makeTurn()
+@@ -607,6 +670,7 @@ void Nullkiller::makeTurn()
  		reserveRequiredTownDefenders();
  
  		tasks.clear();
@@ -1109,15 +1189,28 @@ index c2adab572..f946b70ac 100644
  		decompose(tasks, sptr(CaptureObjectsBehavior()), 1);
  		decompose(tasks, sptr(ClusterBehavior()), MAX_DEPTH);
  		decompose(tasks, sptr(DefenceBehavior()), MAX_DEPTH);
-@@ -646,6 +672,7 @@ void Nullkiller::makeTurn()
- 			return a->priority > b->priority;
- 		});
+@@ -641,11 +705,16 @@ void Nullkiller::makeTurn()
+ 			}
+ 		}
+ 
+-		std::ranges::sort(selectedTasks, [](const TTask& a, const TTask& b)
+-		{
+-			return a->priority > b->priority;
+-		});
++		if(strategicCampaign)
++			std::stable_sort(selectedTasks.begin(), selectedTasks.end(), [](const auto & a, const auto & b) {
++				return nullkiller3::prefersTask(*a, *b);
++			});
++		else
++			std::ranges::sort(selectedTasks, [](const TTask& a, const TTask& b) {
++				return a->priority > b->priority;
++			});
  
 +		if(strategicMode) nullkiller3::traceNative(*cc, selectedTasks, pass);
  		bool hasAnySuccess = false;
  		if(selectedTasks.empty())
  		{
-@@ -727,6 +754,12 @@ void Nullkiller::makeTurn()
+@@ -727,6 +796,12 @@ void Nullkiller::makeTurn()
  			{
  				if(!executeTask(selectedTask))
  				{
@@ -1130,7 +1223,7 @@ index c2adab572..f946b70ac 100644
  					lockTaskHeroes(selectedTask, HeroLockedReason::HERO_CHAIN);
  					const bool hasRemainingTasks = selectedTaskIndex + 1 < selectedTasks.size();
  					const auto failureAction = chooseTaskFailureAction(hasAnySuccess, hasRemainingTasks, hasUnlockedHeroWithMovement());
-@@ -750,7 +783,8 @@ void Nullkiller::makeTurn()
+@@ -750,7 +825,8 @@ void Nullkiller::makeTurn()
  			}
  		}
  
@@ -1140,7 +1233,7 @@ index c2adab572..f946b70ac 100644
  		if(!hasAnySuccess)
  		{
  			if(hasUnlockedHeroWithMovement())
-@@ -763,7 +797,7 @@ void Nullkiller::makeTurn()
+@@ -763,7 +839,7 @@ void Nullkiller::makeTurn()
  		}
  
  		for(const auto * heroInfo : cc->getHeroesInfo())
@@ -1149,7 +1242,7 @@ index c2adab572..f946b70ac 100644
  
  		if(pass == settings->getMaxPass())
  			logAi->warn("MaxPass reached. Terminating AI turn.");
-@@ -773,11 +807,28 @@ void Nullkiller::makeTurn()
+@@ -773,11 +849,28 @@ void Nullkiller::makeTurn()
  bool Nullkiller::updateStateAndExecutePriorityPass(Goals::TGoalVec & tempResults, const int passIndex)
  {
  	updateState();
@@ -1178,7 +1271,7 @@ index c2adab572..f946b70ac 100644
  
  		// TODO: Mircea: Should merge recruiting from DefenseBehavior
  		decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
-@@ -883,14 +934,17 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
+@@ -883,14 +976,17 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
  
  bool Nullkiller::executeTask(const Goals::TTask & task)
  {
@@ -1196,7 +1289,7 @@ index c2adab572..f946b70ac 100644
  		task->accept(aiGw);
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
-@@ -898,20 +952,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
+@@ -898,20 +994,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
  	{
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
@@ -1245,7 +1338,7 @@ index c2adab572..f946b70ac 100644
  	freeRes.positive();
  	return freeRes;
  }
-@@ -923,6 +1004,7 @@ void Nullkiller::lockResources(const TResources & res)
+@@ -923,6 +1046,7 @@ void Nullkiller::lockResources(const TResources & res)
  
  std::shared_ptr<const CPathsInfo> Nullkiller::getPathsInfo(const CGHeroInstance * h) const
  {
@@ -1254,7 +1347,7 @@ index c2adab572..f946b70ac 100644
  }
  
 diff --git a/AI/Nullkiller2/Engine/Nullkiller.h b/AI/Nullkiller2/Engine/Nullkiller.h
-index 067777725..fa3edd442 100644
+index 067777725..39a41d841 100644
 --- a/AI/Nullkiller2/Engine/Nullkiller.h
 +++ b/AI/Nullkiller2/Engine/Nullkiller.h
 @@ -24,6 +24,7 @@
@@ -1299,6 +1392,15 @@ index 067777725..fa3edd442 100644
  	virtual ~Nullkiller();
  	void init(const std::shared_ptr<CCallback> & cbInput, AIGateway * aiGwInput);
  	virtual void makeTurn();
+@@ -154,6 +165,8 @@ private:
+ 	const CGHeroInstance * findRequiredTownDefender(const CGTownInstance * town) const;
+ 	void decompose(Goals::TGoalVec & results, const Goals::TSubgoal& behavior, int decompositionMaxDepth) const;
+ 	Goals::TTask choseBestTask(Goals::TGoalVec & tasks) const;
++	void setNativeTaskRank(const Goals::TSubgoal & task, PriorityEvaluator & evaluator,
++	                       const EvaluationContext & context, bool priorityPass) const;
+ 	using EvaluationContextMap = std::map<const Goals::AbstractGoal *, EvaluationContext>;
+ 	EvaluationContextMap buildEvaluationContexts(const Goals::TGoalVec & tasks) const;
+ 	Goals::TTaskVec buildPlanAndFilter(
 diff --git a/AI/Nullkiller2/Engine/PriorityEvaluator.cpp b/AI/Nullkiller2/Engine/PriorityEvaluator.cpp
 index e1fa9dcd5..77a404a7a 100644
 --- a/AI/Nullkiller2/Engine/PriorityEvaluator.cpp
@@ -1377,10 +1479,18 @@ index e1fa9dcd5..77a404a7a 100644
  			auto ourSpeed = defendTown.hero->movementPointsLimit();
  			auto enemySpeed = threat.heroPtr.get()->movementPointsLimit();
 diff --git a/AI/Nullkiller2/Goals/AbstractGoal.h b/AI/Nullkiller2/Goals/AbstractGoal.h
-index c7734bfff..ba7573944 100644
+index c7734bfff..40679beac 100644
 --- a/AI/Nullkiller2/Goals/AbstractGoal.h
 +++ b/AI/Nullkiller2/Goals/AbstractGoal.h
-@@ -114,6 +114,10 @@ namespace Goals
+@@ -13,6 +13,7 @@
+ #include "../../../lib/mapObjects/CGTownInstance.h"
+ #include "../../../lib/mapObjects/CGHeroInstance.h"
+ #include "../AIUtility.h"
++#include "../../Nullkiller3/TaskRanking.h"
+ 
+ namespace NK2AI
+ {
+@@ -114,6 +115,10 @@ namespace Goals
  		const CGTownInstance * town; SETTER(CGTownInstance *, town)
  		int bid; SETTER(int, bid)
  		EGoals goalType;
@@ -1391,6 +1501,14 @@ index c7734bfff..ba7573944 100644
  
  		explicit AbstractGoal(EGoals goal = EGoals::INVALID): goalType(goal)
  		{
+@@ -176,6 +181,7 @@ namespace Goals
+ 	{
+ 	public:
+ 		float priority;
++		nullkiller3::NativeTaskRank nativeRank; // Fresh candidate rank; never serialized.
+ 
+ 		ITask() : priority(0) {}
+ 
 diff --git a/AI/Nullkiller2/Goals/AdventureSpellCast.cpp b/AI/Nullkiller2/Goals/AdventureSpellCast.cpp
 index 63624af91..376e704c5 100644
 --- a/AI/Nullkiller2/Goals/AdventureSpellCast.cpp
@@ -1637,6 +1755,7 @@ index 2a9973de3..7325a9a70 100644
  
  		if(!heroPtr.isVerified())
 diff --git a/AI/Nullkiller2/Goals/RecruitHero.cpp b/AI/Nullkiller2/Goals/RecruitHero.cpp
+index d93ba3ed6..34afa021f 100644
 --- a/AI/Nullkiller2/Goals/RecruitHero.cpp
 +++ b/AI/Nullkiller2/Goals/RecruitHero.cpp
 @@ -11,6 +11,8 @@
@@ -1648,7 +1767,7 @@ diff --git a/AI/Nullkiller2/Goals/RecruitHero.cpp b/AI/Nullkiller2/Goals/Recruit
  #include "../../../lib/constants/StringConstants.h"
  
  
-@@ -57,14 +59,23 @@
+@@ -57,14 +59,23 @@ void RecruitHero::accept(AIGateway * aiGw)
  	if(!heroToHire)
  		throw cannotFulfillGoalException("No hero to hire!");
  
