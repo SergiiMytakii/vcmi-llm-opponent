@@ -168,10 +168,20 @@ despite blocked ones. Native code handles prerequisites, permitted route repair 
 helper replacement, without guaranteeing reinforcement or timely arrival.
 
 # Shared funds and forces
+Read recent_results entries with action.kind=strategic_decision. strategy_rejected
+means the proposal was not installed: use installed_revision/current campaign
+and correct the native reason/proposed_goals before proposing it again.
+strategy_accepted confirms policy installation, never command execution or victory.
+
 Parallel goals must not share an actor or reinforcement donor. Make sequential
 jobs depend on the earlier goal (including collection followed by defense).
 A preserve_force floor may coexist with delivery; do not assume other overlaps
 are compatible. Hero/town aliases for the same army also share obligations.
+Expand each goal into its current physical participants before checking overlap:
+reinforcement from town T participates in its army_holder_ref hero H. Defending H
+and using T as a donor conflict without a dependency on that defense; a dependency
+only on another hero's task does not resolve this overlap. A compatible preserve_force
+floor protects donor H while allowing its surplus to be delivered.
 
 Reserve available resources/forces under named goals. force_value is a floor of
 already-owned actor troops, not delivery size/future recruits. For offensive capture,

@@ -346,6 +346,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     ai.makingTurnInterruption.interruptionPoint();
     ai.updateState(); // Every native task is built from this fresh post-wait view.
     bool accepted = false;
+    JsonNode attemptedReply;
     std::string reason = response.error;
     bool factsUnchanged = true;
     for(const auto * key : {"heroes","towns","resources","visible_objects","shipyards","frontiers","victory"})
@@ -356,6 +357,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     {
         JsonParsingSettings parser; parser.strict = true; parser.mode = JsonParsingSettings::JsonFormatMode::JSON;
         JsonNode reply(response.output.data(),response.output.size(),parser,"NK3 strategic reply");
+        attemptedReply=reply;
         const auto & usage = static_cast<const JsonNode &>(reply)["usage"];
         if(usage["known"].isBool() && usage["known"].Bool() && boundedInteger(usage["input_tokens"],0,1000000000)
             && boundedInteger(usage["output_tokens"],0,1000000000))
@@ -389,6 +391,26 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     }
     else if(reason.empty()) reason = "stale_or_cancelled_strategic_reply";
     arbiter.finished(elapsed,consumed);
+    // Use the same bounded, saved own-result history as native actions. A
+    // controller-valid policy can still be refused by the engine; the next
+    // permitted request must not mistake that proposal for installed intent.
+    JsonNode action;
+    action["kind"].String()="strategic_decision";
+    action["request_id"]=request["request_id"];
+    action["decision"]=attemptedReply["decision"];
+    action["reason"].String()=reason.substr(0,256);
+    action["installed_revision"]=campaign.plan()["revision"];
+    action["proposed_goals"].Vector();
+    if(attemptedReply["plan"]["goals"].isVector())
+        for(const auto & goal:attemptedReply["plan"]["goals"].Vector())
+        {
+            if(!goal.isStruct() || action["proposed_goals"].Vector().size()>=12) continue;
+            JsonNode summary;
+            for(const auto * field:{"id","kind","actor_ref","target_ref","depends_on"}) summary[field]=goal[field];
+            action["proposed_goals"].Vector().push_back(summary);
+        }
+    externalai::recordResult(persisted["memory"],request["identity"]["day"].Integer(),action,false);
+    persisted["memory"]["recent_results"].Vector().back()["outcome"].String()=accepted ? "strategy_accepted" : "strategy_rejected";
     trace["accepted"].Bool() = accepted;
     trace["fallback_reason"].String() = reason;
     trace["elapsed_ms"].Integer() = elapsed;

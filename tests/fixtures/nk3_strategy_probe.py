@@ -107,6 +107,15 @@ if mode=='economy':
     reply['assignments']=[dict(hero_ref=hero['ref'],role='defender')]
     reply['reconsider_when']=[dict(goal_id='income',kind='deadline_missed')]
 if mode=='stale':reply['identity']['generation']='old'
+if mode=='rejection_feedback' and r['identity']['revision']>0:
+    hero=r['observation']['heroes'][0]['ref']
+    goal.update(id='hold-a',kind='defend_area',actor_ref=hero,target_ref=town,building_id=-1,
+                min_army_value=0,deadline_day=r['observation']['day']+1,
+                required_capabilities=['land'],complete_when=dict(kind='held_until',value=r['observation']['day']+1))
+    if not any(item.get('outcome')=='strategy_rejected' for item in r['memory'].get('recent_results',[])):
+        plan['goals'].append(dict(goal,id='hold-b'))
+    reply['assignments']=[dict(hero_ref=hero,role='main')]
+    reply['reconsider_when']=[dict(goal_id='hold-a',kind='deadline_missed')]
 if mode=='invalid':plan['goals'][0]['required_capabilities']=['fly']
 if mode in ('timeout','slow'):
     import time

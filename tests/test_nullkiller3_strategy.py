@@ -1,6 +1,7 @@
 """One strategic exchange creates a goal and native play continues on rejection."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,53 @@ CLI=ROOT/'scripts/playtest.py'
 @unittest.skipUnless(sys.platform=='darwin' and os.environ.get('VCMI_NK3_STRATEGY_CONFIG'),
                      'requires a separate NK3 build and private strategic fixture')
 class NativeStrategicExchangeTest(unittest.TestCase):
+    def test_native_rejection_is_visible_to_next_strategy_request(self):
+        config=json.loads(Path(os.environ['VCMI_NK3_STRATEGY_CONFIG']).read_text())
+        output=Path(tempfile.mkdtemp(prefix='nk3-feedback-',dir=ROOT/'.build/playtests'))
+        print('\nNK3 feedback evidence:',output,flush=True)
+        config.update(players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='model',references={},
+                      controller=[sys.executable,str(ROOT/'tests/fixtures/nk3_strategy_probe.py')],
+                      controller_sources=[str(ROOT/'tests/fixtures/nk3_strategy_probe.py')],
+                      purpose='integration',case_id='nk3-feedback',headless=True,max_seconds=30,
+                      decision_timeout_seconds=5,experience_mode='off',review_interval_days=0)
+        config.pop('save_resource',None)
+        path=output/'config.json';path.write_text(json.dumps(config));run=output/'run'
+        subprocess.run([sys.executable,str(CLI),'prepare','--config',str(path),'--out',str(run)],check=True,capture_output=True)
+        env=dict(os.environ,NK3_PROBE_MODE='rejection_feedback');env.pop('VCMI_NK3_SEED_CAMPAIGN',None)
+        records=[];decoder=json.JSONDecoder()
+        with (output/'driver.log').open('w') as log:
+            child=subprocess.Popen([sys.executable,str(CLI),'run','--run',str(run)],env=env,stdout=log,stderr=subprocess.STDOUT)
+            try:
+                deadline=time.monotonic()+35
+                while child.poll() is None and time.monotonic()<deadline:
+                    text=(run/'runtime.log').read_text(errors='replace') if (run/'runtime.log').exists() else ''
+                    text=re.sub(r'\x1b\[[0-9;]*m','',text);records=[]
+                    for match in re.finditer(r'NK3_STRATEGY (\{)',text):
+                        try:record=decoder.raw_decode(text[match.start(1):])[0]
+                        except ValueError:continue
+                        if record.get('requested'):records.append(record)
+                    if len(records)>=3:break
+                    time.sleep(.05)
+            finally:
+                (run/'STOP').touch(exist_ok=True);child.wait(timeout=15)
+        self.assertTrue(json.loads((run/'launch.json').read_text())['cleanup_complete'])
+        self.assertTrue(json.loads((run/'launch.json').read_text())['protected_files_unchanged'])
+        self.assertGreaterEqual(len(records),3,str(output))
+        self.assertTrue(records[0]['accepted'])
+        self.assertFalse(records[1]['accepted'])
+        self.assertEqual(records[1]['fallback_reason'],'conflicting_hero_obligations')
+        requests=sorted((json.loads(p.read_text()) for p in (run/'decisions').glob('*/request.json')),
+                        key=lambda x:int(x['request_id'].rsplit(':',1)[1]))
+        result=next((item for item in requests[2]['memory']['recent_results']
+                     if item['outcome']=='strategy_rejected'),None)
+        self.assertIsNotNone(result,'next model request hides native strategic rejection')
+        self.assertEqual(result['action']['kind'],'strategic_decision')
+        self.assertEqual(result['action']['request_id'],requests[1]['request_id'])
+        self.assertEqual(result['action']['reason'],'conflicting_hero_obligations')
+        self.assertEqual(result['action']['installed_revision'],records[0]['revision'])
+        self.assertEqual([g['id'] for g in result['action']['proposed_goals']],['hold-a','hold-b'])
+        self.assertTrue(records[2]['accepted'],'controller did not use native rejection feedback')
+
     def test_strategy_goal_and_invalid_reply_fallback_through_recorder(self):
         config=json.loads(Path(os.environ['VCMI_NK3_STRATEGY_CONFIG']).read_text())
         output=Path(tempfile.mkdtemp(prefix='nk3-strategy-',dir=ROOT/'.build/playtests'))
