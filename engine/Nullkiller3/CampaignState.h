@@ -1,6 +1,7 @@
 #pragma once
 
 #include "json/JsonNode.h"
+#include <boost/uuid/detail/sha1.hpp>
 #include <algorithm>
 #include <functional>
 #include <cmath>
@@ -381,12 +382,16 @@ public:
         return true;
     }
 
-    // Only offered routes for this actor establish current readiness. Missing
-    // observations remain unknown; dependency goals may establish readiness later.
-    bool hasSupportedRoute(const JsonNode & goal,const JsonNode & world) const
+    // Facts for model correction, not a shortlist restricting strategic goals.
+    // Every option is an offered native route; no private map facts are added.
+    JsonNode routeFeedback(const JsonNode & goal,const JsonNode & world) const
     {
+        JsonNode feedback;feedback["goal_id"]=goal["id"];feedback["actor_ref"]=goal["actor_ref"];
+        feedback["target_ref"]=goal["target_ref"];feedback["deadline_day"]=goal["deadline_day"];
+        feedback["supported"].Bool()=false;feedback["assigned_routes"].Vector();feedback["safe_options"].Vector();
         const auto & kind=goal["kind"].String();
-        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier") return true;
+        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier")
+        { feedback["supported"].Bool()=true;return feedback; }
         const auto & entries=kind=="scout_frontier" ? world["frontier_options"] : world["forecasts"]["routes"];
         for(const auto & entry:entries.Vector())
         {
@@ -394,16 +399,64 @@ public:
             if(target!=goal["target_ref"]) continue;
             for(const auto & route:entry["own_arrivals"].Vector())
             {
-                if(route["hero_ref"]!=goal["actor_ref"]
-                    || !integer(route["day"],world["day"].Integer(),goal["deadline_day"].Integer())
-                    || !integer(route["army_value"],goal["min_army_value"].Integer(),1000000000000LL)
-                    || !integer(route["army_loss_estimate"],0,route["army_value"].Integer())) continue;
+                JsonNode option=route;option["issues"].Vector();
+                auto issue=[&](const char * code) {option["issues"].Vector().emplace_back(code);};
+                if(find(world,"heroes",route["hero_ref"]).isNull()
+                    || !integer(route["day"],world["day"].Integer(),2147483647)
+                    || !integer(route["army_value"],0,1000000000000LL)
+                    || !integer(route["army_loss_estimate"],0,1000000000000LL))
+                { if(route["hero_ref"]==goal["actor_ref"]) {issue("incomplete_route_forecast");feedback["assigned_routes"].Vector().push_back(option);} continue; }
                 const auto army=route["army_value"].Integer(),loss=route["army_loss_estimate"].Integer();
-                if(loss<=army*plan()["policy"]["max_loss_ratio"].Float()
-                    && army-loss>=reservedForce(goal["actor_ref"].String(),world)) return true;
+                const auto floor=reservedForce(route["hero_ref"].String(),world);
+                option["retained_force_floor"].Integer()=floor;
+                option["allowed_loss_ratio"]=plan()["policy"]["max_loss_ratio"];
+                if(army<goal["min_army_value"].Integer()) issue("starting_army_below_minimum");
+                if(loss>army*plan()["policy"]["max_loss_ratio"].Float()) issue("loss_exceeds_policy");
+                if(loss>army || army-loss<floor) issue("retained_force_below_reserve");
+                const bool safe=option["issues"].Vector().empty();
+                option["meets_deadline"].Bool()=route["day"].Integer()<=goal["deadline_day"].Integer();
+                if(!option["meets_deadline"].Bool()) issue("arrival_after_deadline");
+                if(safe) feedback["safe_options"].Vector().push_back(option);
+                if(route["hero_ref"]==goal["actor_ref"])
+                {
+                    feedback["supported"].Bool() |= option["issues"].Vector().empty();
+                    feedback["assigned_routes"].Vector().push_back(option);
+                }
             }
         }
-        return false;
+        if(feedback["assigned_routes"].Vector().empty()) feedback["reason"].String()="assigned_actor_route_not_established";
+        else feedback["reason"].String()=feedback["supported"].Bool() ? "supported_route" : "assigned_routes_violate_constraints";
+        return feedback;
+    }
+
+    bool hasSupportedRoute(const JsonNode & goal,const JsonNode & world) const
+    { return routeFeedback(goal,world)["supported"].Bool(); }
+
+    // Arbiter identity tracks constraint failures and offered corrections, not
+    // local path scores or enumeration order. Keep saved facts bounded.
+    std::string routeFeedbackFacts(const JsonNode & goal,const JsonNode & world) const
+    {
+        const auto feedback=routeFeedback(goal,world);
+        JsonNode facts;facts["reason"]=feedback["reason"];facts["supported"]=feedback["supported"];
+        for(const auto * key : {"assigned_routes","safe_options"})
+        {
+            std::set<std::string> options;
+            for(const auto & route:feedback[key].Vector())
+            {
+                JsonNode option;option["hero_ref"]=route["hero_ref"];option["day"]=route["day"];
+                option["issues"]=route["issues"];option["meets_deadline"]=route["meets_deadline"];
+                options.insert(option.toCompactString());
+            }
+            facts[key].Vector();
+            for(const auto & option:options) facts[key].Vector().emplace_back(option);
+        }
+        const auto canonical=facts.toCompactString();
+        boost::uuids::detail::sha1 digest;digest.process_bytes(canonical.data(),canonical.size());
+        unsigned int words[5];digest.get_digest(words);
+        static constexpr char hex[]="0123456789abcdef";
+        std::string result;
+        for(const auto word:words) for(int shift=28;shift>=0;shift-=4) result+=hex[(word>>shift)&15];
+        return result;
     }
 
     JsonNode review(const JsonNode & world,bool checkRoutes=true)

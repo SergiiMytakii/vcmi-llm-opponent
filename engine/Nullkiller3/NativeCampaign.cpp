@@ -681,6 +681,14 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     const auto joint=forecastCommitments(world,campaign,helperSources());
     for(const auto * field:{"commitments","resource_calendar","army_pools","deliveries","stock_at_deadline"}) forecasts[field]=joint[field];
     world["goal_statuses"]=campaign.review(world);
+    world["goal_feedback"].Vector();
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+    {
+        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier") continue;
+        auto feedback=campaign.routeFeedback(goal,world);
+        feedback["status"]=world["goal_statuses"][goal["id"].String()];
+        world["goal_feedback"].Vector().push_back(feedback);
+    }
     observeBuildingProgress();
     observeOperationProgress();
     forecasts["route_assumptions"].String()="All visible town/mine/resource targets, complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";

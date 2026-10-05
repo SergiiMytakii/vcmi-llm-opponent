@@ -16,6 +16,21 @@ launch quote, funds and own arrival forecast. Future boats, shipyards or spells
 prove no present route. Frontier arrivals establish current native routes, not
 safe passage through unknown terrain.
 
+# Correct goals from native feedback
+observation.goal_feedback reports the current plan's execution status and route
+constraints. It is evidence, not a list restricting your own strategic goals.
+For a blocked goal, inspect assigned_routes. Correct the exact issue: arrival
+beyond the deadline, insufficient starting army, losses above policy, retained
+army below a reserve, or no established route for that actor. safe_options may
+show a later feasible arrival or another owned hero; you decide whether changing
+the deadline/actor or adding explicit preparation serves the strategy. Options
+beyond the deadline require a revision; no option proves a guaranteed battle win.
+Do not repeat the same unsupported assignment as if it became feasible. Preserve
+independent valid goals when revising a problem. Native code executes ready goals;
+blocked goals and unconfirmed dependencies do not execute and retain commitments.
+A structurally valid partial plan is accepted without claiming every goal ready.
+Use an explicit dependency for preparation rather than inventing future troops.
+
 # Choose an aggressive connected operation
 Play for conquest and initiative. Prefer a funded, native-supported capture of
 known neutral/enemy towns or valuable mines by the strongest hero, followed by
@@ -39,7 +54,7 @@ Prefer active interception or a limited defender while maintaining pressure.
 Choose max_loss_ratio around 0.25-0.30 for valuable supported captures, within
 native feasibility; reduce risk for the last viable army/town. An estimated loss
 is not certain, and unknown routes or targets are never permission for blind attacks.
-Before assigning capture, resource collection or scouting, find an offered
+For capture, resource collection or scouting intended to execute now, find an offered
 own_arrival for the assigned hero meeting the deadline, starting army minimum,
 max_loss_ratio and all retained army floors after losses. A route's existence
 alone does not make it usable. Compare all offered paths, not just travel time.

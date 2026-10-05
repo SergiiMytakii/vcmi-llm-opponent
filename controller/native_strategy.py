@@ -29,7 +29,10 @@ def references(request):
 
 
 def evidence(request):
-    return campaign_evidence({**request, 'actions': []})
+    refs = campaign_evidence({**request, 'actions': []})
+    if 'goal_feedback' in request['observation']:
+        refs.append('observation:goal_feedback')
+    return sorted(set(refs))
 
 
 def validate_request(request):

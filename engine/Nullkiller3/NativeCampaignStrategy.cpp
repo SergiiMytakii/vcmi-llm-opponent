@@ -150,7 +150,12 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         const auto & status = world["goal_statuses"][goal["id"].String()];
         const auto & why = status["reason"].String();
         if(why == "no_supported_route" || why == "executor_no_longer_owned" || why == "deadline_missed" || why=="target_no_longer_owned" || why=="dependency_failed" || why=="force_floor_breached" || why=="force_continuity_unconfirmed")
-            result.push_back({"commitment:"+goal["id"].String(),why,true,true,actionable,true});
+        {
+            auto facts=why;
+            if(why=="no_supported_route")
+                facts=operationIdentity(goal).toCompactString()+campaign.routeFeedbackFacts(goal,world);
+            result.push_back({"commitment:"+goal["id"].String(),facts,true,true,actionable,true});
+        }
     }
     bool exhausted=!campaign.plan().isNull();
     int64_t completedDay=0;
@@ -274,7 +279,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     request["signals"] = trace["signals"];
     request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
     request["budget"]["tokens"].Integer() = arbiter.remainingBudget().tokens;
-    for(const auto * key : {"day","resources","victory","rules"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());

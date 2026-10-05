@@ -249,8 +249,6 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     else if(reply["decision"].String() != "retain" || !reply["plan"].isNull() || current.plan().isNull())
         return reject("invalid_strategic_retention");
     trial.review(freshWorld);
-    for(const auto & [id,status]:trial.statuses().Struct())
-        if(status["reason"].String()=="no_supported_route") return reject("goal_has_no_supported_route");
     std::map<std::string, const JsonNode *> goals;
     for(const auto & goal : trial.plan()["goals"].Vector()) goals[goal["id"].String()] = &goal;
     const auto & assignments = reply["assignments"];
