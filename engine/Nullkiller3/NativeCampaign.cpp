@@ -129,7 +129,7 @@ bool NativeCampaign::repairDeliverySources(NK2AI::Nullkiller & ai)
                     && obligation["kind"].String()!="preserve_force") compatible=false;
             if(!compatible) continue;
             const auto strength=helper->estimateCombatValue();
-            const auto floor=campaign.reservedForce(reference(helper),world,sources,goal["id"].String());
+            const auto floor=campaign.exchangeForce(reference(helper),world,sources,goal["id"].String());
             const auto surplus=strength>floor ? strength-floor : 0;
             if(!surplus || actor->estimateCombatValue()+surplus<goal["complete_when"]["value"].Integer()) continue;
             auto prospectiveSources=sources;
@@ -192,7 +192,7 @@ bool NativeCampaign::locallyRepairedCourierLoss(NK2AI::Nullkiller & ai,const std
         const auto * actor=dynamic_cast<const CGHeroInstance *>(resolve(ai,goal["actor_ref"]));
         const auto * source=dynamic_cast<const CGHeroInstance *>(resolve(ai,JsonNode(sources.at(goal["id"].String()))));
         if(!actor || !source || actor->getOwner()!=ai.playerID || source->getOwner()!=ai.playerID) return false;
-        const auto floor=campaign.reservedForce(sources.at(goal["id"].String()),world,sources,goal["id"].String());
+        const auto floor=campaign.exchangeForce(sources.at(goal["id"].String()),world,sources,goal["id"].String());
         const auto strength=source->estimateCombatValue();
         if(actor->estimateCombatValue()+(strength>floor ? strength-floor : 0)<goal["complete_when"]["value"].Integer()) return false;
         for(const auto & dependency:goal["depends_on"].Vector())
@@ -339,6 +339,20 @@ void NativeCampaign::recordDelivery(NK2AI::Nullkiller & ai, const CGHeroInstance
     if(const auto b=aliases.find(std::to_string(source->id.getNum()));b!=aliases.end()) donors.insert(externalai::objectReference(b->second));
     for(const auto * town:ai.cc->getTownsInfo())
         if(town->getUpperArmy()==source) donors.insert(reference(town));
+    JsonNode transfer;transfer["kind"].String()="army_transfer";
+    transfer["recipient_ref"].String()=recipient;transfer["source_refs"].Vector();
+    for(const auto & donor:donors) transfer["source_refs"].Vector().emplace_back(donor);
+    transfer["recipient_before"].Integer()=receiverBefore;transfer["recipient_after"].Integer()=receiver->estimateCombatValue();
+    transfer["source_before"].Integer()=sourceBefore;transfer["source_after"].Integer()=source->estimateCombatValue();
+    transfer["affected_operations"].Vector();
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+        if(goal["actor_ref"].isString() && donors.count(goal["actor_ref"].String())
+            && campaign.holdsCommitment(goal["id"].String())
+            && (goal["kind"].String()=="capture_target" || goal["kind"].String()=="secure_resource")
+            && source->estimateCombatValue()<goal["min_army_value"].Integer())
+            transfer["affected_operations"].Vector().push_back(operationIdentity(goal));
+    externalai::recordResult(persisted["memory"],world["day"].Integer(),transfer,false);
+    persisted["memory"]["recent_results"].Vector().back()["outcome"].String()="transfer_observed";
     for(const auto & goal:campaign.plan()["goals"].Vector())
         if(goal["kind"].String()=="reinforce_hero" && goal["actor_ref"].String()==recipient
             && donors.count(campaign.deliverySource(goal,helperSources()))
@@ -411,6 +425,8 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["in_boat"].Bool() = hero->inBoat();
         item["army_value"].Integer() = hero->estimateCombatValue();
         item["strength"]["army_ai_value"] = item["army_value"];
+        item["strength"]["hero_multiplier"].Float()=hero->getHeroStrength();
+        item["strength"]["hero_combat_value"].Integer()=hero->estimateHeroCombatValue();
         item["movement"].Integer() = hero->movementPointsRemaining();
         item["mana"].Integer() = hero->mana;
         item["movement_per_day"].Integer() = hero->movementPointsLimit();
@@ -694,6 +710,11 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     observeBuildingProgress();
     observeOperationProgress();
     world["offensive_preparation"]=offensivePreparation(campaign,world);
+    for(const auto & loss:battleLossSignals(campaign.plan(),persisted["memory"],true))
+    {
+        JsonNode item;item["question"].String()=loss.question;item["facts"].String()=loss.facts;
+        world["offensive_preparation"]["recent_losses"].Vector().push_back(item);
+    }
     world["main_army_idle"]=mainArmyIdle(campaign,world);
     forecasts["route_assumptions"].String()="All visible town/mine/resource targets, complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
     traceCampaign();
@@ -803,7 +824,7 @@ void NativeCampaign::rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals
             if(loss>strength*campaign.plan()["policy"]["max_loss_ratio"].Float()) return false;
             const auto reserve=prospectiveSources
                 ? campaign.reservedForce(reference(path.targetHero),world,*prospectiveSources,executingGoal())
-                : forceReserve(path.targetHero);
+                : campaign.reservedForce(reference(path.targetHero),world,helperSources(),executingGoal());
             if(strength<loss || (!stabilizing && strength-loss<reserve))
             {
                 logAi->trace("NK3 campaign path rejected: goal=%s army=%llu loss=%llu reserve=%llu",goal["id"].String(),strength,loss,reserve);
@@ -904,7 +925,7 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
             if(town && town->getOwner()==ai.playerID)
             {
                 const auto * source=town->getUpperArmy();
-                const auto floor=campaign.reservedForce(reference(source),world,helperSources(),goal["id"].String());
+                const auto floor=campaign.exchangeForce(reference(source),world,helperSources(),goal["id"].String());
                 // Holding remains a live commitment, not another visit. Keep
                 // its role/reserves; a fresh task is useful here only when the
                 // town has another army with surplus that can be acquired.
@@ -936,7 +957,7 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
             if(sources.count(goal["id"].String())) target=resolve(ai,JsonNode(sources.at(goal["id"].String())));
             const auto * town=dynamic_cast<const CGTownInstance *>(target);
             if(!actor || !town || town->getOwner()!=ai.playerID) continue;
-            const auto floor=campaign.reservedForce(reference(town),world,sources,goal["id"].String());
+            const auto floor=campaign.exchangeForce(reference(town),world,sources,goal["id"].String());
             const auto sourceValue=town->getUpperArmy()->estimateCombatValue();
             const auto surplus=sourceValue>floor ? sourceValue-floor : 0;
             const auto required=goal["complete_when"]["value"].Integer();
@@ -1163,6 +1184,45 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
         };
         if(!withinRisk(task,0)) return 0;
     }
+    auto referenceOf=[&](const CGHeroInstance * hero) {
+        const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
+        const auto found=aliases.find(std::to_string(hero->id.getNum()));
+        return found==aliases.end() ? std::string() : externalai::objectReference(found->second);
+    };
+    // Native chains must not consume another operation's starting force, or
+    // consolidate a stronger commander into a weaker one without a named
+    // reinforcement intention. Never reverse a precomputed chain at meeting.
+    std::function<bool(const NK2AI::Goals::TSubgoal &,int)> exchangesAllowed = [&](const auto & item,int depth) {
+        if(depth>16) return false;
+        if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
+            for(const auto & child:composition->decompose(nullptr)) if(!exchangesAllowed(child,depth+1)) return false;
+        const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get());
+        if(!chain) return true;
+        const auto & path=chain->getPath();
+        if(!path.heroArmy || !path.targetHero) return false;
+        const auto & spending=task->strategicGoalID;
+        bool explicitDelivery=false;
+        for(const auto & goal:campaign.plan()["goals"].Vector())
+            explicitDelivery |= goal["id"].String()==spending && goal["kind"].String()=="reinforce_hero"
+                && goal["actor_ref"].String()==referenceOf(path.targetHero);
+        std::set<const CGHeroInstance *> participants{path.targetHero};
+        for(const auto & node:path.nodes) if(node.targetHero) participants.insert(node.targetHero);
+        uint64_t available=0;bool protectedDonor=false;
+        for(const auto * hero:participants)
+        {
+            const auto army=hero->estimateCombatValue();
+            const auto ref=referenceOf(hero);
+            const auto floor=hero==path.targetHero ? 0 : campaign.exchangeForce(ref,world,helperSources(),spending);
+            protectedDonor |= floor>0;
+            available+=army-std::min<uint64_t>(army,floor);
+            if(hero!=path.targetHero && !explicitDelivery && army>path.targetHero->estimateCombatValue()
+                && hero->getHeroStrength()>path.targetHero->getHeroStrength()) return false;
+        }
+        // The path has no residual-donor-army quote. A protected donor is
+        // usable only when its observed surplus proves the offered chain.
+        return !protectedDonor || path.heroArmy->estimateCombatValue()<=available;
+    };
+    if(!exchangesAllowed(task,0)) return 0;
     std::function<bool(const NK2AI::Goals::TSubgoal &,int)> hiringAllowed = [&](const auto & item,int depth) {
         if(depth>16) return false;
         if(const auto * hire=dynamic_cast<const NK2AI::Goals::RecruitHero *>(item.get()))
@@ -1278,7 +1338,7 @@ uint64_t NativeCampaign::forceReserve(const CArmedInstance * army) const
     const auto ref = externalai::objectReference(found->second);
     std::string spending;
     { std::lock_guard lock(executionMutex); spending=deliveryGoal.empty() ? spendingGoal : deliveryGoal; }
-    return campaign.reservedForce(ref,world,helperSources(),spending);
+    return campaign.exchangeForce(ref,world,helperSources(),spending);
 }
 const CGHeroInstance * NativeCampaign::deliveryReceiver(const CGHeroInstance * first, const CGHeroInstance * second) const
 {

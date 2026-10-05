@@ -643,6 +643,24 @@ public:
         }
         return result;
     }
+    // Starting force is protected only from unrelated exchanges. Its own
+    // operation may spend that force under the existing battle-loss policy.
+    int64_t operationForce(const std::string & ref,const JsonNode & world,const std::string & spendingGoal = {}) const
+    {
+        const auto pool=armyPool(ref,world);
+        int64_t floor=0;
+        for(const auto & goal:plan()["goals"].Vector())
+        {
+            const auto & kind=goal["kind"].String(), & id=goal["id"].String();
+            if(id==spendingGoal || !holdsCommitment(id)
+                || (kind!="capture_target" && kind!="secure_resource")
+                || !goal["actor_ref"].isString() || armyPool(goal["actor_ref"].String(),world)!=pool) continue;
+            floor=std::max(floor,goal["min_army_value"].Integer());
+        }
+        for(const auto & hero:world["heroes"].Vector()) if(armyPool(hero["ref"].String(),world)==pool)
+            return std::min(floor,hero["army_value"].Integer());
+        return 0;
+    }
     int64_t reservedForce(const std::string & ref, const JsonNode & world,
         const std::map<std::string,std::string> & replacements = {}, const std::string & spendingGoal = {}) const
     {
@@ -669,6 +687,11 @@ public:
                 pledged = std::max(pledged, std::max<int64_t>(0,required-current));
         }
         return floor + pledged;
+    }
+    int64_t exchangeForce(const std::string & ref,const JsonNode & world,
+        const std::map<std::string,std::string> & replacements = {},const std::string & spendingGoal = {}) const
+    {
+        return std::max(reservedForce(ref,world,replacements,spendingGoal),operationForce(ref,world,spendingGoal));
     }
     JsonNode reservedResources(const std::string & spendingGoal = {}) const
     {

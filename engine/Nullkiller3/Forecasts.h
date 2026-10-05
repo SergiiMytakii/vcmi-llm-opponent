@@ -263,7 +263,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
     for(const auto & [pool,power]:armies)
     {
         JsonNode item;item["holder_ref"].String()=pool;item["army_value"].Integer()=power;
-        item["reserved_value"].Integer()=campaign.reservedForce(pool,world,replacements);
+        item["reserved_value"].Integer()=campaign.exchangeForce(pool,world,replacements);
         item["unpledged_now"].Integer()=std::max<int64_t>(0,power-item["reserved_value"].Integer());
         for(const auto & ref:aliases[pool]) item["aliases"].Vector().emplace_back(ref);
         result["army_pools"].Vector().push_back(item);
@@ -291,7 +291,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
                     if(arrival["hero_ref"].String()==traveler
                         && (!best || arrival["day"].Integer()<(*best)["day"].Integer()
                             || (arrival["day"]==(*best)["day"] && arrival["army_loss_estimate"].Integer()<(*best)["army_loss_estimate"].Integer()))) best=&arrival;
-            const auto floor=campaign.reservedForce(pool,world,replacements,id);
+            const auto floor=campaign.exchangeForce(pool,world,replacements,id);
             delivery["source_army_now"].Integer()=armies.at(pool);delivery["source_floor"].Integer()=floor;
             delivery["recipient_army_now"].Integer()=armies.at(recipient);
             if(best)

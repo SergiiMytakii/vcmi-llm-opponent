@@ -76,6 +76,36 @@ known neutral/enemy towns or valuable mines by the strongest hero, followed by
 reinforcement and the next objective. Use helpers for collection, scouting and
 limited defense. A substantial main army should advance or obtain reinforcement,
 not spend several days idle merely because enemy strength is unknown.
+For conquest, prefer a currently supported enemy-town capture over a mine or
+scouting. When choosing otherwise, compare that offered town explicitly in
+alternatives and give the concrete reason in reason: defense, losses, travel,
+necessary preparation or a more valuable operation. Do not force an unsupported
+attack merely because the target is a town.
+
+# Recovery and command continuity
+After substantial battle loss or loss of the main executor, compare
+commander_options before assigning the new main. Compare hero_multiplier,
+hero_combat_value, mana, movement and offered source/meeting options, not just
+current troops or hero level. These are native estimates, not a battle guarantee.
+Choose a connected recovery operation: reinforce_hero to receive own available
+forces, then a capture depending on that receipt when a follow-up route is
+supported. If the attack forecast after delivery is unknown, keep the funded
+reinforcement as the next concrete task and reconsider attacks after arrival;
+do not invent its route. Preserve required defense and shared resource budgets.
+Helpers scout/collect while the chosen commander rebuilds. If immediate safe
+capture is better, choose it; if recovery cannot be established, explicitly
+choose preservation or purposeful scouting and explain the missing condition.
+Bought town stock is not delivered reinforcement. A recovery step completes
+only after the named recipient's confirmed handoff, followed by fresh route
+validation of the next operation.
+An army_transfer result preserves affected_operations. Continue the same target
+with the appropriate commander or explain why it must be abandoned/prepared.
+Changing the army holder is not itself a reason to replace conquest with scouting.
+A transfer to a weaker commander needs a concrete operational benefit; do not
+strip the stronger commander for an unrelated chain. Native protection preserves
+another active capture's starting-force minimum, while its own battles still
+use the accepted loss policy.
+
 Compare two or three approaches briefly. Unknown/unbounded enemy strength and
 straight-line advance scenarios alone do not establish an imminent assault.
 Use observed enemy movement, established approaches and neutral barriers; if

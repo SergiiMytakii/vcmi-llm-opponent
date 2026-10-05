@@ -15,8 +15,8 @@ from prompt_context import (compact_json, encode_request, context_parts, bounded
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL = 'gpt-5.6-terra'
-REASONING_EFFORT = 'none'
+MODEL = 'gpt-6.1-sol'
+REASONING_EFFORT = 'low'
 VERSION = 'codex-cli 0.160.0'
 TIMEOUT = 120  # NK3: recorder 130s, native exchange 140s.
 LEGACY_TIMEOUT = 60  # Deprecated protocol 1 retains its native 70s boundary.

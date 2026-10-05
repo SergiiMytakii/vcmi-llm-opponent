@@ -144,6 +144,8 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         const auto idle=idleArmySignals(campaign,world,actionable);
         result.insert(result.end(),idle.begin(),idle.end());
     }
+    const auto transfers=operationTransferSignals(campaign,world,persisted["memory"],actionable);
+    result.insert(result.end(),transfers.begin(),transfers.end());
     auto losses=battleLossSignals(campaign.plan(),persisted["memory"],actionable);
     std::erase_if(losses,[&](const auto & signal) {
         if(!locallyRepairedCourierLoss(ai,signal.question.substr(std::string("battle_loss:").size()))) return false;

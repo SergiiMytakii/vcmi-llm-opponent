@@ -272,6 +272,29 @@ inline std::vector<StrategicSignal> battleLossSignals(const JsonNode & plan, con
 }
 // A newly numbered plan is not a newly observed problem. Aggregate semantic
 // blockers independently of goal IDs, deadlines, prose and revision numbers.
+inline std::vector<StrategicSignal> operationTransferSignals(const CampaignState & campaign,const JsonNode & world,const JsonNode & memory,bool actionable)
+{
+    std::map<std::string,std::string> latest;
+    for(const auto & result:memory["recent_results"].Vector())
+    {
+        const auto & action=result["action"];
+        if(action["kind"].String()!="army_transfer") continue;
+        for(const auto & operation:action["affected_operations"].Vector())
+            for(const auto & goal:campaign.plan()["goals"].Vector())
+                if(campaign.holdsCommitment(goal["id"].String()) && operationIdentity(goal)==operation
+                    && std::any_of(world["heroes"].Vector().begin(),world["heroes"].Vector().end(),[&](const auto & hero) {
+                        return hero["ref"]==goal["actor_ref"] && hero["army_value"].Integer()<goal["min_army_value"].Integer();
+                    }))
+                {
+                    JsonNode facts;facts["operation"]=operation;facts["recipient_ref"]=action["recipient_ref"];
+                    facts["recipient_after"]=action["recipient_after"];facts["source_after"]=action["source_after"];
+                    latest["operation_transfer:"+goal["target_ref"].String()]=facts.toCompactString();
+                }
+    }
+    std::vector<StrategicSignal> signals;
+    for(const auto & [question,facts]:latest) signals.push_back({question,facts,true,true,actionable,false});
+    return signals;
+}
 inline std::string repairQuestionFacts(const JsonNode & plan, const JsonNode & blockers, const JsonNode & statuses)
 {
     std::set<std::string> problems;
@@ -365,6 +388,15 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
             for(const auto & [id,goal]:goals)
                 if((*goal)["actor_ref"]==assignment["hero_ref"] && ((*goal)["kind"].String()=="capture_target" || (*goal)["kind"].String()=="secure_resource")
                     && trial.statuses()[id]["state"].String()=="ready") supported=true;
+            if(!supported)
+            {
+                const auto preparation=forecastCommitments(freshWorld,trial);
+                for(const auto & [id,goal]:goals)
+                    if((*goal)["actor_ref"]==assignment["hero_ref"] && (*goal)["kind"].String()=="reinforce_hero"
+                        && trial.statuses()[id]["state"].String()=="ready")
+                        for(const auto & delivery:preparation["deliveries"].Vector())
+                            if(delivery["goal_id"].String()==id && delivery["status"].String()=="conditional") supported=true;
+            }
             if(!supported) return reject("weaker_main_without_supported_offense");
         }
     for(const auto & [id, goal] : goals)

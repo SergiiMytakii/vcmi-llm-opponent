@@ -3,6 +3,39 @@
 
 namespace nullkiller3
 {
+// Sources are independent alternatives for this recipient, never a joint promise.
+inline JsonNode reinforcementSources(const JsonNode & actor,const JsonNode & world)
+{
+    JsonNode result;result.Vector();
+    std::set<std::string> offeredPools;
+    auto offerSource=[&](const JsonNode & town,bool isTown)
+    {
+        const auto poolRef=CampaignState::armyPool(town["ref"].String(),world);
+        if((poolRef==actor.String() && !isTown) || !offeredPools.insert(poolRef).second) return;
+        JsonNode source;source["source_ref"]=town["ref"];source["army_pool_ref"].String()=poolRef;
+        source["kind"].String()=isTown ? "town" : "hero";source["meeting_routes"].Vector();
+        for(const auto & pool:world["forecasts"]["army_pools"].Vector())
+            if(pool["holder_ref"].String()==poolRef && poolRef!=actor.String()) source["unpledged_army_value"]=pool["unpledged_now"];
+        for(const auto & alternative:world["forecasts"]["alternatives"].Vector())
+            if(alternative["approach"].String()=="offense" && alternative["town_ref"]==town["ref"])
+                source["fundable_recruitment_value"]=alternative["army_purchased_value"];
+        for(const auto & entry:world["forecasts"]["routes"].Vector())
+            for(const auto & route:entry["own_arrivals"].Vector())
+                if((entry["target_ref"]==town["ref"] && route["hero_ref"]==actor)
+                    || (!isTown && entry["target_ref"]==actor && route["hero_ref"]==town["ref"]))
+                {
+                    JsonNode meeting=route;meeting["destination_ref"]=entry["target_ref"];
+                    source["meeting_routes"].Vector().push_back(meeting);
+                }
+        source["status"].String()=source["meeting_routes"].Vector().empty() ? "meeting_route_unknown" : "conditional_meeting";
+        source["assumptions"].String()="Independent source alternative, not a joint allocation. Retained defense, losses, funds, stack packing and delivery remain native constraints; no post-meeting attack is promised.";
+        if(source["unpledged_army_value"].Integer()>0 || source["fundable_recruitment_value"].Integer()>0)
+            result.Vector().push_back(source);
+    };
+    for(const auto & town:world["towns"].Vector()) offerSource(town,true);
+    for(const auto & hero:world["heroes"].Vector()) offerSource(hero,false);
+    return result;
+}
 // Advice from offered own routes and physical pools, never a promised future battle.
 inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNode & world)
 {
@@ -68,33 +101,15 @@ inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNo
         target["reinforced_route_assumptions"].String()="Offered native path army above the current army requires its native exchanges; separate source options do not prove this attack route.";
         result["targets"].Vector().push_back(target);
     }
-    std::set<std::string> offeredPools;
-    auto offerSource=[&](const JsonNode & town,bool isTown)
+    result["reinforcement_sources"]=reinforcementSources(actor,world);
+    result["commander_options"].Vector();
+    for(const auto & hero:world["heroes"].Vector())
     {
-        const auto poolRef=CampaignState::armyPool(town["ref"].String(),world);
-        if((poolRef==actor.String() && !isTown) || !offeredPools.insert(poolRef).second) return;
-        JsonNode source;source["source_ref"]=town["ref"];source["army_pool_ref"].String()=poolRef;
-        source["kind"].String()=isTown ? "town" : "hero";source["meeting_routes"].Vector();
-        for(const auto & pool:world["forecasts"]["army_pools"].Vector())
-            if(pool["holder_ref"].String()==poolRef && poolRef!=actor.String()) source["unpledged_army_value"]=pool["unpledged_now"];
-        for(const auto & alternative:world["forecasts"]["alternatives"].Vector())
-            if(alternative["approach"].String()=="offense" && alternative["town_ref"]==town["ref"])
-                source["fundable_recruitment_value"]=alternative["army_purchased_value"];
-        for(const auto & entry:world["forecasts"]["routes"].Vector())
-            for(const auto & route:entry["own_arrivals"].Vector())
-                if((entry["target_ref"]==town["ref"] && route["hero_ref"]==actor)
-                    || (!isTown && entry["target_ref"]==actor && route["hero_ref"]==town["ref"]))
-                {
-                    JsonNode meeting=route;meeting["destination_ref"]=entry["target_ref"];
-                    source["meeting_routes"].Vector().push_back(meeting);
-                }
-        source["status"].String()=source["meeting_routes"].Vector().empty() ? "meeting_route_unknown" : "conditional_meeting";
-        source["assumptions"].String()="Independent source alternative, not a joint allocation. Retained defense, losses, funds, stack packing and delivery remain native constraints; no post-meeting attack is promised.";
-        if(source["unpledged_army_value"].Integer()>0 || source["fundable_recruitment_value"].Integer()>0)
-            result["reinforcement_sources"].Vector().push_back(source);
-    };
-    for(const auto & town:world["towns"].Vector()) offerSource(town,true);
-    for(const auto & hero:world["heroes"].Vector()) offerSource(hero,false);
+        JsonNode option;
+        for(const auto * key:{"ref","army_value","strength","movement","mana","movement_per_day"}) option[key]=hero[key];
+        option["reinforcement_sources"]=reinforcementSources(hero["ref"],world);
+        result["commander_options"].Vector().push_back(option);
+    }
     return result;
 }
 
