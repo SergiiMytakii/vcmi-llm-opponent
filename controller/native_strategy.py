@@ -34,6 +34,8 @@ def evidence(request):
         refs.append('observation:goal_feedback')
     if 'offensive_preparation' in request['observation']:
         refs.append('observation:offensive_preparation')
+    if 'main_army_idle' in request['observation']:
+        refs.append('observation:main_army_idle')
     return sorted(set(refs))
 
 

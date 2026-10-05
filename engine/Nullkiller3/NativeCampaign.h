@@ -69,21 +69,22 @@ class NativeCampaign
     void observeBuildingProgress();
     void observeOperationProgress();
     void recordCheckpointBaseline();
-    std::vector<StrategicSignal> strategicSignals(NK2AI::Nullkiller & ai);
+    std::vector<StrategicSignal> strategicSignals(NK2AI::Nullkiller & ai,bool includeIdle);
 
     std::string reference(const CGObjectInstance * object);
     const CGObjectInstance * resolve(const NK2AI::Nullkiller & ai, const JsonNode & ref) const;
     std::map<std::string,std::string> helperSources() const;
     bool repairDeliverySources(NK2AI::Nullkiller & ai);
     bool locallyRepairedCourierLoss(NK2AI::Nullkiller & ai,const std::string & actor);
-    NK2AI::Goals::TGoalVec deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * recipient,const CGObjectInstance * source) const;
+    NK2AI::Goals::TGoalVec deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * recipient,const CGObjectInstance * source,bool collectFromTown = false) const;
     NK2AI::Goals::TGoalVec repairRoute(NK2AI::Nullkiller & ai, const CGHeroInstance * hero, const CGObjectInstance * destination) const;
     void rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals::TGoalVec generated,
                        const JsonNode & goal, const NK2AI::Nullkiller & ai,
                        const std::map<std::string,std::string> * prospectiveSources = nullptr);
 public:
     explicit NativeCampaign(const JsonNode & saved);
-    bool reviewStrategy(NK2AI::Nullkiller & ai);
+    bool reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle = false);
+    bool reviewIdleArmy(NK2AI::Nullkiller & ai);
     void cancelExchange() { exchangeCancelled = true; }
     void cancel() { stopping = true; cancelExchange(); }
     bool isStopping() const { return stopping; }

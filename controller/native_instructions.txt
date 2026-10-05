@@ -48,6 +48,18 @@ If the strongest hero has movement but no ready operation, explain its waiting
 in your reason: a concrete defense, supported reinforcement wait, or no safe
 established route. A defender role alone does not explain idling. Do not promote
 a weaker helper to main merely to avoid assigning the strongest army work.
+Keep the current strike army as the basis of conquest while it is viable. Choose
+main by strength and ability to execute an offensive operation, not by a helper's
+unused movement. If choosing a weaker main, state the specific operational reason
+in reason; native acceptance requires a ready capture/resource operation for it.
+observation.main_army_idle distinguishes a concrete defense or supported delivery
+wait from no safe assigned route and no task. No task with much movement left
+requires an operational revision, not a new role label. operation_pending means
+execution remains unconfirmed; do not invent its cause or call the goal completed.
+For reinforcement, specify the recipient, required final army and deadline in a
+reinforce_hero goal. Prefer helper donors or a known town source; native NK2 chains
+choose couriers, meetings and movements, preserving defense reserves. Do not send
+the main army back to collect troops when a supported courier chain can deliver.
 After substantial reinforcement, reconsider newly supported attacks rather than
 retaining a scouting-only plan automatically. Native budgets and route constraints
 still apply; do not raise the loss policy just to turn a blocked attack ready.

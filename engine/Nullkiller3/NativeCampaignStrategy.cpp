@@ -130,7 +130,7 @@ void NativeCampaign::recordCheckpointBaseline()
     baseline["offense"]=offensiveCheckpoint(world["offensive_preparation"]);
     persisted["checkpoint_baseline"]=baseline;
 }
-std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller & ai)
+std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller & ai,bool includeIdle)
 {
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
@@ -139,6 +139,11 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     result.insert(result.end(),checkpoint.begin(),checkpoint.end());
     const auto offense=offensiveCheckpointSignals(world,persisted["checkpoint_baseline"],actionable);
     result.insert(result.end(),offense.begin(),offense.end());
+    if(includeIdle)
+    {
+        const auto idle=idleArmySignals(campaign,world,actionable);
+        result.insert(result.end(),idle.begin(),idle.end());
+    }
     auto losses=battleLossSignals(campaign.plan(),persisted["memory"],actionable);
     std::erase_if(losses,[&](const auto & signal) {
         if(!locallyRepairedCourierLoss(ai,signal.question.substr(std::string("battle_loss:").size()))) return false;
@@ -234,7 +239,15 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     }
     return result;
 }
-bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
+bool NativeCampaign::reviewIdleArmy(NK2AI::Nullkiller & ai)
+{
+    ai.updateState();
+    world["main_army_idle"]=mainArmyIdle(campaign,world);
+    logAi->info("NK3_IDLE %s",world["main_army_idle"].toCompactString());
+    if(world["main_army_idle"]["reason"].String()!="no_task") return false;
+    return reviewStrategy(ai,true);
+}
+bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
 {
     ai.aiGw->checkStrategicTurn();
     const std::string mode = environment("VCMI_NK3_MODE");
@@ -249,7 +262,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     if(persisted["checkpoint_baseline"]["offense"].isNull())
         persisted["checkpoint_baseline"]["offense"]=offensiveCheckpoint(world["offensive_preparation"]);
     arbiter.beginTurn(world["day"].Integer(), {280000,120000,40000});
-    auto decision = arbiter.consider(strategicSignals(ai));
+    auto decision = arbiter.consider(strategicSignals(ai,includeIdle));
     JsonNode trace;
     trace["day"] = world["day"];
     trace["player"] = world["player"];
@@ -279,13 +292,14 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
         +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
         +std::to_string(revision)+":"+std::to_string(sequence);
     request["observation"] = world;
+    if(includeIdle) request["observation"]["main_army_idle"]=mainArmyIdle(campaign,world);
     request["memory"] = persisted["memory"];
     request["memory"]["experience_id"] = persisted["experience_id"];
     request["campaign"] = campaign.plan();
     request["signals"] = trace["signals"];
     request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
     request["budget"]["tokens"].Integer() = arbiter.remainingBudget().tokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());

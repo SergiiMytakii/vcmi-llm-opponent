@@ -989,7 +989,7 @@ index 17f79e8f3..03b449dc7 100644
  	if(obj->tempOwner.isValidPlayer() && cb->getPlayerRelations(obj->tempOwner, aiNk->playerID) != PlayerRelations::ENEMIES) //owned or allied objects don't pose any threat
  		return 0;
 diff --git a/AI/Nullkiller2/Engine/Nullkiller.cpp b/AI/Nullkiller2/Engine/Nullkiller.cpp
-index c2adab572..cde8db0b2 100644
+index c2adab572..a2dc6d870 100644
 --- a/AI/Nullkiller2/Engine/Nullkiller.cpp
 +++ b/AI/Nullkiller2/Engine/Nullkiller.cpp
 @@ -9,6 +9,9 @@
@@ -1223,7 +1223,14 @@ index c2adab572..cde8db0b2 100644
  					lockTaskHeroes(selectedTask, HeroLockedReason::HERO_CHAIN);
  					const bool hasRemainingTasks = selectedTaskIndex + 1 < selectedTasks.size();
  					const auto failureAction = chooseTaskFailureAction(hasAnySuccess, hasRemainingTasks, hasUnlockedHeroWithMovement());
-@@ -750,7 +825,8 @@ void Nullkiller::makeTurn()
+@@ -744,15 +819,18 @@ void Nullkiller::makeTurn()
+ 						break;
+ 					}
+ 
++					if(strategicCampaign) strategicCampaign->reviewIdleArmy(*this);
+ 					return;
+ 				}
+ 				hasAnySuccess = true;
  			}
  		}
  
@@ -1232,8 +1239,11 @@ index c2adab572..cde8db0b2 100644
 +			hasAnySuccess |= ResourceTrader::trade(*buildAnalyzer, *cc, getFreeResources());
  		if(!hasAnySuccess)
  		{
++			if(strategicCampaign && strategicCampaign->reviewIdleArmy(*this)) continue;
  			if(hasUnlockedHeroWithMovement())
-@@ -763,7 +839,7 @@ void Nullkiller::makeTurn()
+ 				logAi->debug("Pass %d: No worthwhile task was found at full scan depth. AI turn is complete.", pass);
+ 			else
+@@ -763,21 +841,41 @@ void Nullkiller::makeTurn()
  		}
  
  		for(const auto * heroInfo : cc->getHeroesInfo())
@@ -1241,8 +1251,13 @@ index c2adab572..cde8db0b2 100644
 +			aiGw->pickBestArtifacts(cc, heroInfo);
  
  		if(pass == settings->getMaxPass())
++		{
++			if(strategicCampaign) strategicCampaign->reviewIdleArmy(*this);
  			logAi->warn("MaxPass reached. Terminating AI turn.");
-@@ -773,11 +849,28 @@ void Nullkiller::makeTurn()
++		}
+ 	}
+ }
+ 
  bool Nullkiller::updateStateAndExecutePriorityPass(Goals::TGoalVec & tempResults, const int passIndex)
  {
  	updateState();
@@ -1271,7 +1286,7 @@ index c2adab572..cde8db0b2 100644
  
  		// TODO: Mircea: Should merge recruiting from DefenseBehavior
  		decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
-@@ -883,14 +976,17 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
+@@ -883,14 +981,17 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
  
  bool Nullkiller::executeTask(const Goals::TTask & task)
  {
@@ -1289,7 +1304,7 @@ index c2adab572..cde8db0b2 100644
  		task->accept(aiGw);
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
-@@ -898,20 +994,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
+@@ -898,20 +999,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
  	{
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
@@ -1338,7 +1353,7 @@ index c2adab572..cde8db0b2 100644
  	freeRes.positive();
  	return freeRes;
  }
-@@ -923,6 +1046,7 @@ void Nullkiller::lockResources(const TResources & res)
+@@ -923,6 +1051,7 @@ void Nullkiller::lockResources(const TResources & res)
  
  std::shared_ptr<const CPathsInfo> Nullkiller::getPathsInfo(const CGHeroInstance * h) const
  {

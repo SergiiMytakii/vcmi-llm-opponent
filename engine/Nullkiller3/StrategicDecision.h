@@ -47,6 +47,50 @@ inline JsonNode operationIdentity(const JsonNode & goal)
     for(const auto * field:{"kind","actor_ref","target_ref","min_army_value","required_capabilities","complete_when"}) result[field]=goal[field];
     return result;
 }
+inline JsonNode mainArmyIdle(const CampaignState & campaign,const JsonNode & world)
+{
+    const auto & preparation=world["offensive_preparation"];
+    JsonNode result;result["hero_ref"]=preparation["hero_ref"];result["army_value"]=preparation["army_value"];
+    result["movement"]=preparation["movement"];result["reason"].String()="movement_spent";
+    const JsonNode * hero=nullptr;
+    for(const auto & own:world["heroes"].Vector()) if(own["ref"]==result["hero_ref"]) hero=&own;
+    if(!hero || (*hero)["movement"].Integer()<std::max<int64_t>(500,(*hero)["movement_per_day"].Integer()/2)) return result;
+    result["reason"].String()="no_task";
+    bool assigned=false,ready=false,routeBlocked=false,preparing=false;
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+    {
+        if(goal["actor_ref"]!=result["hero_ref"] || !campaign.holdsCommitment(goal["id"].String())) continue;
+        assigned=true;
+        const auto & status=world["goal_statuses"][goal["id"].String()];
+        ready |= status["state"].String()=="ready";
+        const auto & why=status["reason"].String();
+        routeBlocked |= why=="no_supported_route" || why=="route_not_established" || why=="deadline_unreachable";
+        preparing |= why=="dependency_unconfirmed";
+        if(goal["kind"].String()=="reinforce_hero" && supportedDeliveryWait(world["forecasts"],goal,world["day"].Integer()))
+        { result["reason"].String()="waiting_delivery";result["goal_id"]=goal["id"];return result; }
+        if(goal["kind"].String()=="preserve_force" && why=="holding_preserved_force")
+        { result["reason"].String()="defense";result["goal_id"]=goal["id"];return result; }
+        if((goal["kind"].String()=="defend_area" || goal["kind"].String()=="preserve_force")
+            && status["state"].String()=="ready")
+            for(const auto & town:world["towns"].Vector())
+                if(town["ref"]==goal["target_ref"] && town["position"]==(*hero)["position"])
+                { result["reason"].String()="defense";result["goal_id"]=goal["id"];return result; }
+    }
+    if(assigned) result["reason"].String()=ready ? "operation_pending" : preparing ? "waiting_preparation" : routeBlocked ? "no_safe_route" : "operation_pending";
+    return result;
+}
+inline std::vector<StrategicSignal> idleArmySignals(const CampaignState & campaign,const JsonNode & world,bool actionable)
+{
+    const auto idle=mainArmyIdle(campaign,world);
+    if(idle["reason"].String()!="no_task") return {};
+    JsonNode facts=offensiveCheckpoint(world["offensive_preparation"]);facts["safe_targets"].Vector();
+    std::set<std::string> refs;
+    for(const auto & target:world["offensive_preparation"]["targets"].Vector())
+        if(target["earliest_current_safe_day"].isNumber()) refs.insert(target["target_ref"].String());
+    for(const auto & ref:refs) facts["safe_targets"].Vector().emplace_back(ref);
+    auto basis=facts.toCompactString();if(basis.size()>8192) basis=offensiveCheckpoint(world["offensive_preparation"]).toCompactString();
+    return {{"idle_army:"+idle["hero_ref"].String(),basis,true,true,actionable,false}};
+}
 // Only the operation's own participants, not routine treasury changes or
 // unrelated construction, establish whether an acknowledged task progressed.
 inline JsonNode operationOwnFacts(const JsonNode & goal,const JsonNode & own,const std::string & source)
@@ -278,6 +322,18 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
         mainCount += assignment["role"].String() == "main";
     }
     if(mainCount > 1) return reject("competing_main_heroes");
+    const JsonNode * strongest=nullptr;
+    for(const auto & hero:freshWorld["heroes"].Vector())
+        if(!strongest || hero["army_value"].Integer()>(*strongest)["army_value"].Integer()) strongest=&hero;
+    for(const auto & assignment:assignments.Vector())
+        if(strongest && assignment["role"].String()=="main" && assignment["hero_ref"]!=(*strongest)["ref"])
+        {
+            bool supported=false;
+            for(const auto & [id,goal]:goals)
+                if((*goal)["actor_ref"]==assignment["hero_ref"] && ((*goal)["kind"].String()=="capture_target" || (*goal)["kind"].String()=="secure_resource")
+                    && trial.statuses()[id]["state"].String()=="ready") supported=true;
+            if(!supported) return reject("weaker_main_without_supported_offense");
+        }
     for(const auto & [id, goal] : goals)
         if((*goal)["actor_ref"].isString())
         {

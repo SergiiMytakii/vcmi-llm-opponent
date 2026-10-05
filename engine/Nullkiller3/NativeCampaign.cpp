@@ -153,18 +153,18 @@ bool NativeCampaign::repairDeliverySources(NK2AI::Nullkiller & ai)
     }
     return changed;
 }
-NK2AI::Goals::TGoalVec NativeCampaign::deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * actor,const CGObjectInstance * target) const
+NK2AI::Goals::TGoalVec NativeCampaign::deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * actor,const CGObjectInstance * target,bool collectFromTown) const
 {
     using namespace NK2AI;
     if(!actor || !target) return {};
     Goals::TGoalVec generated;
-    if(const auto * town=dynamic_cast<const CGTownInstance *>(target))
+    if(!collectFromTown) generated=Goals::GatherArmyBehavior(actor,target).decompose(&ai);
+    if(collectFromTown) if(const auto * town=dynamic_cast<const CGTownInstance *>(target))
     {
         auto paths=ai.pathfinder->getPathInfo(town->visitablePos(),false);
         std::erase_if(paths,[&](const AIPath & path){return path.targetHero!=actor;});
         generated=Goals::CaptureObjectsBehavior::getVisitGoals(paths,&ai,town,true);
     }
-    else generated=Goals::GatherArmyBehavior(actor,target).decompose(&ai);
     if(generated.empty())
     {
         if(const auto * helper=dynamic_cast<const CGHeroInstance *>(target))
@@ -693,6 +693,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     observeBuildingProgress();
     observeOperationProgress();
     world["offensive_preparation"]=offensivePreparation(campaign,world);
+    world["main_army_idle"]=mainArmyIdle(campaign,world);
     forecasts["route_assumptions"].String()="All visible town/mine/resource targets, complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
     traceCampaign();
 }
@@ -1025,6 +1026,9 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
         }
         const auto countBefore = output.size();
         rememberTasks(output, generated, goal, ai);
+        if(output.size()==countBefore && kind=="reinforce_hero" && !priorityPass && actor
+            && dynamic_cast<const CGTownInstance *>(target))
+            rememberTasks(output,deliveryTasks(ai,actor,target,true),goal,ai);
         logAi->trace("NK3 campaign proposals: goal=%s generated=%zu admitted=%zu",goal["id"].String(),generated.size(),output.size()-countBefore);
         if(output.size() == countBefore && kind != "develop_town" && !stabilizing)
         {
