@@ -17,6 +17,56 @@ CLI=ROOT/'scripts/playtest.py'
 @unittest.skipUnless(sys.platform=='darwin' and os.environ.get('VCMI_NK3_STRATEGY_CONFIG'),
                      'requires a separate NK3 build and private strategic fixture')
 class NativeStrategicExchangeTest(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('VCMI_NK3_HOLDING_CONFIG'),
+                         'requires the explicit saved S-duel holding reproduction')
+    def test_holding_preserves_movement_after_unproductive_visit(self):
+        config=json.loads(Path(os.environ['VCMI_NK3_HOLDING_CONFIG']).read_text())
+        output=Path(tempfile.mkdtemp(prefix='nk3-holding-',dir=ROOT/'.build/playtests'))
+        print('\nNK3 holding evidence:',output,flush=True)
+        # The supplied completed-day-9 save recreates days 10 and 11. This is
+        # a separate native-only copy, not the supervised GPT continuation.
+        config.update(nk3_mode='native',experience_mode='off',review_interval_days=2,
+                      purpose='integration',case_id='nk3-holding',headless=True,max_seconds=30)
+        path=output/'config.json';path.write_text(json.dumps(config));run=output/'run'
+        subprocess.run([sys.executable,str(CLI),'prepare','--config',str(path),'--out',str(run)],check=True,capture_output=True)
+        with (output/'driver.log').open('w') as log:
+            child=subprocess.Popen([sys.executable,str(CLI),'run','--run',str(run)],stdout=log,stderr=subprocess.STDOUT)
+            try:
+                deadline=time.monotonic()+35
+                while child.poll() is None and time.monotonic()<deadline:
+                    state_path=run/'turn-review/state.json'
+                    if state_path.exists() and json.loads(state_path.read_text()).get('status')=='paused':break
+                    time.sleep(.05)
+            finally:
+                (run/'STOP').touch(exist_ok=True);child.wait(timeout=15)
+        launch=json.loads((run/'launch.json').read_text())
+        self.assertTrue(launch['cleanup_complete']);self.assertTrue(launch['protected_files_unchanged'])
+        state=json.loads((run/'turn-review/state.json').read_text())
+        self.assertEqual((state['status'],state['completed_day']),('paused',11),str(output))
+        turns=[json.loads(line) for line in (run/'turn-review/turns.jsonl').read_text().splitlines()]
+        start=next(t for t in turns if t['day']==10 and t['player']==1 and t['phase']=='start')
+        main_id=max(start['heroes'],key=lambda h:h['army_value'])['id']
+        for day in (10,11):
+            end=next(t for t in turns if t['day']==day and t['player']==1 and t['phase']=='end')
+            hero=next(h for h in end['heroes'] if h['id']==main_id)
+            self.assertGreater(hero['movement'],0,
+                f'day {day}: holding repeated the same visit until movement was exhausted')
+            begin=next(t for t in turns if t['day']==day and t['player']==1 and t['phase']=='start')
+            movement=next(h for h in begin['heroes'] if h['id']==main_id)['movement']
+            self.assertLess(hero['movement'],movement,'new turn incorrectly suppressed every holding attempt')
+        # A confirmed approach remains useful. The main hero must still reach
+        # the refuge vicinity; suppressing all holding movement cannot pass.
+        text=re.sub(r'\x1b\[[0-9;]*m','',(run/'runtime.log').read_text(errors='replace'))
+        decoder=json.JSONDecoder();approaches=[]
+        for match in re.finditer(r'NK3_EXECUTION (\{)',text):
+            try:record=decoder.raw_decode(text[match.start(1):])[0]
+            except ValueError:continue
+            action=record['action']
+            if record['day']==10 and action.get('goal_id')=='strengthen-last-town':
+                before,after=action['before']['heroes'][0],action['after']['heroes'][0]
+                if before['position']!=after['position']:approaches.append((before,after))
+        self.assertTrue(approaches,'holding no longer executes a useful approach to the refuge')
+
     def test_native_rejection_is_visible_to_next_strategy_request(self):
         config=json.loads(Path(os.environ['VCMI_NK3_STRATEGY_CONFIG']).read_text())
         output=Path(tempfile.mkdtemp(prefix='nk3-feedback-',dir=ROOT/'.build/playtests'))

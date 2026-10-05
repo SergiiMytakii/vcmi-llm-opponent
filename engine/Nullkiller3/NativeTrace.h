@@ -9,14 +9,29 @@
 
 namespace nullkiller3
 {
-// Holding remains active, but repeating an acknowledged visit with unchanged own
-// state cannot help. A new day or any fresh own effect permits another attempt.
+// Holding remains active, but spending movement on the same acknowledged visit
+// is not progress. A new day or changed own facts permit another attempt.
 inline bool unchangedHoldingAttempt(const JsonNode & memory,const std::string & goalID,int64_t revision,const JsonNode & current)
 {
+    auto usefulFacts=[](const JsonNode & snapshot) {
+        auto facts=snapshot;
+        if(facts["heroes"].isVector())
+            for(auto & hero:facts["heroes"].Vector())
+                if(hero.isStruct()) hero.Struct().erase("movement");
+        return facts;
+    };
     const auto & results=memory["recent_results"].Vector();
     for(auto it=results.rbegin();it!=results.rend();++it)
         if((*it)["action"]["goal_id"].String()==goalID)
-            return (*it)["action"]["campaign_revision"].Integer()==revision && (*it)["outcome"].String()=="no_change_observed" && (*it)["action"]["after"]==current;
+        {
+            const auto & action=(*it)["action"];
+            const auto & outcome=(*it)["outcome"].String();
+            return action["campaign_revision"].Integer()==revision
+                && (outcome=="no_change_observed" || outcome=="effects_observed")
+                && action["before"].isStruct() && action["after"].isStruct() && current.isStruct()
+                && usefulFacts(action["before"])==usefulFacts(action["after"])
+                && usefulFacts(action["after"])==usefulFacts(current);
+        }
     return false;
 }
 
