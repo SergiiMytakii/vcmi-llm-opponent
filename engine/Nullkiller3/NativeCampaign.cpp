@@ -45,6 +45,7 @@ JsonNode armyUnits(const CArmedInstance * army)
         const auto count=army->getStackCount(slot);
         if(count<=0) continue;
         JsonNode unit;unit["count"].Integer()=count;
+        unit["creature"].Integer()=army->getCreature(slot)->getId().getNum();
         unit["unit_value"].Integer()=stack->estimateCombatValue()/count;
         result.Vector().push_back(unit);
     }

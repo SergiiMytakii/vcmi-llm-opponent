@@ -1,5 +1,6 @@
 #pragma once
 #include "CampaignState.h"
+#include "Forecasts.h"
 
 namespace nullkiller3
 {
@@ -15,7 +16,15 @@ inline JsonNode reinforcementSources(const JsonNode & actor,const JsonNode & wor
         JsonNode source;source["source_ref"]=town["ref"];source["army_pool_ref"].String()=poolRef;
         source["kind"].String()=isTown ? "town" : "hero";source["meeting_routes"].Vector();
         for(const auto & pool:world["forecasts"]["army_pools"].Vector())
-            if(pool["holder_ref"].String()==poolRef && poolRef!=actor.String()) source["unpledged_army_value"]=pool["unpledged_now"];
+            if(pool["holder_ref"].String()==poolRef && poolRef!=actor.String())
+            {
+                // A proposed reinforcement protects the recipient's current
+                // contribution too, so its native exchange cannot swap it away.
+                const auto * recipient=ownArmyUnits(actor.String(),world);
+                const auto power=pool["army_value"].Integer();
+                const auto floor=recipient ? wholeCreatureSourceFloor(poolRef,power,pool["reserved_value"].Integer(),world,recipient) : power;
+                source["unpledged_army_value"].Integer()=std::max<int64_t>(0,power-floor);
+            }
         for(const auto & alternative:world["forecasts"]["alternatives"].Vector())
             if(alternative["approach"].String()=="offense" && alternative["town_ref"]==town["ref"])
                 source["fundable_recruitment_value"]=alternative["army_purchased_value"];

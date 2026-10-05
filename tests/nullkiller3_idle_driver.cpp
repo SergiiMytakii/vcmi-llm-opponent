@@ -10,7 +10,7 @@ JsonNode json(const std::string & value)
 void require(bool value,const char * message) { if(!value) throw std::runtime_error(message); }
 void lastCreatureDelivery()
 {
-    auto world=json(R"({"day":6,"days_in_week":7,"player":1,"resources":[0,0,0,0,0,0,0],"daily_income":[0,0,0,0,0,0,0],"capabilities":["land","transfer"],"heroes":[{"ref":"main","army_value":8190},{"ref":"courier","army_value":107,"minimum_retained_army_value":107,"army_units":[{"count":1,"unit_value":107}]}],"towns":[{"ref":"home","army_holder_ref":"courier","defense_value":107}],"forecasts":{"routes":[{"target_ref":"main","own_arrivals":[{"hero_ref":"courier","day":7,"army_value":107,"army_loss_estimate":0}]}]}})");
+    auto world=json(R"({"day":6,"days_in_week":7,"player":1,"resources":[0,0,0,0,0,0,0],"daily_income":[0,0,0,0,0,0,0],"capabilities":["land","transfer"],"heroes":[{"ref":"main","army_value":8190,"army_units":[{"creature":14,"count":1,"unit_value":8190}]},{"ref":"courier","army_value":107,"minimum_retained_army_value":107,"army_units":[{"creature":14,"count":1,"unit_value":107}]}],"towns":[{"ref":"home","army_holder_ref":"courier","defense_value":107}],"forecasts":{"routes":[{"target_ref":"main","own_arrivals":[{"hero_ref":"courier","day":7,"army_value":107,"army_loss_estimate":0}]}]}})");
     auto plan=json(R"({"version":3,"revision":1,"approach":"economy","horizon_days":3,"goals":[{"id":"deliver","kind":"reinforce_hero","actor_ref":"main","target_ref":"courier","deadline_day":7,"priority":100,"building_id":-1,"min_army_value":8297,"depends_on":[],"required_capabilities":["land","transfer"],"complete_when":{"kind":"army_at_least","value":8297}}],"reserves":[],"policy":{"max_loss_ratio":0.25,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
     nullkiller3::CampaignState campaign;std::string reason;
     require(campaign.accept(plan,world,reason),reason.c_str());
@@ -32,7 +32,7 @@ void lastCreatureDelivery()
 }
 void wholeCreatureDelivery()
 {
-    auto world=json(R"({"day":6,"days_in_week":7,"player":1,"resources":[0,0,0,0,0,0,0],"daily_income":[0,0,0,0,0,0,0],"capabilities":["land","transfer"],"heroes":[{"ref":"main","army_value":25576},{"ref":"courier","army_value":1596,"minimum_retained_army_value":532,"army_units":[{"count":3,"unit_value":532}]}],"towns":[{"ref":"home","army_holder_ref":"courier","defense_value":1596}],"forecasts":{"routes":[{"target_ref":"main","own_arrivals":[{"hero_ref":"courier","day":7,"army_value":1596,"army_loss_estimate":0}]},{"target_ref":"home","own_arrivals":[{"hero_ref":"main","day":7,"army_value":25576,"army_loss_estimate":0}]}]}})");
+    auto world=json(R"({"day":6,"days_in_week":7,"player":1,"resources":[0,0,0,0,0,0,0],"daily_income":[0,0,0,0,0,0,0],"capabilities":["land","transfer"],"heroes":[{"ref":"main","army_value":25576,"army_units":[{"creature":14,"count":1,"unit_value":25576}]},{"ref":"courier","army_value":1596,"minimum_retained_army_value":532,"army_units":[{"creature":22,"count":3,"unit_value":532}]}],"towns":[{"ref":"home","army_holder_ref":"courier","defense_value":1596}],"forecasts":{"routes":[{"target_ref":"main","own_arrivals":[{"hero_ref":"courier","day":7,"army_value":1596,"army_loss_estimate":0}]},{"target_ref":"home","own_arrivals":[{"hero_ref":"main","day":7,"army_value":25576,"army_loss_estimate":0}]}]}})");
     auto plan=json(R"({"version":3,"revision":1,"approach":"economy","horizon_days":3,"goals":[{"id":"deliver","kind":"reinforce_hero","actor_ref":"main","target_ref":"courier","deadline_day":7,"priority":100,"building_id":-1,"min_army_value":25744,"depends_on":[],"required_capabilities":["land","transfer"],"complete_when":{"kind":"army_at_least","value":25744}},{"id":"hold","kind":"preserve_force","actor_ref":"courier","target_ref":"home","deadline_day":7,"priority":90,"building_id":-1,"min_army_value":1428,"depends_on":[],"required_capabilities":["land"],"complete_when":{"kind":"force_preserved_until","value":7}}],"reserves":[{"goal_id":"hold","resources":[0,0,0,0,0,0,0],"force_value":1428}],"policy":{"max_loss_ratio":0.25,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
     std::string reason;
     for(const auto & source:{"courier","home"})
@@ -57,6 +57,41 @@ void wholeCreatureDelivery()
     require(logistics["deliveries"][0]["recipient_possible_value"].Integer()==26108
         && nullkiller3::supportedDeliveryWait(logistics,plan["goals"][0],6),
         "a legal whole-pegasus donation was lost or rounded upward");
+}
+void reservedPackingDelivery()
+{
+    auto world=json(R"({"day":19,"days_in_week":7,"player":1,"resources":[0,0,0,0,0,0,0],"daily_income":[0,0,0,0,0,0,0],"capabilities":["land","transfer"],"heroes":[{"ref":"main","army_value":28762,"army_units":[{"creature":14,"count":102,"unit_value":107},{"creature":18,"count":22,"unit_value":241},{"creature":16,"count":29,"unit_value":135},{"creature":28,"count":16,"unit_value":46},{"creature":30,"count":2,"unit_value":177},{"creature":19,"count":13,"unit_value":335},{"creature":24,"count":2,"unit_value":1593}]},{"ref":"courier","army_value":4006,"minimum_retained_army_value":482,"army_units":[{"creature":20,"count":5,"unit_value":482},{"creature":22,"count":3,"unit_value":532}]}],"towns":[{"ref":"home","army_holder_ref":"courier","defense_value":4006}],"forecasts":{"routes":[{"target_ref":"main","own_arrivals":[{"hero_ref":"courier","day":20,"army_value":4006,"army_loss_estimate":0}]}]}})");
+    auto plan=json(R"({"version":3,"revision":1,"approach":"economy","horizon_days":3,"goals":[{"id":"deliver","kind":"reinforce_hero","actor_ref":"main","target_ref":"courier","deadline_day":20,"priority":100,"building_id":-1,"min_army_value":31322,"depends_on":[],"required_capabilities":["land","transfer"],"complete_when":{"kind":"army_at_least","value":31322}},{"id":"hold","kind":"preserve_force","actor_ref":"courier","target_ref":"home","deadline_day":21,"priority":90,"building_id":-1,"min_army_value":1428,"depends_on":[],"required_capabilities":["land"],"complete_when":{"kind":"force_preserved_until","value":21}}],"reserves":[{"goal_id":"hold","resources":[0,0,0,0,0,0,0],"force_value":1428}],"policy":{"max_loss_ratio":0.25,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+    nullkiller3::CampaignState campaign;std::string reason;
+    require(campaign.accept(plan,world,reason),reason.c_str());
+    const auto logistics=nullkiller3::forecastCommitments(world,campaign);
+    require(logistics["deliveries"][0]["recipient_possible_value"].Integer()==28762
+        && !nullkiller3::supportedDeliveryWait(logistics,plan["goals"][0],19),
+        "reserved delivery promised two new creature types into seven occupied recipient slots");
+    world["forecasts"]["army_pools"]=logistics["army_pools"];
+    require(nullkiller3::reinforcementSources(JsonNode("main"),world).Vector().empty(),
+        "full recipient was offered incompatible reserved donor stacks");
+    // One free slot: native tries source slot20 before22, so five dendroids
+    // (2410), not a different 2560-valued selection, fit this exchange.
+    world["heroes"][0]["army_units"].Vector().pop_back();
+    world["heroes"][0]["army_value"].Integer()=25576;
+    plan["goals"][0]["min_army_value"].Integer()=27986;
+    plan["goals"][0]["complete_when"]["value"].Integer()=27986;
+    nullkiller3::CampaignState freeSlot;
+    require(freeSlot.accept(plan,world,reason),reason.c_str());
+    const auto fitting=nullkiller3::forecastCommitments(world,freeSlot);
+    require(fitting["deliveries"][0]["recipient_possible_value"].Integer()==27986
+        && nullkiller3::supportedDeliveryWait(fitting,plan["goals"][0],19),
+        "one free slot failed to receive the native first whole stack");
+    // A full army can still merge the donor's Pegasus into its Pegasus slot.
+    world["heroes"][0]["army_units"].Vector().push_back(json(R"({"creature":22,"count":2,"unit_value":532})"));
+    world["heroes"][0]["army_value"].Integer()=26640;
+    nullkiller3::CampaignState matching;
+    require(matching.accept(plan,world,reason),reason.c_str());
+    const auto merged=nullkiller3::forecastCommitments(world,matching);
+    require(merged["deliveries"][0]["recipient_possible_value"].Integer()==28236
+        && nullkiller3::supportedDeliveryWait(merged,plan["goals"][0],19),
+        "full recipient could not merge an existing creature type");
 }
 void blockedScoutingReview()
 {
@@ -127,6 +162,6 @@ void blockedScoutingReview()
 }
 int main()
 {
-    try { lastCreatureDelivery();wholeCreatureDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n"; }
+    try { lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n"; }
     catch(const std::exception & error) { std::cerr<<error.what()<<"\n";return 1; }
 }
