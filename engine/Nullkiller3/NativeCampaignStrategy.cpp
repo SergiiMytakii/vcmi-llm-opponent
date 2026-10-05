@@ -152,16 +152,24 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         if(why == "executor_no_longer_owned" || why == "deadline_missed" || why=="target_no_longer_owned" || why=="dependency_failed" || why=="force_floor_breached" || why=="force_continuity_unconfirmed")
             result.push_back({"commitment:"+goal["id"].String(),why,true,true,actionable,true});
     }
-    if(!campaign.plan().isNull())
+    bool exhausted=!campaign.plan().isNull();
+    int64_t completedDay=0;
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+    {
+        const auto & status=world["goal_statuses"][goal["id"].String()];
+        exhausted &= status["state"].String()=="completed";
+        completedDay=std::max(completedDay,status["completed_day"].Integer());
+    }
+    if(!campaign.plan().isNull() && !exhausted)
     {
         const auto saved = campaign.save();
         if(world["day"].Integer() >= saved["accepted_day"].Integer()+campaign.plan()["horizon_days"].Integer())
             result.push_back({"horizon",std::to_string(campaign.plan()["revision"].Integer()),true,true,actionable,false});
     }
-    bool exhausted=!campaign.plan().isNull();
-    for(const auto & goal:campaign.plan()["goals"].Vector())
-        exhausted &= world["goal_statuses"][goal["id"].String()]["state"].String()=="completed";
-    if(exhausted) result.push_back({"campaign_exhausted",std::to_string(campaign.plan()["revision"].Integer()),true,true,actionable,false});
+    // Completion dates survive saves. Even a plan accepted on an earlier day
+    // waits until the next own turn after its last observed completion.
+    if(exhausted && completedDay<world["day"].Integer())
+        result.push_back({"campaign_exhausted",std::to_string(campaign.plan()["revision"].Integer())+":"+std::to_string(world["day"].Integer()),true,true,actionable,false});
     const auto repairFacts=repairQuestionFacts(campaign.plan(),persisted["goal_blockers"],world["goal_statuses"]);
     if(!repairFacts.empty()) result.push_back({"repair_exhausted",repairFacts,true,true,actionable,false});
     for(const auto & goal:campaign.plan()["goals"].Vector())

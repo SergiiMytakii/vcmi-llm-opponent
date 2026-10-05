@@ -14,6 +14,7 @@
 namespace NK2AI { class Nullkiller; }
 class CGHeroInstance;
 class CGObjectInstance;
+class CGTownInstance;
 class CArmedInstance;
 
 namespace nullkiller3
@@ -102,7 +103,8 @@ public:
     const JsonNode & memory() const { return persisted["memory"]; }
     const CampaignState & commitments() const { return campaign; }
     NK2AI::Goals::TGoalVec generate(NK2AI::Nullkiller & ai, bool priorityPass, bool stabilizationOnly = false);
-    float priority(const NK2AI::Goals::TSubgoal & task, float nativeScore) const;
+    float priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const;
+    std::string heroHireReason(const NK2AI::Nullkiller & ai, const CGTownInstance * town, const CGHeroInstance * candidate) const;
     TResources reservedResources(const TResources & currentFunds) const;
     TResources plannedBoatResources(const CGHeroInstance * hero, const TResources & currentFunds, const TResources & nativeLocks) const;
     bool emergencySpending() const;

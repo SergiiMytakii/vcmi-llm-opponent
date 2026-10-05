@@ -93,6 +93,10 @@ public:
         {
             if(!signal.strategicImpact || !signal.needsModel || !signal.actionable)
                 continue;
+            // Successful routine execution is not a new strategic emergency.
+            // Leave this question unaddressed so the next own turn can review it.
+            if(signal.question == "campaign_exhausted" && requests > 0)
+                continue;
             const auto old = addressed.find(signal.question);
             if(old != addressed.end() && old->second == signal.facts)
                 continue;
@@ -112,7 +116,9 @@ public:
         }
         result.deadlineMs = std::max<int64_t>(0,
             budget.waitMs - (critical ? 0 : budget.criticalReserveMs));
-        if(result.deadlineMs == 0 || budget.tokens <= 0)
+        // A normal decision needs a useful inference window. Critical events
+        // may still spend the reserved time, including a shorter last window.
+        if(result.deadlineMs == 0 || (!critical && result.deadlineMs < 60000) || budget.tokens <= 0)
         {
             result.reason = RequestReason::BudgetExhausted;
             return result;

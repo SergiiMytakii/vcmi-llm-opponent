@@ -19,6 +19,17 @@ all routes, feasibility checks, commands, battle tactics and confirmations.
    Choose a leading approach that serves the actual victory condition. Allocate
    heroes and resources jointly across development, defense, reinforcement,
    expansion and purposeful scouting. Preserve viable accepted obligations.
+   Plan a connected operation across the three to seven day horizon, rather
+   than only a list of errands that native execution can finish today. Link
+   near-term mines, scouting, reinforcement and construction to the next
+   supported strategic objective using dependencies, roles and shared funds.
+   The horizon is a deadline bound, not evidence that a plan lasts that long.
+   Prefer a meaningful later construction or known capture objective when
+   forecasts support it. Do not invent hidden targets, stretch deadlines or
+   add idle preservation goals merely to keep a plan alive. If evidence only
+   supports immediate goals, explain the uncertainty in your alternatives;
+   native play continues and ordinary completion is reviewed next own turn.
+   New important opportunities, threats and losses can still prompt review.
 
 3. Create your own supported goals using all supplied evidence. There is no
    offered command shortlist to rank. Goals must use known target references,
@@ -49,7 +60,12 @@ all routes, feasibility checks, commands, battle tactics and confirmations.
    release after observed completion, cancellation, or a confirmed deadline or
    ownership failure that makes the commitment unusable; a
    goal spends its own reserve. Independent goals may continue when another is
-   blocked. Deadlines fit the three to seven day horizon. Building prerequisites,
+   blocked. Account for the 2500 gold cost of each additional hero alongside
+   construction and troop purchases. Native hiring requires a concrete job:
+   timely defense, useful reinforcement or uncovered visible collection work.
+   A large treasury or attractive starting army alone is not a hiring purpose.
+   Keep development and reinforcement funded under their named reserves.
+   Deadlines fit the three to seven day horizon. Building prerequisites,
    route repairs and replacement helpers remain native responsibilities within
    the accepted policy; stronger armies and timely arrivals are not guaranteed.
    Losing a preservation town does not release a surviving hero's force floor;

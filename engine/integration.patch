@@ -1064,7 +1064,7 @@ index c2adab572..f946b70ac 100644
  	{
  		if(task->asTask()->priority <= 0)
  			task->asTask()->priority = priorityEvaluator->evaluate(task);
-+		if(strategicCampaign) task->asTask()->priority = strategicCampaign->priority(task, task->asTask()->priority);
++		if(strategicCampaign) task->asTask()->priority = strategicCampaign->priority(*this, task, task->asTask()->priority);
  	}
  
  	auto bestTask = *vstd::maxElementByFun(tasks, [](const Goals::TSubgoal& task) -> float
@@ -1072,7 +1072,7 @@ index c2adab572..f946b70ac 100644
  						task,
  						priorityTier,
  						evaluationContexts.at(task.get()));
-+				if(strategicCampaign) task->asTask()->priority = strategicCampaign->priority(task, task->asTask()->priority);
++				if(strategicCampaign) task->asTask()->priority = strategicCampaign->priority(*this, task, task->asTask()->priority);
  			}
  		}
  	);
@@ -1637,11 +1637,28 @@ index 2a9973de3..7325a9a70 100644
  
  		if(!heroPtr.isVerified())
 diff --git a/AI/Nullkiller2/Goals/RecruitHero.cpp b/AI/Nullkiller2/Goals/RecruitHero.cpp
-index d93ba3ed6..b9a3c270b 100644
 --- a/AI/Nullkiller2/Goals/RecruitHero.cpp
 +++ b/AI/Nullkiller2/Goals/RecruitHero.cpp
-@@ -59,12 +59,14 @@ void RecruitHero::accept(AIGateway * aiGw)
+@@ -11,6 +11,8 @@
+ #include "Goals.h"
+ #include "../AIGateway.h"
+ #include "../AIUtility.h"
++#include "../Engine/Nullkiller.h"
++#include "../../Nullkiller3/NativeCampaign.h"
+ #include "../../../lib/constants/StringConstants.h"
  
+ 
+@@ -57,14 +59,23 @@
+ 	if(!heroToHire)
+ 		throw cannotFulfillGoalException("No hero to hire!");
+ 
++	if(aiGw->nullkiller->strategicCampaign)
++	{
++		const auto reason=aiGw->nullkiller->strategicCampaign->heroHireReason(*aiGw->nullkiller,t,heroToHire);
++		if(reason.empty()) throw cannotFulfillGoalException("NK3 hero hiring lacks a funded concrete job");
++		logAi->info("NK3_HERO_HIRE town=%d hero=%d cost=%d purpose=%s",t->id.getNum(),heroToHire->id.getNum(),GameConstants::HERO_GOLD_COST,reason);
++	}
++
  	if(t->getVisitingHero())
  	{
 +		aiGw->checkStrategicTurn();

@@ -12,6 +12,7 @@
 #include "../Nullkiller2/Engine/Nullkiller.h"
 #include "../Nullkiller2/Behaviors/CaptureObjectsBehavior.h"
 #include "../Nullkiller2/Behaviors/GatherArmyBehavior.h"
+#include "../Nullkiller2/Goals/RecruitHero.h"
 #include "../Nullkiller2/Goals/BuildThis.h"
 #include "../Nullkiller2/Goals/BuyArmy.h"
 #include "../Nullkiller2/Goals/ExecuteHeroChain.h"
@@ -987,7 +988,76 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
     }
     return output;
 }
-float NativeCampaign::priority(const NK2AI::Goals::TSubgoal & task, float nativeScore) const
+std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const CGTownInstance * town, const CGHeroInstance * candidate) const
+{
+    if(!town || !candidate || town->getOwner()!=ai.playerID) return {};
+    TResources price;price[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
+    if(!ai.getFreeResources().canAfford(price)) return {};
+    const auto heroes=ai.cc->getHeroesInfo();
+    if(heroes.empty()) return "main:no_owned_hero";
+    // Compare the accepted shared spending calendar before and after hiring.
+    // A discretionary purchase must not make funded construction/delivery fail.
+    auto before=world;
+    before["resources"]=resourceValues(ai.cc->getResourceAmount());
+    auto after=before;after["resources"][6].Integer()-=GameConstants::HERO_GOLD_COST;
+    const auto baseline=forecastCommitments(before,campaign,helperSources());
+    const auto reduced=forecastCommitments(after,campaign,helperSources());
+    for(const auto * category:{"commitments","deliveries"})
+        for(const auto & funded:baseline[category].Vector())
+            if(funded["status"].String()=="conditional")
+                for(const auto & remaining:reduced[category].Vector())
+                    if(remaining["goal_id"]==funded["goal_id"] && remaining["status"].String()!="conditional") return {};
+    const auto alias=persisted["object_ids"].Struct().find(std::to_string(town->id.getNum()));
+    if(alias!=persisted["object_ids"].Struct().end())
+        for(const auto & defense:world["forecasts"]["defenses"].Vector())
+            if(defense["town_ref"].String()==externalai::objectReference(alias->second)
+                && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1
+                && defense["status"].String()=="insufficient_current_force"
+                && candidate->estimateCombatValue()>=static_cast<uint64_t>(
+                    defense["opposing_upper_sum"].Integer()-defense["conditional_force_value"].Integer()))
+                return "defender:"+std::to_string(town->id.getNum());
+    if(ai.buildAnalyzer->isGoldPressureOverMax()) return {};
+
+    // Starting troops are useful only when an actual main hero can receive
+    // a meaningful reinforcement on a current route to this town.
+    if(candidate->getArmyCost()>GameConstants::HERO_GOLD_COST/2)
+        for(const auto * recipient:heroes)
+        {
+            const auto assigned=role(recipient);
+            if(assigned!="main" && (!assigned.empty()
+                || ai.heroManager->getHeroRoleOrDefaultInefficient(recipient)!=NK2AI::HeroRole::MAIN)) continue;
+            const auto gain=ai.armyManager->howManyReinforcementsCanGet(recipient,candidate);
+            if(gain<std::max<uint64_t>(200,recipient->estimateCombatValue()/4)) continue;
+            for(const auto & path:ai.pathfinder->getPathInfo(town->visitablePos(),false))
+                if(path.targetHero==recipient && path.heroArmy && path.exchangeCount<=1
+                    && path.turn()<=1 && !path.getFirstBlockedAction() && !path.getTotalArmyLoss())
+                    return "reinforcement:"+std::to_string(recipient->id.getNum());
+        }
+
+    // Collection is a concrete visible workload, not permission to hire merely
+    // because cash is available. Existing free scouts cover five nearby jobs
+    // each; committed actors cannot be counted as free collectors.
+    size_t collectors=0;
+    for(const auto * hero:heroes)
+        if(role(hero).empty() && ai.heroManager->getHeroRoleOrDefaultInefficient(hero)==NK2AI::HeroRole::SCOUT
+            && ai.dangerHitMap->getClosestTown(hero->visitablePos())==town) ++collectors;
+    size_t jobs=0;int firstTarget=-1;
+    for(const auto * object:ai.objectClusterizer->getNearbyObjects())
+        if(ai.cc->isVisible(object->visitablePos()) && ai.dangerHitMap->getClosestTown(object->visitablePos())==town
+            && (object->ID==Obj::RESOURCE || object->ID==Obj::TREASURE_CHEST || object->ID==Obj::CAMPFIRE))
+        {
+            bool committed=false;
+            const auto alias=persisted["object_ids"].Struct().find(std::to_string(object->id.getNum()));
+            if(alias!=persisted["object_ids"].Struct().end())
+                for(const auto & goal:campaign.plan()["goals"].Vector())
+                    if(campaign.holdsCommitment(goal["id"].String())
+                        && goal["target_ref"].String()==externalai::objectReference(alias->second)) committed=true;
+            if(!committed) { ++jobs;if(firstTarget<0) firstTarget=object->id.getNum(); }
+        }
+    if(jobs>5*(collectors+1)) return "collector:"+std::to_string(firstTarget)+":jobs="+std::to_string(jobs);
+    return {};
+}
+float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
 {
     // The accepted risk ceiling applies to every selected native path, even
     // when its hero/opportunity is outside the campaign's named goals.
@@ -1008,6 +1078,21 @@ float NativeCampaign::priority(const NK2AI::Goals::TSubgoal & task, float native
         };
         if(!withinRisk(task,0)) return 0;
     }
+    std::function<bool(const NK2AI::Goals::TSubgoal &,int)> hiringAllowed = [&](const auto & item,int depth) {
+        if(depth>16) return false;
+        if(const auto * hire=dynamic_cast<const NK2AI::Goals::RecruitHero *>(item.get()))
+        {
+            const auto * candidate=hire->getHero();
+            if(!candidate && hire->town)
+                for(const auto * available:ai.cc->getAvailableHeroes(hire->town))
+                    if(!candidate || available->estimateHeroCombatValue()>candidate->estimateHeroCombatValue()) candidate=available;
+            return !heroHireReason(ai,hire->town,candidate).empty();
+        }
+        if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
+            for(const auto & child:composition->decompose(nullptr)) if(!hiringAllowed(child,depth+1)) return false;
+        return true;
+    };
+    if(!hiringAllowed(task,0)) return 0;
     if(!task->strategicStabilizationReason.empty()) return 105000.0f;
     if(!task->strategicEmergencyTown.empty())
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
