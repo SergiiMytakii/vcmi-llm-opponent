@@ -1,9 +1,22 @@
 #pragma once
 #include "CampaignState.h"
 #include "RequestArbiter.h"
+#include "Forecasts.h"
+#include <cmath>
 
 namespace nullkiller3
 {
+inline std::vector<StrategicSignal> allocationCheckpointSignals(const CampaignState & campaign,
+    const JsonNode & world,const JsonNode & baseline,bool actionable)
+{
+    if(campaign.plan().isNull() || baseline.isNull()) return {};
+    const auto day=world["day"].Integer();
+    const auto week=std::max<int64_t>(1,world["days_in_week"].Integer());
+    if(day<baseline["day"].Integer()+3 && day%week!=0) return {};
+    const auto facts=allocationCheckpointFacts(campaign,world);
+    if(facts.empty() || facts==baseline["facts"].String()) return {};
+    return {{"checkpoint:allocation",facts,true,true,actionable,false}};
+}
 inline JsonNode operationIdentity(const JsonNode & goal)
 {
     JsonNode result;
@@ -27,6 +40,45 @@ inline JsonNode operationOwnFacts(const JsonNode & goal,const JsonNode & own,con
             auto & item=result[source];item["army_holder_ref"]=town["army_holder_ref"];
             item["army_value"]=town["army_value"].isNull() ? town["defense_value"] : town["army_value"];
         }
+    bool heroSource=false;
+    for(const auto & hero:own["heroes"].Vector()) heroSource |= hero["ref"].String()==source;
+    const bool courier=goal["kind"].String()=="reinforce_hero" && heroSource;
+    const auto traveler=courier ? JsonNode(source) : goal["actor_ref"];
+    const auto destination=courier ? goal["actor_ref"]
+        : goal["kind"].String()=="reinforce_hero" ? JsonNode(source) : goal["target_ref"];
+    result["route_subject"]["traveler"]=traveler;
+    result["route_subject"]["destination"]=destination;
+    auto route=[&](const JsonNode & arrivals) {
+        for(const auto & arrival:arrivals.Vector())
+            if(arrival["hero_ref"]==traveler && arrival["movement_cost"].isNumber())
+            {
+                const auto cost=arrival["movement_cost"].Float();
+                if(std::isfinite(cost) && cost>=0 && cost<=2000)
+                {
+                    result["route_cost"].Integer()=std::llround(cost*1000000);
+                    result["route_subject"]["measure"].String()="native_travel_cost";
+                }
+            }
+    };
+    for(const auto & target:own["forecasts"]["routes"].Vector()) if(target["target_ref"]==destination) route(target["own_arrivals"]);
+    for(const auto & target:own["frontier_options"].Vector()) if(target["ref"]==destination) route(target["own_arrivals"]);
+    if(result["route_cost"].isNull())
+    {
+        JsonNode from,to;
+        for(const auto * list:{"heroes","towns","visible_objects","frontier_options"})
+            for(const auto & object:own[list].Vector())
+            {
+                if(object["ref"]==traveler) from=object["position"];
+                if(object["ref"]==destination) to=object["position"];
+            }
+        if(from.isVector() && to.isVector() && from.Vector().size()==3 && to.Vector().size()==3 && from[2]==to[2])
+        {
+            result["route_cost"].Integer()=(std::abs(from[0].Integer()-to[0].Integer())+std::abs(from[1].Integer()-to[1].Integer()))*1000000;
+            // Matches the existing frontier-repair heuristic. This measures
+            // approach to a known target, never an ETA through unknown terrain.
+            result["route_subject"]["measure"].String()="known_target_proximity";
+        }
+    }
     return result;
 }
 inline bool operationStalled(const JsonNode & progress,const JsonNode & forecasts,const std::string & id,int64_t day)
@@ -39,6 +91,40 @@ inline bool operationStalled(const JsonNode & progress,const JsonNode & forecast
             for(const auto & purchase:delivery["recruitment_schedule"].Vector())
                 if(purchase["day"].Integer()>=day) return false;
     return true;
+}
+inline JsonNode operationProgress(const JsonNode & previous,const JsonNode & objective,const JsonNode & facts,int64_t day)
+{
+    auto forceFacts=[](JsonNode value) {
+        value.Struct().erase("route_cost");
+        for(auto & [ref,item]:value.Struct()) if(item.isStruct())
+        {
+            item.Struct().erase("position");item.Struct().erase("in_boat");
+        }
+        return value;
+    };
+    JsonNode progress=previous;
+    const bool newIntent=progress.isNull() || previous["objective"]!=objective;
+    bool advanced=newIntent || forceFacts(previous["facts"])!=forceFacts(facts);
+    if(newIntent) progress=JsonNode();
+    if(previous["facts"]["route_subject"]!=facts["route_subject"])
+        progress.Struct().erase("best_route_cost");
+    if(facts["route_cost"].isNumber()
+        && (progress["best_route_cost"].isNull() || facts["route_cost"].Integer()<progress["best_route_cost"].Integer()))
+    {
+        progress["best_route_cost"]=facts["route_cost"];
+        const auto traveler=facts["route_subject"]["traveler"].isString()
+            ? facts["route_subject"]["traveler"].String() : objective["actor_ref"].String();
+        const auto destination=facts["route_subject"]["destination"].String();
+        advanced |= facts[traveler]["position"]!=previous["facts"][traveler]["position"]
+            || (!destination.empty() && facts[destination]["position"]!=previous["facts"][destination]["position"]);
+    }
+    // A smaller supported route cost advances only with actual movement. Daily
+    // refill alone can improve the baseline, never the progress clock.
+    // A lateral step, retreat or return to a previous best cannot keep
+    // an otherwise ineffective operation alive forever.
+    if(advanced) { progress["last_progress_day"].Integer()=day;progress.Struct().erase("last_no_change_day"); }
+    progress["objective"]=objective;progress["facts"]=facts;
+    return progress;
 }
 inline std::vector<StrategicSignal> criticalTownLossSignals(const JsonNode & plan,const JsonNode & world,bool actionable)
 {

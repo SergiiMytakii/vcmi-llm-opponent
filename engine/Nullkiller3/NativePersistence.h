@@ -92,6 +92,11 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     }
     JsonNode result=saved;
     bool invalid=!validNativeAliases(saved["object_ids"]) || !validPendingTask(saved["pending_native_task"]);
+    const auto & checkpoint=saved["checkpoint_baseline"];
+    if(!checkpoint.isNull())
+        invalid |= !checkpoint.isStruct() || checkpoint.Struct().size()!=2
+            || !savedInteger(checkpoint["day"],1,2147483647) || !checkpoint["facts"].isString()
+            || checkpoint["facts"].String().size()>8192;
     for(const auto * field:{"confirmed_resource_pickups","frontier_positions","local_repairs","delivery_receipts","goal_blockers"})
         invalid |= !saved[field].isNull() && !saved[field].isStruct();
     if(saved["confirmed_resource_pickups"].isStruct())
@@ -123,6 +128,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
             invalid |= !item["objective"].isStruct() || !item["facts"].isStruct()
                 || item["objective"].toCompactString().size()>2048 || item["facts"].toCompactString().size()>2048
                 || !savedInteger(item["last_progress_day"],1,2147483647)
+                || (!item["best_route_cost"].isNull() && !savedInteger(item["best_route_cost"],0,2147483647))
                 || (!item["last_no_change_day"].isNull() && !savedInteger(item["last_no_change_day"],1,2147483647));
         }
     }
@@ -187,7 +193,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     }
     if(invalid)
         for(const auto * field:{"object_ids","memory","native_campaign","strategy_metadata","local_repairs",
-                               "delivery_receipts","goal_blockers","frontier_positions","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress"})
+                               "delivery_receipts","goal_blockers","frontier_positions","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
             result.Struct().erase(field);
     // Derived ExternalAI review snapshots are rebuilt from the next complete
     // own list. Facts, history, aliases and spent budget remain durable.

@@ -11,7 +11,7 @@ index df873b241..0ca32ec21 100644
  if(ENABLE_NULLKILLER2_AI)
  	add_subdirectory(Nullkiller2)
 diff --git a/AI/Nullkiller2/AIGateway.cpp b/AI/Nullkiller2/AIGateway.cpp
-index 02b0d31bf..c68a89c15 100644
+index 02b0d31bf..7a5bd6373 100644
 --- a/AI/Nullkiller2/AIGateway.cpp
 +++ b/AI/Nullkiller2/AIGateway.cpp
 @@ -35,21 +35,23 @@
@@ -103,7 +103,16 @@ index 02b0d31bf..c68a89c15 100644
  }
  
  void AIGateway::newObject(const CGObjectInstance * obj)
-@@ -562,8 +589,29 @@ void AIGateway::yourTurn(QueryID queryID)
+@@ -400,6 +427,8 @@ void AIGateway::requestRealized(PackageApplied * pa)
+ void AIGateway::receivedResource()
+ {
+ 	LOG_TRACE(logAi);
++	if(nullkiller && nullkiller->strategicCampaign)
++		nullkiller->strategicCampaign->resourcesChanged(cc->getResourceAmount());
+ }
+ 
+ void AIGateway::showUniversityWindow(const IMarket * market, const CGHeroInstance * visitor, QueryID queryID)
+@@ -562,8 +591,29 @@ void AIGateway::yourTurn(QueryID queryID)
  	executeActionAsync("yourTurn", [this, queryID](){ answerQuery(queryID, 0); });
  	status.startedTurn();
  
@@ -134,7 +143,7 @@ index 02b0d31bf..c68a89c15 100644
  	asyncTasks->run([this]()
  	{
  		ScopedThreadName guard("NK2AI::AIGateway::makingTurn");
-@@ -572,6 +620,14 @@ void AIGateway::yourTurn(QueryID queryID)
+@@ -572,6 +622,14 @@ void AIGateway::yourTurn(QueryID queryID)
  	});
  }
  
@@ -149,7 +158,7 @@ index 02b0d31bf..c68a89c15 100644
  void AIGateway::heroGotLevel(const CGHeroInstance * hero, PrimarySkill pskill, std::vector<SecondarySkill> & skills, QueryID queryID)
  {
  	LOG_TRACE_PARAMS(logAi, "queryID '%i'", queryID);
-@@ -785,6 +841,7 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
+@@ -785,6 +843,7 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
  
  					if(newValue > oldValue && nullkiller->getFreeResources().canAfford(upgradeInfo.getUpgradeCostsFor(upgID) * s->getCount()))
  					{
@@ -157,7 +166,7 @@ index 02b0d31bf..c68a89c15 100644
  						cc->upgradeCreature(obj, SlotID(i), upgID);
  						upgraded = true;
  						logAi->debug("Upgraded %d %s to %s", s->getCount(), upgradeInfo.oldID.toCreature()->getNamePluralTranslated(),
-@@ -801,7 +858,14 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
+@@ -801,7 +860,14 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
  	return upgraded;
  }
  
@@ -173,7 +182,7 @@ index 02b0d31bf..c68a89c15 100644
  {
  	try
  	{
-@@ -809,9 +873,11 @@ void AIGateway::makeTurn()
+@@ -809,9 +875,11 @@ void AIGateway::makeTurn()
  		logAi->info("Player %d (%s) starting turn, day %d", playerID, playerID.toString(), day);
  
  		std::shared_lock gsLock(CGameState::mutex);
@@ -186,7 +195,7 @@ index 02b0d31bf..c68a89c15 100644
  
  		const auto start = std::chrono::high_resolution_clock::now();
  		nullkiller->makeTurn();
-@@ -872,7 +938,19 @@ void AIGateway::moveCreaturesToHero(const CGTownInstance * t)
+@@ -872,7 +940,19 @@ void AIGateway::moveCreaturesToHero(const CGTownInstance * t)
  {
  	if(t->getVisitingHero() && t->armedGarrison() && t->getVisitingHero()->tempOwner == t->tempOwner)
  	{
@@ -207,7 +216,7 @@ index 02b0d31bf..c68a89c15 100644
  	}
  }
  
-@@ -881,6 +959,43 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -881,6 +961,43 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  	if(source->stacksCount() == 0)
  		return;
  
@@ -251,7 +260,7 @@ index 02b0d31bf..c68a89c15 100644
  	const CArmedInstance * armies[] = {destinationArmy, source};
  
  	auto bestArmy = nullkiller->armyManager->getBestArmy(destinationArmy, destinationArmy, source, cc->getTile(source->visitablePos())->getTerrainID());
-@@ -890,6 +1005,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -890,6 +1007,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  		// move first stack at first slot if empty to avoid can not take away last creature
  		if(!army->hasStackAtSlot(SlotID(0)) && army->stacksCount() > 0)
  		{
@@ -259,7 +268,7 @@ index 02b0d31bf..c68a89c15 100644
  			cc->mergeOrSwapStacks(
  				army,
  				army,
-@@ -911,6 +1027,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -911,6 +1029,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  				if(targetSlot.validSlot())
  				{
  					// remove unwanted creatures
@@ -267,7 +276,7 @@ index 02b0d31bf..c68a89c15 100644
  					cc->mergeOrSwapStacks(destinationArmy, source, i, targetSlot);
  				}
  				else if(destinationArmy->getStack(i).estimateCombatValue() < destinationArmy->estimateCombatValue() / 100)
-@@ -945,6 +1062,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -945,6 +1064,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  								break;
  
  							// move all except 1 of weakest creature from source to destination
@@ -275,7 +284,7 @@ index 02b0d31bf..c68a89c15 100644
  							cc->splitStack(
  								source,
  								destinationArmy,
-@@ -957,6 +1075,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -957,6 +1077,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  						else
  						{
  							// Source last stack is not weakest. Move 1 of weakest creature from destination to source
@@ -283,7 +292,7 @@ index 02b0d31bf..c68a89c15 100644
  							cc->splitStack(
  								destinationArmy,
  								source,
-@@ -966,6 +1085,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -966,6 +1087,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  						}
  					}
  
@@ -291,7 +300,7 @@ index 02b0d31bf..c68a89c15 100644
  					cc->mergeOrSwapStacks(armyPtr, destinationArmy, j, i);
  				}
  			}
-@@ -997,6 +1117,7 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
+@@ -997,6 +1119,7 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
  
  				if(duplicatingSlot != stack.first)
  				{
@@ -299,7 +308,7 @@ index 02b0d31bf..c68a89c15 100644
  					cc->mergeStacks(recruiter, recruiter, stack.first, duplicatingSlot);
  					break;
  				}
-@@ -1008,9 +1129,12 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
+@@ -1008,9 +1131,12 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
  			}
  		}
  
@@ -313,7 +322,7 @@ index 02b0d31bf..c68a89c15 100644
  	}
  }
  
-@@ -1028,6 +1152,35 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
+@@ -1028,6 +1154,35 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
  	assert(status.getBattle() == ONGOING_BATTLE);
  	status.setBattle(ENDING_BATTLE);
  	bool won = br->winner == cc->getBattle(battleID)->battleGetMySide();
@@ -349,7 +358,7 @@ index 02b0d31bf..c68a89c15 100644
  	logAi->debug("Player %d (%s): I %s the %s!", playerID, playerID.toString(), (won ? "won" : "lost"), battlename);
  	battlename.clear();
  
-@@ -1056,7 +1209,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
+@@ -1056,7 +1211,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
  	std::vector<const CGObjectInstance *> ret;
  	for(const ObjectInstanceID objId : nullkiller->memory->visitableObjs)
  	{
@@ -358,7 +367,7 @@ index 02b0d31bf..c68a89c15 100644
  		if(obj && obj->tempOwner == playerID)
  			ret.push_back(obj);
  	}
-@@ -1065,6 +1218,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
+@@ -1065,6 +1220,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
  
  bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  {
@@ -366,7 +375,7 @@ index 02b0d31bf..c68a89c15 100644
  	if(!heroPtr.isVerified())
  		throw cannotFulfillGoalException("Hero was lost!");
  
-@@ -1079,6 +1233,9 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1079,6 +1235,9 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  	auto afterMovementCheck = [&]() -> void
  	{
  		waitTillFree(); //movement may cause battle or blocking dialog
@@ -376,7 +385,7 @@ index 02b0d31bf..c68a89c15 100644
  		if(!heroPtr.isVerified())
  		{
  			lostHero(heroPtr);
-@@ -1096,6 +1253,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1096,6 +1255,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  	{
  		//FIXME: this assertion fails also if AI moves onto defeated guarded object
  		//assert(cb->getVisitableObjs(dst).size() > 1); //there's no point in revisiting tile where there is no visitable object
@@ -384,7 +393,7 @@ index 02b0d31bf..c68a89c15 100644
  		cc->moveHero(*heroPtr, heroPtr->convertFromVisitablePos(dst), false);
  		afterMovementCheck(); // TODO: is it feasible to hero get killed there if game work properly?
  		// If revisiting, teleport probing is never done, and so the entries into the list would remain unused and uncleared
-@@ -1149,11 +1307,13 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1149,11 +1309,13 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  
  		auto doMovement = [&](int3 dst, bool transit, const EPathfindingLayer & layer)
  		{
@@ -398,7 +407,7 @@ index 02b0d31bf..c68a89c15 100644
  			if(cc->getObj(exitId) && cc->getObj(exitId)->ID == Obj::WHIRLPOOL)
  			{
  				nullkiller->armyFormation->rearrangeArmyForWhirlpool(*heroPtr);
-@@ -1200,6 +1360,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1200,6 +1362,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  
  		for(; i > 0; i--)
  		{
@@ -406,7 +415,7 @@ index 02b0d31bf..c68a89c15 100644
  			int3 currentCoord = path.nodes[i].coord;
  			const auto & nextNode = path.nodes[i - 1];
  			int3 nextCoord = nextNode.coord;
-@@ -1285,6 +1446,7 @@ void AIGateway::buildStructure(const CGTownInstance * t, BuildingID building)
+@@ -1285,6 +1448,7 @@ void AIGateway::buildStructure(const CGTownInstance * t, BuildingID building)
  {
  	auto name = t->getTown()->buildings.at(building)->getNameTranslated();
  	logAi->debug("Player %d will build %s in town of %s at %s", playerID, name, t->getNameTextID(), t->anchorPos().toString());
@@ -414,7 +423,7 @@ index 02b0d31bf..c68a89c15 100644
  	cc->buildBuilding(t, building); //just do this;
  }
  
-@@ -1293,6 +1455,7 @@ void AIGateway::tryRealize(Goals::DigAtTile & g)
+@@ -1293,6 +1457,7 @@ void AIGateway::tryRealize(Goals::DigAtTile & g)
  	assert(g.hero->visitablePos() == g.tile); //surely we want to crash here?
  	if(g.hero->diggingStatus() == EDiggingStatus::CAN_DIG)
  	{
@@ -422,7 +431,7 @@ index 02b0d31bf..c68a89c15 100644
  		cc->dig(g.hero);
  	}
  	else
-@@ -1311,7 +1474,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
+@@ -1311,7 +1476,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
  	{
  		if(const auto * m = dynamic_cast<const IMarket*>(obj))
  		{
@@ -431,7 +440,7 @@ index 02b0d31bf..c68a89c15 100644
  			for(auto it = ResourceSet::nziterator(freeRes); it.valid(); it++)
  			{
  				auto res = it->resType;
-@@ -1325,6 +1488,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
+@@ -1325,6 +1490,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
  				//TODO trade only as much as needed
  				if (toGive) //don't try to sell 0 resources
  				{
@@ -439,7 +448,7 @@ index 02b0d31bf..c68a89c15 100644
  					cc->trade(m->getObjInstanceID(), EMarketMode::RESOURCE_RESOURCE, res, GameResID(g.resID), toGive);
  					acquiredResources = static_cast<int>(toGet * (it->resVal / toGive));
  					logAi->debug("Traded %d of %s for %d of %s at %s", toGive, res, acquiredResources, g.resID, obj->getObjectNameTextID());
-@@ -1364,6 +1528,7 @@ void AIGateway::endTurn()
+@@ -1364,6 +1530,7 @@ void AIGateway::endTurn()
  
  	do
  	{
@@ -447,7 +456,7 @@ index 02b0d31bf..c68a89c15 100644
  		cc->endTurn();
  	}
  	while(status.haveTurn()); //for some reasons, our request may fail -> stop requesting end of turn only after we've received a confirmation that it's over
-@@ -1381,6 +1546,7 @@ void AIGateway::buildArmyIn(const CGTownInstance * t)
+@@ -1381,6 +1548,7 @@ void AIGateway::buildArmyIn(const CGTownInstance * t)
  
  void AIGateway::finish()
  {
@@ -455,7 +464,7 @@ index 02b0d31bf..c68a89c15 100644
  	nullkiller->makingTurnInterruption.interruptThread();
  
  	if (asyncTasks)
-@@ -1395,7 +1561,7 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
+@@ -1395,7 +1563,7 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
  	if (!asyncTasks)
  		throw std::runtime_error("Attempt to execute task on shut down AI state!");
  
@@ -464,7 +473,7 @@ index 02b0d31bf..c68a89c15 100644
  	{
  		ScopedThreadName guard("NK2AI::AIGateway::" + description);
  		std::shared_lock gsLock(CGameState::mutex);
-@@ -1407,6 +1573,11 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
+@@ -1407,6 +1575,11 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
  		{
  			logAi->debug("%s thread has been terminated. We'll end it immediately", description);
  		}
@@ -476,7 +485,7 @@ index 02b0d31bf..c68a89c15 100644
  	});
  }
  
-@@ -1543,6 +1714,8 @@ void AIStatus::waitTillFree()
+@@ -1543,6 +1716,8 @@ void AIStatus::waitTillFree()
  	std::unique_lock<std::mutex> lock(mx);
  	while(battle != NO_BATTLE || !remainingQueries.empty() || !objectsBeingVisited.empty() || ongoingHeroMovement)
  	{
@@ -485,7 +494,7 @@ index 02b0d31bf..c68a89c15 100644
  		cv.wait_for(lock, std::chrono::milliseconds(10));
  		aiGw->nullkiller->makingTurnInterruption.interruptionPoint();
  	}
-@@ -1720,13 +1893,13 @@ void AIGateway::memorizeVisitableObj(const CGObjectInstance * obj,
+@@ -1720,13 +1895,13 @@ void AIGateway::memorizeVisitableObj(const CGObjectInstance * obj,
  	}
  }
  
@@ -501,7 +510,7 @@ index 02b0d31bf..c68a89c15 100644
  			if(obj && isWeeklyRevisitable(playerID, obj))
  				memory->markObjectUnvisited(obj);
  		}
-@@ -1735,7 +1908,7 @@ void AIGateway::memorizeRevisitableObjs(const std::unique_ptr<AIMemory> & memory
+@@ -1735,7 +1910,7 @@ void AIGateway::memorizeRevisitableObjs(const std::unique_ptr<AIMemory> & memory
  
  void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const CGHeroInstance * h, const CGHeroInstance * other)
  {
@@ -510,7 +519,7 @@ index 02b0d31bf..c68a89c15 100644
  	{
  		bool changeMade = false;
  		std::set<std::pair<ArtifactInstanceID, ArtifactInstanceID>> swappedSet;
-@@ -1797,6 +1970,7 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
+@@ -1797,6 +1972,7 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
  					if(target->isPositionFree(slot) && artifact->canBePutAt(target, slot, true)) //combined artifacts are not always allowed to move
  					{
  						ArtifactLocation destLocation(target->id, slot);
@@ -518,7 +527,7 @@ index 02b0d31bf..c68a89c15 100644
  						cc->swapArtifacts(location, destLocation); //just put into empty slot
  						emptySlotFound = true;
  						changeMade = true;
-@@ -1843,11 +2017,14 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
+@@ -1843,11 +2019,14 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
  									ArtifactLocation destLocation(target->id, slot);
  									ArtifactLocation backpack(artHolder->id, ArtifactPosition::BACKPACK_START);
  

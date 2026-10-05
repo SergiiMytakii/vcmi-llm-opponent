@@ -47,6 +47,21 @@ class CampaignState
     {
         return std::find(list.Vector().begin(), list.Vector().end(), value) != list.Vector().end();
     }
+    bool atPreservationRefuge(const JsonNode & goal,const JsonNode & world) const
+    {
+        const auto & hero=find(world,"heroes",goal["actor_ref"]);
+        if(hero.isNull() || hero["army_value"].Integer()<goal["min_army_value"].Integer()) return false;
+        auto near=[&](const JsonNode & town) {
+            const auto & a=hero["position"], & b=town["position"];
+            return a.isVector() && b.isVector() && a.Vector().size()==3 && b.Vector().size()==3
+                && a[2]==b[2] && std::abs(a[0].Integer()-b[0].Integer())<=1 && std::abs(a[1].Integer()-b[1].Integer())<=1;
+        };
+        const auto & original=find(world,"towns",goal["target_ref"]);
+        if(!original.isNull()) return near(original);
+        if(plan()["policy"]["allow_route_repair"].Bool())
+            for(const auto & town:world["towns"].Vector()) if(near(town)) return true;
+        return false;
+    }
     static bool failedCommitment(const JsonNode & status)
     {
         if(status["state"].String()=="cancelled") return true;
@@ -105,6 +120,12 @@ public:
     {
         const auto & status=state["statuses"][id];
         return status["state"].String()!="completed" && status["state"].String()!="cancelled" && !failedCommitment(status);
+    }
+    bool requiresStabilization(const std::string & id) const
+    {
+        const auto & status=state["statuses"][id];
+        return status["reason"].String()=="force_floor_breached"
+            || (status["reason"].String()=="force_continuity_unconfirmed" && status["stabilized_day"].isNull());
     }
     // A town's upper army may physically belong to its garrison hero. The
     // current owned-world projection identifies that one pool without pointers.
@@ -194,6 +215,9 @@ public:
                     || !integer(status["unconfirmed_since_day"],saved["accepted_day"].Integer(),goal["complete_when"]["value"].Integer())) return;
                 if(status["failure_reason"].String()=="force_continuity_unconfirmed" && status["reason"].String()!="deadline_missed") return;
             }
+            if(!status["stabilized_day"].isNull()
+                && ((status["reason"].String()!="force_continuity_unconfirmed" && status["failure_reason"].String()!="force_continuity_unconfirmed")
+                    || !integer(status["stabilized_day"],status["unconfirmed_since_day"].Integer(),goal["deadline_day"].Integer()))) return;
         }
         state = saved;
         restoreError.clear();
@@ -404,6 +428,11 @@ public:
                 || (previous["reason"].String()=="deadline_missed" && previous["failure_reason"].String()=="force_continuity_unconfirmed"))
             {
                 status=previous;
+                // The missing historical interval remains unconfirmed. Once
+                // its hero is observed at refuge with the promised force,
+                // stop repeating that return before another compatible task.
+                if(status["stabilized_day"].isNull() && world["day"].Integer()<=goal["deadline_day"].Integer()
+                    && atPreservationRefuge(goal,world)) status["stabilized_day"]=world["day"];
                 if(world["day"].Integer()>goal["deadline_day"].Integer())
                 {
                     status["reason"].String()="deadline_missed";
@@ -433,17 +462,7 @@ public:
             { status["state"].String()="blocked";status["reason"].String()="target_no_longer_owned"; }
             else if(goal["kind"].String() == "preserve_force")
             {
-                const auto & hero = find(world, "heroes", goal["actor_ref"]);
-                const auto & original = find(world, "towns", goal["target_ref"]);
-                auto near = [&](const JsonNode & town) {
-                    const auto & a=hero["position"], & b=town["position"];
-                    return a.isVector() && b.isVector() && a.Vector().size()==3 && b.Vector().size()==3
-                        && a[2]==b[2] && std::abs(a[0].Integer()-b[0].Integer())<=1 && std::abs(a[1].Integer()-b[1].Integer())<=1;
-                };
-                bool holding=!original.isNull() && near(original);
-                if(original.isNull() && plan()["policy"]["allow_route_repair"].Bool())
-                    for(const auto & town:world["towns"].Vector()) holding |= near(town);
-                if(holding && hero["army_value"].Integer() >= goal["min_army_value"].Integer())
+                if(atPreservationRefuge(goal,world))
                 { status["state"].String() = "waiting"; status["reason"].String() = "holding_preserved_force"; }
             }
             if(status["state"].String() == "ready" || status["state"].String() == "waiting")
@@ -473,6 +492,7 @@ public:
                 || status["reason"].String()=="force_floor_breached" || failedCommitment(status)) continue;
             status["state"].String()="blocked";
             status["reason"].String()="force_continuity_unconfirmed";
+            status.Struct().erase("stabilized_day");
             if(status["unconfirmed_since_day"].isNull()) status["unconfirmed_since_day"].Integer()=firstDay;
         }
     }

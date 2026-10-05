@@ -9,6 +9,79 @@
 
 namespace nullkiller3
 {
+// A value-only strategic boundary; native purchases remain separate commands.
+inline std::string allocationCheckpointFacts(const CampaignState & campaign,const JsonNode & world)
+{
+    using Funds=std::array<int64_t,7>;
+    Funds free{};
+    const auto protectedFunds=campaign.reservedResources();
+    for(int i=0;i<7;++i) free[i]=std::max<int64_t>(0,world["resources"][i].Integer()-protectedFunds[i].Integer());
+    const auto day=world["day"].Integer(),week=std::max<int64_t>(1,world["days_in_week"].Integer());
+    std::set<std::string> choices;
+    for(const auto & town:world["towns"].Vector())
+    {
+        bool committed=false;
+        for(const auto & goal:campaign.plan()["goals"].Vector())
+            if(campaign.holdsCommitment(goal["id"].String()) && goal["target_ref"]==town["ref"]
+                && (goal["kind"].String()=="develop_town" || goal["kind"].String()=="reinforce_hero"
+                    || goal["kind"].String()=="defend_area")) committed=true;
+        if(committed) continue; // A supported promised purchase is native continuation.
+        for(const bool afterGrowth:{false,true})
+        {
+            if(afterGrowth && day%week!=0) continue;
+            Funds armyCost{};
+            JsonNode stock;stock.Vector();
+            int64_t power=0;
+            bool fundable=true,paid=false;
+            for(const auto & unit:town["recruitment_options"].Vector())
+            {
+                const auto count=unit["available"].Integer()+(afterGrowth ? unit["weekly_growth"].Integer() : 0);
+                if(count<=0 || unit["unit_value"].Integer()<=0) continue;
+                for(int i=0;i<7;++i)
+                {
+                    const auto price=unit["unit_cost"][i].Integer();
+                    if(price<0 || (price>0 && count>(free[i]-armyCost[i])/price)) { fundable=false;break; }
+                    armyCost[i]+=count*price;paid |= price>0;
+                }
+                if(!fundable) break;
+                if(count>(std::numeric_limits<int64_t>::max()-power)/unit["unit_value"].Integer())
+                    return "allocation_context_overflow";
+                power+=count*unit["unit_value"].Integer();
+                JsonNode item;item["creature"]=unit["creature"];item["count"].Integer()=count;
+                item["unit_cost"]=unit["unit_cost"];item["unit_value"]=unit["unit_value"];
+                stock.Vector().push_back(item);
+            }
+            if(!fundable || !paid || !power) continue;
+            std::ranges::sort(stock.Vector(),[](const auto & a,const auto & b){return a["creature"].Integer()<b["creature"].Integer();});
+            for(const auto & option:town["building_options"].Vector())
+            {
+                if(!option["supported"].Bool() || option["availability"].String()!="allowed_now"
+                    || option["income_delta"][6].Integer()<=0) continue;
+                bool affordable=true,conflict=false;
+                for(int i=0;i<7;++i)
+                {
+                    const auto cost=option["cost"][i].Integer();
+                    affordable &= cost>=0 && cost<=free[i];
+                    conflict |= cost>free[i]-armyCost[i];
+                }
+                if(!affordable || !conflict) continue;
+                JsonNode choice;choice["town_ref"]=town["ref"];choice["building_id"]=option["id"];
+                choice["investment_cost"]=option["cost"];choice["income_delta"]=option["income_delta"];
+                choice["recruitment_stock"]=stock;choice["army_value"].Integer()=power;
+                // These are conditional budget alternatives, not battle or delivery
+                // guarantees. Packing, transport and existing force floors remain
+                // authoritative at command admission. No raw cash/day/route score
+                // enters the decision identity; affordability crossings do.
+                choices.insert(choice.toCompactString());
+            }
+        }
+    }
+    std::string facts;
+    for(const auto & choice:choices) { facts+=choice;facts+='\n'; }
+    // Keep the complete own building/stock DTO in the request. Never select a
+    // top-K subset when a pathological map exceeds the signal/storage bound.
+    return facts.size()>8192 ? "allocation_context_overflow" : facts;
+}
 inline bool supportedDeliveryWait(const JsonNode & forecasts,const JsonNode & goal,int64_t day)
 {
     for(const auto & delivery:forecasts["deliveries"].Vector())

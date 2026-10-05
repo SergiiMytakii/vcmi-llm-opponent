@@ -1383,6 +1383,42 @@ This is an open defect to investigate after the requested checkpoint, not a
 passing restoration claim. Private runs report cleanup and protected-file
 preservation. Raw build/run artifacts remain local under ignored `.build/`.
 
+## Continuation after intermediate commit d6a0ab0: one safe return
+
+The failed checkpoint exposes a real conflict: `backup` preservation repeatedly
+returns the helper to its own town at the start of each day, then `deliver` moves
+it away again. The unconfirmed historical interval remains a failure of proof;
+it must not be turned into confirmed preservation. The native recovery now
+records an observed safe return separately and stops repeating that stabilization.
+Current force floors remain protected, a new interrupted interval rearms recovery,
+and an actual below-floor observation still requires stabilization. The safe-return
+date is typed and durable, and malformed dates discard executable intent.
+
+The public campaign test first fails at that observed-return boundary
+(`nk3-save-refuge-contract-red.log`). After repair, all three rebuilt contract
+drivers pass (`nk3-save-refuge-final-contract-proof.log`). Five real courier
+scenarios pass in 49.386 seconds (`nk3-save-refuge-runtime-green.log`), including
+native/model local repair, the fully pledged negative control, defense holding and
+a new multiday saved delivery. Ordinary candidate:
+`.build/nk3-save-refuge-installed/VCMI.app`, config
+`.build/nk3-save-refuge-config.json`.
+
+The exact previously failing save is also resumed, with matching SHA-256
+`356437b137f839a47af85c8de18fc14a5d9894cda7b03a8219543e617b3fe8a7`.
+Run `nk3-save-refuge-original-checkpoint` starts on own day 2, returns safely once,
+and completes delivery on day 3 instead of missing day 6. Its source stays above
+the pledged 1,000 floor. The pending day-2 task is reconciled once; an independent
+day-3 shutdown interruption is retained separately, not counted as a saved-task
+replay. `backup` correctly remains `force_continuity_unconfirmed`, with its
+observed `stabilized_day: 2`; no historical continuity is fabricated.
+Evidence: `nk3-save-refuge-original-checkpoint-proof.json` and
+`nk3-save-refuge-original-checkpoint-validated.log`. The first one-off check
+mistakenly counted the shutdown interruption as a second load recovery; its
+failure log is preserved, and the corrected check reads the same completed run.
+All private runs report cleanup, matching assignments and protected-file
+preservation. This continuation is not included in the requested intermediate
+commit and has not received final independent Review.
+
 ## Remaining acceptance work
 
 Material weekly/checkpoint choices still need a complete requirement-to-behavior
@@ -1402,3 +1438,169 @@ Teleports and adventure movement spells remain explicitly unsupported; no claim
 of those mechanics is required from the currently advertised capability set.
 Full completion and comparative superiority are not claimed. The intermediate
 checkpoint is explicitly requested; final delivery remains pending.
+
+## Planned economic review and bounded comparison screen
+
+The missing three-day/pre-growth allocation boundary is now implemented. It
+quotes individually funded income-building and recruitment alternatives that
+compete for unreserved resources. Existing supported commitments remain native
+continuation; raw cash/day changes do not create a new question. The public
+contract first failed with absent alternatives (`nk3-allocation-checkpoint-red.log`).
+All three current contract drivers pass. Two ordinary engine scenarios pass in
+20.530 seconds, with exactly one allocation question on day 4 or day 7 while the
+long force-preservation goal remains waiting (`nk3-allocation-checkpoint-runtime-final.log`).
+Five ordinary cash/growth/save/courier/joint-economy regressions pass in 69.767
+seconds (`nk3-allocation-checkpoint-negative-and-save-regressions.log`). The first
+proof fixture was jointly affordable and correctly produced no question; the
+corrected fixture retains that failed premise. An intermediate assertion split
+multiline JSON facts into lines; the corrected decoder reads complete JSON values.
+Both failure logs remain local evidence.
+
+The user selected a 12-game preliminary screen, replacing the proposed 72 games
+for this first comparison: three frozen land maps, four AI variants, seed 44,
+with the candidate side fixed within each map and alternating across maps. The
+limits are 42 observed game days and 900 wall seconds per cell; day polling may
+overshoot and its actual last day is recorded. Limit stops are censored, never
+a draw or victory. Baseline sources and binaries remain hash-pinned. No tuning
+is performed against the holdout screen. The first four baseline cells have
+finished; NK3 cells remain gated on current-source runtime proof. Artifacts:
+`.build/nk3-comparison-screen-12/series.json`, baseline configs/runs, supervisor
+source and `seed-application-proof.json`. The pinned engine logs its first RNG
+draw under the misleading label "Using random seed", not the seed itself. A
+small platform-matched C++ reproduction gives seed 44's first draw 1754471130;
+all four started cases match, with the code reading the configured server seed.
+This screen provides functional/cost evidence; statistical superiority is not
+claimed. Final results are still pending.
+
+## Objective progress and actual resource flows: runtime proof pending
+
+The requirement audit found that changing participant position alone refreshed
+the operation progress clock. The public test fails at a lateral step
+(`nk3-movement-progress-red.log`). The initial node-count implementation was rejected before candidate games:
+AINodeStorage::commit skips ordinary previous nodes, so reconstruction length
+is not actual travel length. Tracking now uses the best quoted native remaining
+movement cost and requires actual participant movement before lowering the
+progress clock; refill alone can improve its baseline, never the clock. For
+unestablished full routes, the existing frontier-repair heuristic measures
+approach to the known target, explicitly without an ETA claim. A retreat or
+revisit cannot reset the clock. Legitimate approaches remain progress. The
+route traveler/destination identify its baseline, so a replacement courier starts
+its own distance baseline rather than inheriting the lost source's shortest path.
+The public replacement case first fails (`nk3-replacement-progress-red2.log`); an
+earlier attempt had a test-variable naming collision and did not reach that
+assertion. Save/load retains the typed best distance.
+
+The previous recorder proved net balance changes, which cannot measure gross
+spending after a pickup. The public resource-flow test first fails at a 2,000
+gold pickup followed by 2,500 spending (`nk3-resource-ledger-red.log`). The own
+SetResources callback now records debits/credits within the active native task.
+Receipts reconcile to the observed final balance; a missing packet or bounded
+overflow cannot produce complete totals. Interrupted/restored tasks do not
+fabricate an expense receipt. Resource losses and trades are actual debits, but
+packet cause and purchase completion are not inferred from them. Reports expose
+coverage alongside these totals. This is engine-confirmed resource movement,
+not an attribution of every debit to a particular purchase.
+
+The ordinary source builds and installs, and all three latest public drivers pass
+(`nk3-objective-ledger-final-contract.log`). The offline suite ran 189 cases,
+with 83 native/probe cases skipped for missing runtime configuration. Its only
+failed module was the 12 transport tests because the driver path was omitted;
+after rebuilding and supplying EXCHANGE_DRIVER all 12 pass in 1.936 seconds.
+The original error log is retained. A sequential supervisor will run fresh
+ordinary gameplay, save/load and paired visibility proof after the six baseline
+cases finish; candidate/model screen runs remain gated on that proof. Current
+ordinary candidate: `.build/nk3-objective-cost-final-installed/VCMI.app`.
+The recipient-approach test also first fails before repair
+(`nk3-recipient-progress-red.log`): either participant approaching the meeting
+counts, while neither daily movement refill nor a lateral step does.
+Final independent Review and delivery commit are still pending.
+
+Current-source runtime gate now passes all 17 selected ordinary-engine tests in
+278.111 seconds (`nk3-objective-ledger-final-runtime.log`): planned allocation
+review, exact acknowledged build debits in shared memory/report, near/far
+courier routes, ineffective-work/revision/save controls, courier replacement
+and saved continuation, supported growth/cash waiting, and paired hidden-world
+rankings/commands/model-input/timeout fallback. The tracked patch and every
+owned copied source match the prepared tree. Source, controller snapshot and
+ordinary bundle are frozen in
+`.build/nk3-comparison-screen-12/candidate-provenance.json` before six NK3 cells.
+The geometric approach measure is explicitly conditional information-gathering
+progress toward a known target, never a full-route reachability or ETA claim.
+A review observation about unavailable full routes is not treated as evidence
+that a route is impossible; admitted safe frontier repair and direct approach
+are covered by the far-route ordinary fixture.
+
+## User correction: ExternalAI deprecated, NK3 versus NK2 only
+
+The user explicitly retired ExternalAI from further testing and comparison.
+This supersedes the earlier four-variant preliminary screen, including its
+ExternalAI cells, NK2 self-controls and NK3 native-only ablations. Prior files
+remain historical evidence; they do not enter the final comparative cohort.
+Shared transport/memory components remain reused by NK3.
+
+The selected volume remains 12 actual direct matches: three frozen land maps
+x both starting sides x seeds 44 and 45, full Nullkiller3 versus Nullkiller2,
+impossible difficulty and experience off. The already-started three matching
+NK3/model seed-44 cells are reused; nine additional cells cover the other side
+and seed. The ordinary candidate and controller remain hash-frozen before
+play. All matches are sequential, with 900 wall seconds and 42 observed days
+per match. Deadline/day-cap termination is censoring, not a draw or a loss.
+Artifacts: `.build/nk3-head-to-head-12/series.json`, configs, sequential
+supervisor, per-run limit receipts and aggregate. Outcomes remain pending.
+
+Initial independent full Review completed against baseline `033a97d` and the
+77-file settled target (`nullkiller3-final-review.diff`, SHA256
+`27b0153cc768a969d187f2876293cd0b4dddd17e2ab2004a93ce051157b3c773`).
+Spec found missing lobby-public special victory text; unsupported execution
+must stay explicit and hidden event identities must not be serialized.
+Standards found strongest-surplus helper selection could persist an admitted-
+late courier while a weaker compatible helper could deliver on time. Existing
+route/risk/reserve admission must select and reconsider replacements. The
+spellbook reserve concern was disproved by getFreeGold -> NK3 getFreeResources.
+Both lenses explicitly leave final cohort/episode evidence pending.
+
+Before repair, all 28 frozen project engine/patch files were hash-verified and
+copied to `.build/nk3-head-to-head-12/frozen-project-source/`; the frozen bundle
+and controller remain unchanged. The task-owned queue supports a pause between
+private games for focused regression proof. No game is changed mid-run.
+The public-victory regression is queued against the unchanged ordinary bundle
+after the existing three direct matches finish.
+
+## User replacement: manual medium four-player game
+
+The user cancelled further automated test matches and requested committing
+the repairs, then starting the familiar M map: red human, one full NK3 and
+two NK2 opponents. The pending nine-match queue is stopped. The three prior
+head-to-head matches are censored (two observed-day caps, one wall cap); no
+competitive superiority or victory is claimed. No further synthetic games
+or test suites are run under this instruction.
+
+The public special-victory input regression failed at the missing lobby text
+(`nk3-public-victory-red.log`, 6.390s), then passed on the separately installed
+ordinary bundle (`nk3-public-victory-green.log`, 6.970s). The helper-choice
+fixture failed to establish its courier-loss premise, so it is not a proved
+regression and its new test source is removed. Its failed local evidence is
+retained. The route-admission repair follows the verified control-flow defect
+and reuses the existing deadline/risk/reserve gate with prospective source
+bindings; runtime coverage of that particular replacement remains unproved.
+Source/build review and the user-requested playable session replace additional
+automatic test runs.
+
+
+Targeted independent repair Review approved both Spec and Standards against
+`nullkiller3-repair-review.diff`, SHA256
+`c131d16e8cb14d81826327a4664f1e77864f09930edd80aac9e3d9283854af63`.
+Both lenses treated missing helper runtime coverage as a nonblocking observation
+under the explicit user cancellation. No further test is authorized or run.
+The final ordinary client/server/NK3 build and relocatable CMake installation
+completed successfully: `nk3-manual-four-player-final-build.log` and
+`nk3-manual-four-player-install.log`. The new bundle is
+`.build/nk3-manual-four-player-installed/VCMI.app`.
+
+The user identified the requested map as "один за всех": the installed original
+`Maps/And One for All.h3m`, public name "И один за всех", H3M SOD format 28,
+72 x 72 (M), surface only. The requested human session uses a separate copied
+profile, red human, blue Nullkiller3/model and two Nullkiller2 opponents; ordinary
+GUI startup is required because --testmap and the automated runner force AI-only
+play. Session artifacts stay private under .build; the installed profile is
+preserved. The session is handed to the user without a game-duration limit.

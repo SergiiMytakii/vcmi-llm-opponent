@@ -3,6 +3,7 @@
 #include "StrategicDecision.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
+#include "ResourceLedger.h"
 #include <iostream>
 #include <stdexcept>
 JsonNode json(const std::string & value)
@@ -18,6 +19,63 @@ int main()
     try
     {
         auto namespaceState=json(R"({"object_ids":{"0":0,"17":1},"native_campaign":{"version":3},"request_arbiter":{"tokens":0},"experience_id":"retained"})");
+        nullkiller3::ResourceLedger finances;
+        finances.begin(json("[0,0,0,0,0,0,1000]"));
+        finances.received(json("[0,0,0,0,0,0,3000]"));
+        finances.received(json("[0,0,0,0,0,0,500]"));
+        const auto expense=finances.receipt(json("[0,0,0,0,0,0,500]"));
+        require(expense["debits"][6].Integer()==2500,"task expenses were reduced by a prior resource pickup");
+        require(expense["credits"][6].Integer()==2000 && expense["coverage"].String()=="complete",
+            "acknowledged income was not separated from task expense");
+        require(finances.receipt(json("[0,0,0,0,0,0,400]"))["debits"].isNull(),
+            "an unobserved final balance fabricated a complete expense receipt");
+        finances.begin(json("[10,0,0,0,0,0,500]"));
+        finances.received(json("[0,0,0,0,0,0,1000]"));
+        const auto traded=finances.receipt(json("[0,0,0,0,0,0,1000]"));
+        require(traded["debits"][0].Integer()==10 && traded["credits"][6].Integer()==500
+            && traded["debits"][6].Integer()==0,"a new task retained old spending or netted a trade across resources");
+        const auto march=json(R"({"kind":"capture_mine","actor_ref":"object:0","target_ref":"object:2"})");
+        auto marchFacts=json(R"({"object:0":{"position":[1,1,0],"army_value":1000,"in_boat":false},"route_cost":5})");
+        auto marchClock=nullkiller3::operationProgress(JsonNode(),march,marchFacts,1);
+        marchClock["last_no_change_day"].Integer()=2;
+        marchFacts["object:0"]["position"][1].Integer()=2;
+        const auto lateral=nullkiller3::operationProgress(marchClock,march,marchFacts,2);
+        require(lateral["last_progress_day"].Integer()==1 && nullkiller3::operationStalled(lateral,JsonNode(),"mine",3),
+            "movement without approaching the objective refreshed the progress clock");
+        marchFacts["route_cost"].Integer()=4;
+        const auto closer=nullkiller3::operationProgress(marchClock,march,marchFacts,2);
+        require(closer["last_progress_day"].Integer()==2 && !nullkiller3::operationStalled(closer,JsonNode(),"mine",3),
+            "a supported approach to the objective was treated as stagnation");
+        auto retreatFacts=marchFacts;retreatFacts["route_cost"].Integer()=6;
+        auto retreat=nullkiller3::operationProgress(closer,march,retreatFacts,3);
+        retreat["last_no_change_day"].Integer()=3;
+        const auto revisit=nullkiller3::operationProgress(retreat,march,marchFacts,4);
+        require(revisit["last_progress_day"].Integer()==2 && nullkiller3::operationStalled(revisit,JsonNode(),"mine",4),
+            "revisiting the same best route position erased an unproductive movement loop");
+        auto replacementFacts=marchFacts;
+        replacementFacts["object:3"]=json(R"({"position":[8,8,0],"army_value":1000})");
+        replacementFacts["route_subject"]=json(R"({"traveler":"object:3","destination":"object:0"})");
+        replacementFacts["route_cost"].Integer()=8;
+        const auto replacementClock=nullkiller3::operationProgress(closer,march,replacementFacts,3);
+        require(replacementClock["best_route_cost"].Integer()==8,"a replacement courier inherited the lost source's shortest route");
+        replacementFacts["route_cost"].Integer()=7;
+        replacementFacts["object:3"]["position"][0].Integer()=7;
+        require(nullkiller3::operationProgress(replacementClock,march,replacementFacts,4)["last_progress_day"].Integer()==4,
+            "a replacement courier approaching the recipient was marked stalled");
+        auto recipientClock=nullkiller3::operationProgress(replacementClock,march,replacementFacts,4);
+        replacementFacts["object:0"]["position"][0].Integer()=2;
+        replacementFacts["route_cost"].Integer()=6;
+        require(nullkiller3::operationProgress(recipientClock,march,replacementFacts,5)["last_progress_day"].Integer()==5,
+            "the recipient approaching its courier was treated as stagnation");
+        auto refillFacts=marchFacts;refillFacts["route_cost"].Integer()=3;
+        require(nullkiller3::operationProgress(closer,march,refillFacts,3)["last_progress_day"].Integer()==2,
+            "daily movement refill without actual travel was counted as objective progress");
+        auto savedMarch=namespaceState;savedMarch["operation_progress"]["mine"]=revisit;
+        require(nullkiller3::restoreNativeNamespace(savedMarch)["operation_progress"]["mine"]["best_route_cost"].Integer()==4,
+            "loading forgot the previous best objective position");
+        savedMarch["operation_progress"]["mine"]["best_route_cost"].String()="invalid";
+        require(nullkiller3::restoreNativeNamespace(savedMarch)["native_campaign"].isNull(),
+            "malformed saved route progress retained executable intent");
         auto budget=namespaceState["request_arbiter"];
         require(nullkiller3::validNativeAliases(namespaceState["object_ids"]),"canonical aliases rejected");
         for(const auto & aliases:{json(R"({"bad":0})"),json(R"({"0":"bad"})"),json(R"({"0":0,"17":0})"),json(R"({"9999999999999999":0})"),json(R"({"01":0})")})
@@ -28,7 +86,7 @@ int main()
             require(restored["request_arbiter"]==budget,"intent reset refunded spent budget");
             require(restored["experience_id"]==namespaceState["experience_id"],"intent reset changed experience owner");
         }
-        for(const auto * field:{"strategy_metadata","local_repairs","delivery_receipts","goal_blockers","memory","pending_native_task","building_progress","operation_progress"})
+        for(const auto * field:{"strategy_metadata","local_repairs","delivery_receipts","goal_blockers","memory","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
         {
             auto malformed=namespaceState;malformed[field].String()="invalid";
             const auto restored=nullkiller3::restoreNativeNamespace(malformed);
@@ -36,6 +94,14 @@ int main()
             require(restored["request_arbiter"]==budget,"malformed state refunded spent budget");
         }
         require(nullkiller3::restoreNativeNamespace(json("1"))["request_arbiter"].isString(),"invalid root granted fresh model budget");
+        auto checkpointNamespace=namespaceState;
+        checkpointNamespace["checkpoint_baseline"]=json(R"({"day":4,"facts":"funded-allocation"})");
+        require(nullkiller3::restoreNativeNamespace(checkpointNamespace)["checkpoint_baseline"]==checkpointNamespace["checkpoint_baseline"],
+            "checkpoint decision baseline did not survive load");
+        checkpointNamespace["checkpoint_baseline"]["day"].Integer()=-1;
+        const auto invalidCheckpoint=nullkiller3::restoreNativeNamespace(checkpointNamespace);
+        require(invalidCheckpoint["checkpoint_baseline"].isNull() && invalidCheckpoint["native_campaign"].isNull()
+            && invalidCheckpoint["request_arbiter"]==budget,"malformed checkpoint refunded budget or retained executable intent");
         auto progressNamespace=namespaceState;
         progressNamespace["building_progress"]=json(R"({"object:1:3":{"remaining":[2,3],"last_progress_day":2}})");
         require(nullkiller3::restoreNativeNamespace(progressNamespace)["building_progress"]==progressNamespace["building_progress"],
@@ -253,6 +319,33 @@ int main()
         require(reloadedUncertain.restoreReason().empty(),"unconfirmed force interval did not survive serialization");
         require(reloadedUncertain.review(uncertainWorld)["hold"]["state"].String()!="completed",
             "a reloaded endpoint erased the unknown interval");
+        auto refugeWorld=world;refugeWorld["day"].Integer()=2;
+        refugeWorld["heroes"][1]["position"]=json("[10,12,0]");
+        auto refugeGuard=guard;refugeGuard.unconfirmedExecution(2);
+        require(refugeGuard.review(refugeWorld)["hold"]["stabilized_day"].isNull(),
+            "an unsafe saved endpoint claimed stabilization");
+        require(refugeGuard.requiresStabilization("hold"),"unknown unsafe endpoint skipped safe return");
+        refugeWorld["day"].Integer()=3;
+        refugeWorld["heroes"][1]["position"]=json("[6,12,0]");
+        require(refugeGuard.review(refugeWorld)["hold"]["stabilized_day"].Integer()==3,
+            "an observed safe return did not discharge repeated stabilization");
+        refugeGuard=nullkiller3::CampaignState(refugeGuard.save());
+        require(refugeGuard.restoreReason().empty(),"safe-return evidence did not restore");
+        require(!refugeGuard.requiresStabilization("hold"),"the saved safe return remained urgent");
+        refugeWorld["day"].Integer()=4;
+        refugeWorld["heroes"][1]["position"]=json("[10,12,0]");
+        require(refugeGuard.review(refugeWorld)["hold"]["stabilized_day"].Integer()==3
+            && refugeGuard.statuses()["hold"]["reason"].String()=="force_continuity_unconfirmed",
+            "later delivery erased the safe return or invented historical force continuity");
+        auto malformedRefuge=refugeGuard.save();
+        malformedRefuge["statuses"]["hold"]["stabilized_day"].Integer()=7;
+        require(nullkiller3::CampaignState(malformedRefuge).plan().isNull(),"an invalid stabilization date restored");
+        refugeGuard.unconfirmedExecution(4);
+        require(refugeGuard.review(refugeWorld)["hold"]["stabilized_day"].isNull(),
+            "a new unknown execution retained an earlier stabilization");
+        require(refugeGuard.requiresStabilization("hold"),"a new missing interval did not rearm safe return");
+        refugeGuard.observeForceMinimum("object:1",4,900);
+        require(refugeGuard.requiresStabilization("hold"),"an actual force loss skipped stabilization");
         uncertainWorld["day"].Integer()=7;
         const auto expiredUncertain=reloadedUncertain.review(uncertainWorld)["hold"];
         require(expiredUncertain["reason"].String()=="deadline_missed"
@@ -310,6 +403,43 @@ int main()
         const auto & army = forecast["alternatives"][1];
         require(army["approach"].String() == "offense" && army["army_purchased_value"].Integer() == 1000,"early army affordability incorrect");
         require(army["resources_at_deadline"][6].Integer() >= 1000,"army forecast consumed protected funds");
+        auto choiceWorld=economyWorld;
+        choiceWorld["towns"][0]["ref"].String()="object:2";
+        choiceWorld["daily_income"]=json("[0,0,0,0,0,0,0]");
+        choiceWorld["day"].Integer()=4;
+        auto choiceBaseline=json(R"({"day":1,"facts":""})");
+        const auto choices=nullkiller3::allocationCheckpointFacts(guard,choiceWorld);
+        require(!choices.empty(),"mutually exclusive funded income/army choices missing from checkpoint");
+        require(nullkiller3::allocationCheckpointSignals(guard,choiceWorld,choiceBaseline,true).size()==1,
+            "three-day strategic allocation checkpoint missing before horizon expiry");
+        choiceBaseline["facts"].String()=choices;
+        choiceWorld["resources"][6].Integer()=2200;
+        require(nullkiller3::allocationCheckpointSignals(guard,choiceWorld,choiceBaseline,true).empty(),
+            "routine cash inside the same allocation choice repeated a review");
+        choiceWorld["resources"][6].Integer()=1100;
+        require(nullkiller3::allocationCheckpointSignals(guard,choiceWorld,choiceBaseline,true).empty(),
+            "an unfunded investment requested a choice");
+        choiceWorld["resources"][6].Integer()=4000;
+        require(nullkiller3::allocationCheckpointSignals(guard,choiceWorld,choiceBaseline,true).empty(),
+            "jointly affordable ordinary purchases requested a conflict review");
+        choiceWorld["resources"][6].Integer()=3000;
+        choiceWorld["day"].Integer()=7;choiceBaseline["day"].Integer()=5;choiceBaseline["facts"].String()="";
+        require(nullkiller3::allocationCheckpointSignals(guard,choiceWorld,choiceBaseline,true).size()==1,
+            "pre-growth strategic allocation checkpoint missing before three days");
+        choiceWorld["day"].Integer()=6;
+        require(nullkiller3::allocationCheckpointSignals(guard,choiceWorld,choiceBaseline,true).empty(),
+            "ordinary daily review ignored its planned checkpoint window");
+        auto scheduledPlan=guard.plan();auto & scheduledGoal=scheduledPlan["goals"][0];
+        scheduledGoal["kind"].String()="develop_town";scheduledGoal["actor_ref"]=JsonNode();
+        scheduledGoal["building_id"].Integer()=10;scheduledGoal["min_army_value"].Integer()=0;
+        scheduledGoal["required_capabilities"]=json(R"(["build"])");
+        scheduledGoal["complete_when"]=json(R"({"kind":"building_present","value":10})");
+        auto scheduledWorld=choiceWorld;scheduledWorld["capabilities"]=json(R"(["build"])");
+        scheduledWorld["player"].Integer()=0;scheduledWorld["towns"][0]["buildings"].Vector();
+        nullkiller3::CampaignState scheduledCampaign;
+        require(scheduledCampaign.accept(scheduledPlan,scheduledWorld,reason),reason.c_str());
+        require(nullkiller3::allocationCheckpointFacts(scheduledCampaign,scheduledWorld).empty(),
+            "an accepted supported investment became a new allocation question");
         economyWorld["towns"][0]["building_options"][0]["availability"].String()="missing_prerequisites";
         economyWorld["towns"][0]["building_options"][0]["requirements"]=json(R"(["allOf",5])");
         economyWorld["towns"][0]["building_options"].Vector().push_back(json(R"({"id":5,"supported":true,"availability":"allowed_now","cost":[0,0,0,0,0,0,900],"income_delta":[0,0,0,0,0,0,0],"requirements":["allOf"]})"));

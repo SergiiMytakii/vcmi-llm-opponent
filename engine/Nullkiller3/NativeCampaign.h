@@ -2,6 +2,7 @@
 
 #include "CampaignState.h"
 #include "RequestArbiter.h"
+#include "ResourceLedger.h"
 #include <atomic>
 #include <mutex>
 #include <chrono>
@@ -37,6 +38,8 @@ class NativeCampaign
     std::string emergencyTown;
     TResources emergencyCost, emergencyFunds;
     mutable std::mutex executionMutex;
+    ResourceLedger resourceLedger;
+    bool resourceLedgerActive=false;
     std::string executingGoal() const;
     bool seedRead = false;
     bool repairedSourcesChanged = false;
@@ -63,6 +66,7 @@ class NativeCampaign
     void traceCampaign() const;
     void observeBuildingProgress();
     void observeOperationProgress();
+    void recordCheckpointBaseline();
     std::vector<StrategicSignal> strategicSignals(NK2AI::Nullkiller & ai);
 
     std::string reference(const CGObjectInstance * object);
@@ -73,7 +77,8 @@ class NativeCampaign
     NK2AI::Goals::TGoalVec deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * recipient,const CGObjectInstance * source) const;
     NK2AI::Goals::TGoalVec repairRoute(NK2AI::Nullkiller & ai, const CGHeroInstance * hero, const CGObjectInstance * destination) const;
     void rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals::TGoalVec generated,
-                       const JsonNode & goal, const NK2AI::Nullkiller & ai);
+                       const JsonNode & goal, const NK2AI::Nullkiller & ai,
+                       const std::map<std::string,std::string> * prospectiveSources = nullptr);
 public:
     explicit NativeCampaign(const JsonNode & saved);
     bool reviewStrategy(NK2AI::Nullkiller & ai);
@@ -85,6 +90,7 @@ public:
     void observe(NK2AI::Nullkiller & ai);
     void resourceVisit(const CGHeroInstance * hero, const CGObjectInstance * object, bool start);
     void forceChanged(const CGHeroInstance * hero, int day);
+    void resourcesChanged(const TResources & resources);
     void battleResult(JsonNode ownResult);
     void terminalResult(int player,int day,bool won);
     void recordDelivery(NK2AI::Nullkiller & ai, const CGHeroInstance * receiver, const CArmedInstance * source,

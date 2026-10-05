@@ -117,17 +117,24 @@ void NativeCampaign::observeOperationProgress()
                 facts["source_floor"]=delivery["source_floor"];
         auto & progress=current[goal["id"].String()];
         for(const auto & [id,previous]:persisted["operation_progress"].Struct())
-            if(previous["objective"]==objective && previous["facts"]==facts) { progress=previous;break; }
-        if(progress.isNull()) progress["last_progress_day"]=world["day"];
-        progress["objective"]=objective;progress["facts"]=facts;
+            if(previous["objective"]==objective) { progress=previous;break; }
+        progress=operationProgress(progress,objective,facts,world["day"].Integer());
     }
     persisted["operation_progress"]=current;
+}
+void NativeCampaign::recordCheckpointBaseline()
+{
+    JsonNode baseline;baseline["day"]=world["day"];
+    baseline["facts"].String()=allocationCheckpointFacts(campaign,world);
+    persisted["checkpoint_baseline"]=baseline;
 }
 std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller & ai)
 {
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
+    const auto checkpoint=allocationCheckpointSignals(campaign,world,persisted["checkpoint_baseline"],actionable);
+    result.insert(result.end(),checkpoint.begin(),checkpoint.end());
     auto losses=battleLossSignals(campaign.plan(),persisted["memory"],actionable);
     std::erase_if(losses,[&](const auto & signal) {
         if(!locallyRepairedCourierLoss(ai,signal.question.substr(std::string("battle_loss:").size()))) return false;
@@ -223,6 +230,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     // still exists. These value-backed tasks expire here; none crosses a wait.
     generate(ai,false);
     generate(ai,true);
+    if(persisted["checkpoint_baseline"].isNull()
+        || persisted["checkpoint_baseline"]["day"].Integer()>world["day"].Integer()) recordCheckpointBaseline();
     arbiter.beginTurn(world["day"].Integer(), {140000,120000,20000});
     auto decision = arbiter.consider(strategicSignals(ai));
     JsonNode trace;
@@ -268,6 +277,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     const auto input = externalai::transportJSON(request.toCompactString());
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
+    recordCheckpointBaseline(); // A timeout/invalid reply cannot repeat this same choice.
     persisted["request_sequence"].Integer() = sequence;
     persisted["pending_strategic_questions"] = request["signals"];
     ai.invalidatePathfinderData();
@@ -332,6 +342,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
             // the goal list. Rebuild those owners before creating any command.
             ai.invalidatePathfinderData();
             ai.updateState();
+            recordCheckpointBaseline(); // New goals/reserves own the next review's comparison.
         }
     }
     else if(reason.empty()) reason = "stale_or_cancelled_strategic_reply";

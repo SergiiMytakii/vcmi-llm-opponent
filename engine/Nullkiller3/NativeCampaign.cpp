@@ -109,7 +109,9 @@ bool NativeCampaign::repairDeliverySources(NK2AI::Nullkiller & ai)
         const auto sources=helperSources();
         const auto ref=sources.count(goal["id"].String()) ? JsonNode(sources.at(goal["id"].String())) : goal["target_ref"];
         const auto * original=resolve(ai,ref);
-        if(original && original->getOwner()==ai.playerID) continue;
+        // Keep the model's healthy named source. A local replacement must
+        // still have an admitted delivery; ownership alone does not prove it.
+        if(original && original->getOwner()==ai.playerID && !sources.count(goal["id"].String())) continue;
         const CGHeroInstance * target=nullptr;
         uint64_t bestSurplus=0;
         for(const auto * helper:ai.cc->getHeroesInfo())
@@ -124,10 +126,22 @@ bool NativeCampaign::repairDeliverySources(NK2AI::Nullkiller & ai)
             const auto strength=helper->estimateCombatValue();
             const auto floor=campaign.reservedForce(reference(helper),world,sources,goal["id"].String());
             const auto surplus=strength>floor ? strength-floor : 0;
-            if(surplus>bestSurplus && actor->estimateCombatValue()+surplus>=goal["complete_when"]["value"].Integer())
-            { target=helper;bestSurplus=surplus; }
+            if(!surplus || actor->estimateCombatValue()+surplus<goal["complete_when"]["value"].Integer()) continue;
+            auto prospectiveSources=sources;
+            prospectiveSources[goal["id"].String()]=reference(helper);
+            NK2AI::Goals::TGoalVec admitted;
+            rememberTasks(admitted,deliveryTasks(ai,actor,helper),goal,ai,&prospectiveSources);
+            if(admitted.empty()) continue;
+            if(helper==original) { target=helper;break; } // Retain a feasible replacement without churn.
+            if(surplus>bestSurplus) { target=helper;bestSurplus=surplus; }
         }
-        if(!target) continue;
+        if(!target)
+        {
+            if(sources.count(goal["id"].String()))
+            { persisted["local_repairs"].Struct().erase(goal["id"].String());changed=true; }
+            continue;
+        }
+        if(sources.count(goal["id"].String()) && sources.at(goal["id"].String())==reference(target)) continue;
         JsonNode repair;repair["day"]=world["day"];repair["goal"]=goal["id"];repair["revision"]=campaign.plan()["revision"];
         repair["kind"].String()="helper_replaced";repair["from"]=goal["target_ref"];repair["to"].String()=reference(target);
         persisted["local_repairs"][goal["id"].String()]=repair;changed=true;
@@ -691,13 +705,13 @@ NK2AI::Goals::TGoalVec NativeCampaign::repairRoute(NK2AI::Nullkiller & ai, const
     return Goals::CaptureObjectsBehavior::getVisitGoals({*best},&ai,nullptr,true);
 }
 void NativeCampaign::rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals::TGoalVec generated,
-                                 const JsonNode & goal, const NK2AI::Nullkiller & ai)
+                                 const JsonNode & goal, const NK2AI::Nullkiller & ai,
+                                 const std::map<std::string,std::string> * prospectiveSources)
 {
     const auto * actor = dynamic_cast<const CGHeroInstance *>(resolve(ai, goal["actor_ref"]));
     const bool delivery=goal["kind"].String()=="reinforce_hero";
     const bool stabilizing=goal["kind"].String()=="preserve_force"
-        && (world["goal_statuses"][goal["id"].String()]["reason"].String()=="force_floor_breached"
-            || world["goal_statuses"][goal["id"].String()]["reason"].String()=="force_continuity_unconfirmed");
+        && campaign.requiresStabilization(goal["id"].String());
     std::function<bool(const NK2AI::Goals::TSubgoal &,int)> allowed = [&](const auto & task,int depth) {
         if(depth>16 || task->invalid()) return false;
         if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(task.get()))
@@ -718,9 +732,12 @@ void NativeCampaign::rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals
             }
             else if(!delivery && strength<goal["min_army_value"].Integer()) return false;
             if(loss>strength*campaign.plan()["policy"]["max_loss_ratio"].Float()) return false;
-            if(strength<loss || (!stabilizing && strength-loss<forceReserve(path.targetHero)))
+            const auto reserve=prospectiveSources
+                ? campaign.reservedForce(reference(path.targetHero),world,*prospectiveSources,executingGoal())
+                : forceReserve(path.targetHero);
+            if(strength<loss || (!stabilizing && strength-loss<reserve))
             {
-                logAi->trace("NK3 campaign path rejected: goal=%s army=%llu loss=%llu reserve=%llu",goal["id"].String(),strength,loss,forceReserve(path.targetHero));
+                logAi->trace("NK3 campaign path rejected: goal=%s army=%llu loss=%llu reserve=%llu",goal["id"].String(),strength,loss,reserve);
                 return false;
             }
             if(world["day"].Integer()+path.turn()>goal["deadline_day"].Integer()) return false;
@@ -795,8 +812,7 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
     for(const auto & goal : campaign.plan()["goals"].Vector())
     {
         const bool stabilizing=goal["kind"].String()=="preserve_force"
-            && (world["goal_statuses"][goal["id"].String()]["reason"].String()=="force_floor_breached"
-            || world["goal_statuses"][goal["id"].String()]["reason"].String()=="force_continuity_unconfirmed");
+            && campaign.requiresStabilization(goal["id"].String());
         if(stabilizationOnly && !stabilizing) continue;
         if(world["goal_statuses"][goal["id"].String()]["state"].String() != "ready" && !stabilizing) continue;
         const auto & kind = goal["kind"].String();
@@ -1021,8 +1037,7 @@ float NativeCampaign::priority(const NK2AI::Goals::TSubgoal & task, float native
             if(goal["id"].String() == task->strategicGoalID
                 && (world["goal_statuses"][goal["id"].String()]["state"].String() == "ready"
                     || (goal["kind"].String()=="preserve_force"
-                        && (world["goal_statuses"][goal["id"].String()]["reason"].String()=="force_floor_breached"
-                            || world["goal_statuses"][goal["id"].String()]["reason"].String()=="force_continuity_unconfirmed"))))
+                        && campaign.requiresStabilization(goal["id"].String()))))
                 return (world["goal_statuses"][goal["id"].String()]["state"].String()=="blocked" ? 95000.0f : 50000.0f)
                     + goal["priority"].Integer();
     // Keep independently useful opportunities, but do not divert a committed
@@ -1148,6 +1163,11 @@ JsonNode NativeCampaign::executionSnapshot(NK2AI::Nullkiller & ai)
     }
     return snapshot;
 }
+void NativeCampaign::resourcesChanged(const TResources & resources)
+{
+    std::lock_guard lock(executionMutex);
+    if(resourceLedgerActive) resourceLedger.received(resourceValues(resources));
+}
 void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::TTask & task)
 {
     const auto * goal=dynamic_cast<const NK2AI::Goals::AbstractGoal *>(task.get());
@@ -1159,6 +1179,7 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
         emergencyTown=goal ? goal->strategicEmergencyTown : "";
         emergencyCost=goal ? goal->strategicEmergencyCost : TResources();
         emergencyFunds=ai.cc->getResourceAmount();
+        resourceLedger.begin(resourceValues(emergencyFunds));resourceLedgerActive=true;
     }
     replanAfterCombat=false;
     executionActive=true;executionStarted=std::chrono::steady_clock::now();
@@ -1199,12 +1220,18 @@ void NativeCampaign::endExecution(NK2AI::Nullkiller & ai,const std::string & ack
         externalai::recordResult(persisted["memory"],after["day"].Integer(),action,false);
         auto & result=persisted["memory"]["recent_results"].Vector().back();
         const bool known=acknowledgment!="recovered_unknown" && acknowledgment!="interrupted" && before["day"]==after["day"];
+        {
+            std::lock_guard lock(executionMutex);
+            if(known && resourceLedgerActive) result["action"]["resource_flows"]=resourceLedger.receipt(after["resources"]);
+            resourceLedgerActive=false;
+        }
         if(known)
             for(const auto & goal:campaign.plan()["goals"].Vector()) if(goal["id"]==action["goal_id"])
             {
                 const auto & progress=static_cast<const JsonNode &>(persisted)["operation_progress"][goal["id"].String()];
-                const auto source=campaign.deliverySource(goal,helperSources());
-                if(!progress.isNull() && operationOwnFacts(goal,before,source)==operationOwnFacts(goal,after,source))
+                // An acknowledged attempt alone is not target progress. The
+                // next fresh path/force observation decides whether it advanced.
+                if(!progress.isNull())
                     persisted["operation_progress"][goal["id"].String()]["last_no_change_day"]=after["day"];
             }
         if(known && action["emergency"].isStruct())

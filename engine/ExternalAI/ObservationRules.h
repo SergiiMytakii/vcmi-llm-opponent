@@ -6,6 +6,7 @@
 #include "../../lib/modding/CModVersion.h"
 #include "../../lib/mapping/CMapHeader.h"
 #include "../../lib/constants/StringConstants.h"
+#include "../../lib/texts/CompositeTranslator.h"
 #include <set>
 
 namespace externalai
@@ -68,6 +69,14 @@ inline void observeStrategicRules(const CCallback & callback, PlayerColor player
             ? "Defeat all hostile teams; one captured town need not end the game."
             : victoryKind == "control_all_towns" ? "Control all towns as required by this scenario. One captured town alone does not prove victory."
             : "Special public victory condition is not implemented by this adapter.";
+        if(!supported && header)
+        {
+            // The lobby renders this same public message through the map's
+            // text overlay. It does not expose the underlying event targets.
+            CompositeTranslator translator;
+            translator.install(header->texts);
+            observation["victory"]["public_description"].String() = header->victoryMessage.toString(&translator);
+        }
         observation["enemy_players"].Vector();
         for(int color = 0; color < PlayerColor::PLAYER_LIMIT.getNum(); ++color)
             if(callback.getPlayerRelations(playerID, PlayerColor(color)) == PlayerRelations::ENEMIES)

@@ -95,6 +95,11 @@ def report(run):
                     and r.get('action',{}).get('source')=='own_battle_result'
                     and r.get('outcome') in ('battle_won','battle_lost','battle_draw')]
     native_requests=[r for r in native_strategy if r.get('requested') is True]
+    resource_flows=[r['action']['resource_flows'] for r in native_execution
+                    if isinstance(r.get('action'),dict) and isinstance(r['action'].get('resource_flows'),dict)]
+    complete_flows=[r for r in resource_flows if r.get('coverage')=='complete'
+                    and all(isinstance(r.get(k),list) and len(r[k])==7
+                            and all(type(v) is int and v>=0 for v in r[k]) for k in ('debits','credits'))]
     native_waits=[r['elapsed_ms'] for r in native_requests if type(r.get('elapsed_ms')) is int and r['elapsed_ms']>=0]
     native_wait_p95=(statistics.quantiles(native_waits,n=100,method='inclusive')[94]
                      if len(native_waits)>1 else native_waits[0] if native_waits else None)
@@ -192,10 +197,16 @@ def report(run):
             "accepted_responses":sum(r.get('accepted') is True for r in native_requests),
             "fallback_reasons":dict(Counter(r.get('fallback_reason','unknown') for r in native_requests if r.get('accepted') is False)),
             "charged_tokens":sum(r['charged_tokens'] for r in native_requests if type(r.get('charged_tokens')) is int),
+            "resource_debits":[sum(r['debits'][i] for r in complete_flows) for i in range(7)],
+            "resource_credits":[sum(r['credits'][i] for r in complete_flows) for i in range(7)],
+            "complete_resource_flow_receipts":len(complete_flows),
+            "incomplete_resource_flows":len(resource_flows)-len(complete_flows),
+            "tasks_without_resource_receipt":sum(isinstance(r.get('action',{}).get('before'),dict)
+                and not isinstance(r['action'].get('resource_flows'),dict) for r in native_execution),
             "wait_ms_median":statistics.median(native_waits) if native_waits else None,
             "wait_ms_p95":native_wait_p95,
             "record_errors":execution_errors+strategy_errors,
-            "limits":"Task records contain observed net own-state changes; battle records contain acknowledged own casualties and battle outcomes. A battle victory is not a match victory. A reconciled unknown result is not a confirmed command; effects do not prove full task completion or gross purchase cost. Request metrics cover finished/cancelled logger records; charged tokens may include conservative reservations for unknown usage."},
+            "limits":"Task records contain observed net own-state changes. Resource debits/credits sum only complete own packet receipts within acknowledged tasks; they include trades and do not identify the packet cause or purchase completion. Interrupted/restored tasks have no complete receipt. Battle records contain acknowledged own casualties and battle outcomes. A battle victory is not a match victory. A reconciled unknown result is not a confirmed command. Request metrics cover finished/cancelled logger records; charged tokens may include conservative reservations for unknown usage."},
         "model_metrics": {'providers':dict(providers), 'usage':dict(usage),
                           'timeouts':counts.get('timeout',0), 'fallbacks':providers.get('fallback',0)},
         "campaign_metrics": {'assessments':changes, 'confirmed_reinforcements':reinforcements,
