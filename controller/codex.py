@@ -10,7 +10,7 @@ import time
 from strategy import strategy_schema, validate_strategy, campaign_schema, validate_campaign
 from experience import learning_schema, validate_learning
 from batch import validate_batch
-from prompt_context import (compact_json, encode_request, context_parts, bounded_history,
+from prompt_context import (compact_json, encode_request, context_parts, bounded_history, without_unknown_army_values,
                             SHARED_CONTEXT_INSTRUCTIONS, HISTORY_INSTRUCTIONS, SOFT_INPUT_BYTES)
 
 
@@ -135,7 +135,7 @@ def choose(request):
         raise ValueError('unsupported Codex CLI version; requires 0.160.0')
     with tempfile.TemporaryDirectory(prefix='vcmi-decision-') as folder:
         workspace = Path(folder)
-        projected, history = bounded_history(request)
+        projected, history = bounded_history(without_unknown_army_values(request) if request['protocol'] == 2 else request)
         model_request = encode_request(projected)
         if request['protocol'] == 2 and len(compact_json(model_request).encode('utf-8')) > SOFT_INPUT_BYTES:
             raise ValueError('context_overflow: complete strategic facts exceed the input budget')

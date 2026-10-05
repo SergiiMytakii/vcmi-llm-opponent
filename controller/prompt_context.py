@@ -35,6 +35,19 @@ def compact_json(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
+def without_unknown_army_values(value):
+    """Hide native risk sentinels; intervals remain the factual model contract."""
+    if isinstance(value, dict):
+        interval = value.get('army_interval', {})
+        unknown = (isinstance(interval, dict) and interval.get('status') in ('unknown', 'unbounded')
+                   and 'upper' not in interval)
+        return {key:without_unknown_army_values(item) for key,item in value.items()
+                if not (unknown and key in ('army_value', 'army', 'observed_army'))}
+    if isinstance(value, list):
+        return [without_unknown_army_values(item) for item in value]
+    return value
+
+
 def bounded_history(request):
     """Project historical facts for this call; full authority and learning stay intact."""
     original = request.get('memory', {})

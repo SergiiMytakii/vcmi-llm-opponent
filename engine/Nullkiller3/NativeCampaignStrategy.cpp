@@ -208,10 +208,7 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         const auto & status=defense["status"].String();
         if(!defense["critical"].Bool() || defense["scenario_deadline_day"].Integer()>world["day"].Integer()+1
             || (status!="insufficient_current_force" && status!="unbounded_opposition")) continue;
-        std::string facts=status+":";
-        for(const auto & threat:defense["threats"].Vector())
-            facts+=threat["source_ref"].String()+":"+threat["army_interval"].toCompactString()+";";
-        result.push_back({"defense:"+defense["town_ref"].String(),facts,true,true,actionable,true});
+        result.push_back(defenseSignal(defense,actionable));
     }
     for(const auto & object:world["visible_objects"].Vector())
     {
@@ -350,6 +347,13 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
             // the goal list. Rebuild those owners before creating any command.
             ai.invalidatePathfinderData();
             ai.updateState();
+            // The accepted decision saw every supplied defense forecast, even
+            // towns it only now marks critical. Do not ask it the same enemy
+            // question again merely because its own policy changed.
+            for(const auto & defense:request["observation"]["forecasts"]["defenses"].Vector())
+                if(defense["status"].String()=="unbounded_opposition"
+                    || defense["status"].String()=="insufficient_current_force")
+                    arbiter.resolved(defenseSignal(defense,true));
             recordCheckpointBaseline(); // New goals/reserves own the next review's comparison.
         }
     }

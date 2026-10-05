@@ -60,7 +60,7 @@ def validate_request(request):
 def reply_schema(request):
     world = request['observation']
     day = world['day']
-    text = {'type': 'string', 'minLength': 1, 'maxLength': 40}
+    text = {'type': 'string', 'minLength': 1, 'maxLength': 160}
     heroes = sorted(h['ref'] for h in world['heroes'])
     hero = {'type': ['string', 'null'], 'enum': [None, *heroes]}
     owned_hero = {'type':'string','enum':heroes} if heroes else {'type':'string','pattern':'^$'}
@@ -184,6 +184,23 @@ def validate_reply(request, reply, wire=False):
             raise ValueError('holding predicate exceeds deadline')
     if any(g['deadline_day'] > request['observation']['day']+plan['horizon_days'] for g in goals.values()):
         raise ValueError('goal exceeds horizon')
+    if reply['decision'] == 'revise':
+        # Match CampaignState's current-force/funds contract before emitting a reply.
+        # A delivery's future army minimum is a goal, never an existing reservation.
+        heroes = {h['ref']:h for h in request['observation']['heroes']}
+        reserved_goals = set()
+        resource_totals = [0] * 7
+        for reserve in plan['reserves']:
+            name = reserve['goal_id']
+            if name not in goals or name in reserved_goals:
+                raise ValueError('invalid_commitment_reserve')
+            reserved_goals.add(name)
+            actor = heroes.get(goals[name]['actor_ref'], {})
+            if reserve['force_value'] > actor.get('army_value', 0):
+                raise ValueError('force_reserve_not_available')
+            resource_totals = [a+b for a,b in zip(resource_totals, reserve['resources'])]
+        if any(total > available for total, available in zip(resource_totals, request['observation']['resources'])):
+            raise ValueError('resource_commitments_exceed_available_funds')
     assigned = {a['hero_ref']:a for a in reply['assignments']}
     if len(assigned) != len(reply['assignments']) or sum(a['role']=='main' for a in assigned.values())>1:
         raise ValueError('conflicting strategic roles')

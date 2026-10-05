@@ -6,6 +6,15 @@
 
 namespace nullkiller3
 {
+// Policy changes alone do not create new enemy evidence. Both callers use
+// this same identity; new enemy refs or strength intervals still trigger review.
+inline StrategicSignal defenseSignal(const JsonNode & defense,bool actionable)
+{
+    std::string facts=defense["status"].String()+":";
+    for(const auto & threat:defense["threats"].Vector())
+        facts+=threat["source_ref"].String()+":"+threat["army_interval"].toCompactString()+";";
+    return {"defense:"+defense["town_ref"].String(),facts,true,true,actionable,true};
+}
 inline std::vector<StrategicSignal> allocationCheckpointSignals(const CampaignState & campaign,
     const JsonNode & world,const JsonNode & baseline,bool actionable)
 {
@@ -212,8 +221,8 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     if(!shape(reply, {"protocol", "request_id", "identity", "decision", "reason", "evidence_refs", "victory_method",
         "assignments", "alternatives", "reconsider_when", "plan", "usage"})
         || !number(reply["protocol"], 2, 2) || reply["request_id"] != request["request_id"]
-        || reply["identity"] != request["identity"] || !text(reply["decision"]) || !text(reply["reason"])
-        || !text(reply["victory_method"])) return reject("invalid_or_stale_strategic_identity");
+        || reply["identity"] != request["identity"] || !text(reply["decision"]) || !text(reply["reason"],640)
+        || !text(reply["victory_method"],640)) return reject("invalid_or_stale_strategic_identity");
     const auto & usage = reply["usage"];
     if(!shape(usage, {"input_tokens", "output_tokens", "known"}) || !usage["known"].isBool()
         || !number(usage["input_tokens"], 0, 1000000000) || !number(usage["output_tokens"], 0, 1000000000))
@@ -272,7 +281,7 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     for(const auto & alternative : alternatives.Vector())
         if(!shape(alternative, {"approach", "benefit", "cost", "uncertainty"}) || !text(alternative["approach"])
             || !approaches.count(alternative["approach"].String()) || !compared.insert(alternative["approach"].String()).second
-            || !text(alternative["benefit"]) || !text(alternative["cost"]) || !text(alternative["uncertainty"]))
+            || !text(alternative["benefit"],640) || !text(alternative["cost"],640) || !text(alternative["uncertainty"],640))
             return reject("invalid_strategic_alternative");
     const auto & conditions = reply["reconsider_when"];
     if(!conditions.isVector() || conditions.Vector().empty() || conditions.Vector().size() > 12)
