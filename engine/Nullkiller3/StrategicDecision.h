@@ -12,7 +12,11 @@ inline StrategicSignal defenseSignal(const JsonNode & defense,bool actionable)
 {
     std::string facts=defense["status"].String()+":";
     for(const auto & threat:defense["threats"].Vector())
+    {
         facts+=threat["source_ref"].String()+":"+threat["army_interval"].toCompactString()+";";
+        if(!threat["neutral_screen"].isNull())
+            facts+=threat["neutral_screen"]["status"].String()+":"+threat["neutral_screen"]["example_guard_refs"].toCompactString()+";";
+    }
     return {"defense:"+defense["town_ref"].String(),facts,true,true,actionable,true};
 }
 inline std::vector<StrategicSignal> allocationCheckpointSignals(const CampaignState & campaign,

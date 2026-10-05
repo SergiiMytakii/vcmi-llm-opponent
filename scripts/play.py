@@ -84,7 +84,7 @@ def play(args):
     with profile_lock(profile):
         env = preflight(engine, profile, codex)
         if args.check:
-            print('Ready: isolated profile, Codex CLI 0.160.0, ChatGPT login, gpt-5.6-terra / low.')
+            print('Ready: isolated profile, Codex CLI 0.160.0, ChatGPT login, gpt-5.6-terra / none.')
             return 0
         from playtesting.runs import write_json
         settings_path = profile / 'config/settings.json'

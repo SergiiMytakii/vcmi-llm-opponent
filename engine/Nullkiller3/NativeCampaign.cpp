@@ -1,5 +1,6 @@
 #include "../Nullkiller2/StdInc.h"
 #include "NativeCampaign.h"
+#include "KnownLandApproach.h"
 #include "NativeTrace.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
@@ -44,6 +45,8 @@ std::string objectKind(const CGObjectInstance * object)
     case Obj::MINE: return "mine";
     case Obj::RESOURCE: return "resource";
     case Obj::MONSTER: return "monster";
+    case Obj::GARRISON:
+    case Obj::GARRISON2: return "garrison";
     case Obj::BOAT: return "boat";
     case Obj::SHIPYARD: return "shipyard";
     default: return "other";
@@ -567,11 +570,66 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         }
     }
 }
+JsonNode NativeCampaign::observedEnemyApproaches(NK2AI::Nullkiller & ai)
+{
+    std::map<int3,size_t> index;std::vector<KnownLandTile> land;
+    const auto size=ai.cc->getMapSize();
+    const auto & view=ai.gameInfo();
+    for(int z=0;z<size.z;++z) for(int y=0;y<size.y;++y) for(int x=0;x<size.x;++x)
+    {
+        const int3 position(x,y,z);
+        if(!ai.cc->isVisible(position)) continue;
+        const auto * tile=view.getTile(position,false);
+        if(!tile || !tile->isLand() || !tile->entrableTerrain() || (tile->blocked() && !tile->visitable())) continue;
+        KnownLandTile cell;
+        for(const auto * guard:view.getGuardingCreatures(position))
+            if(guard->ID==Obj::MONSTER && guard->getOwner()==PlayerColor::NEUTRAL)
+                cell.neutralGuards.push_back(reference(guard));
+        index.emplace(position,land.size());land.push_back(std::move(cell));
+    }
+    // Occupied neutral garrisons block their visitable tile, not an adjacent
+    // monster guard zone. Use the ordinary visible army interval, never hidden stacks.
+    for(const auto & object:world["visible_objects"].Vector())
+    {
+        if(object["kind"].String()!="garrison" || object["owner"].Integer()!=PlayerColor::NEUTRAL.getNum()
+            || object["army_interval"]["lower"].Integer()<=0) continue;
+        const auto & pos=object["position"];
+        const auto cell=index.find(int3(pos[0].Integer(),pos[1].Integer(),pos[2].Integer()));
+        if(cell!=index.end()) land[cell->second].neutralGuards.push_back(object["ref"].String());
+    }
+    // Allow extra geometric edges rather than falsely proving a barrier from
+    // directional entrances or private opponent abilities. Unknown stays unknown.
+    for(const auto & [position,id]:index)
+        for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx)
+            if(dx || dy)
+                if(const auto next=index.find(position+int3(dx,dy,0));next!=index.end())
+                    land[id].neighbors.push_back(next->second);
+    JsonNode result;result.Vector();
+    for(const auto & enemy:world["visible_objects"].Vector())
+    {
+        if(enemy["kind"].String()!="hero" || std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),enemy["owner"])==world["enemy_players"].Vector().end()) continue;
+        const auto & pos=enemy["position"];
+        const auto source=index.find(int3(pos[0].Integer(),pos[1].Integer(),pos[2].Integer()));
+        if(source==index.end()) continue;
+        for(const auto * kind:{"towns","heroes"}) for(const auto & asset:world[kind].Vector())
+        {
+            const auto & where=asset["position"];
+            const auto target=index.find(int3(where[0].Integer(),where[1].Integer(),where[2].Integer()));
+            if(target==index.end()) continue;
+            auto approach=knownLandApproach(land,source->second,target->second);
+            approach["source_ref"]=enemy["ref"];approach["target_ref"]=asset["ref"];
+            approach["assumptions"].String()="Currently visible land connectivity only; directional entrances and other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
+            result.Vector().push_back(approach);
+        }
+    }
+    return result;
+}
 void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
 {
     repairedSourcesChanged |= repairDeliverySources(ai);
     world["forecasts"] = forecastBranches(world,campaign.reservedResources());
     auto & forecasts=world["forecasts"];
+    world["enemy_approaches"]=observedEnemyApproaches(ai);
     forecasts["threats"]=forecastThreats(world);
 
     auto arrivals = [&](const JsonNode & pos, bool frontier) {

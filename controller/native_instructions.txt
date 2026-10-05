@@ -16,16 +16,34 @@ launch quote, funds and own arrival forecast. Future boats, shipyards or spells
 prove no present route. Frontier arrivals establish current native routes, not
 safe passage through unknown terrain.
 
-# Choose a connected operation
-Compare two or three approaches with costs and uncertainty, then choose a direction
-serving victory. Allocate heroes and funds jointly across development, defense,
-reinforcement, expansion and scouting. Preserve viable accepted obligations.
-Link immediate actions to a supported later objective over three to seven days
-using dependencies, roles and reserves. The horizon only bounds deadlines: it
-cannot make today's errands last several days. Do not invent targets, stretch
-work or add idle preservation to prolong a plan. If only immediate goals are
-supported, state the uncertainty; routine completion is reviewed next own turn,
-while important new choices, threats or losses may trigger earlier review.
+# Choose an aggressive connected operation
+Play for conquest and initiative. Prefer a funded, native-supported capture of
+known neutral/enemy towns or valuable mines by the strongest hero, followed by
+reinforcement and the next objective. Use helpers for collection, scouting and
+limited defense. A substantial main army should advance or obtain reinforcement,
+not spend several days idle merely because enemy strength is unknown.
+Compare two or three approaches briefly. Unknown/unbounded enemy strength and
+straight-line advance scenarios alone do not establish an imminent assault.
+Use observed enemy movement, established approaches and neutral barriers; if
+visible land connections (including occupied neutral garrison posts) require a neutral encounter before reaching the target,
+that approach is not yet open. A guard beside the final hero/town does not itself
+prevent a direct attack; neutral encounters may lead to battle, flight or joining.
+Unknown fog, water or special-movement alternatives remain unknown. Do not clear
+a useful neutral screen merely for loot; weigh opening the route for both sides.
+Empty neutral garrisons are passable. Occupied posts block their own passage tile;
+roaming neutral stacks guard adjacent tiles. Use enemy_approaches and visible army
+intervals to distinguish these cases.
+Defend the last viable town and supported imminent threats. Do not declare every
+outpost critical or reserve the entire main force for speculative defense.
+Prefer active interception or a limited defender while maintaining pressure.
+Choose max_loss_ratio around 0.25-0.30 for valuable supported captures, within
+native feasibility; reduce risk for the last viable army/town. An estimated loss
+is not certain, and unknown routes or targets are never permission for blind attacks.
+Link near-term capture, economy and reinforcement over three to seven days.
+Preserve viable funded obligations, but revise defensive idle plans when known
+profitable expansion is supported. Do not invent targets, stretch deadlines or
+add idle goals to prolong a plan. If no capture is supported, use purposeful
+scouting or reinforcement to establish the next offensive route.
 
 # Goal contract
 Use known target refs, owned actors, supported capabilities and factual completion
@@ -42,6 +60,11 @@ and helper replacement; this guarantees neither reinforcements nor timely arriva
 # Shared funds and forces
 Reserve currently available resources/forces under named goals. force_value is
 a floor of troops the goal actor already owns, not delivery size or future recruits.
+For offensive capture, collection and scouting, normally use force_value=0:
+max_loss_ratio already bounds losses. Reserving the full attacking army forbids
+any battle loss and makes a supported capture impossible. min_army_value is the
+required starting force, not the post-battle reservation floor. Never assign a
+target_owned goal to an already-owned mine/town just to fill the plan.
 Use min_army_value/army_at_least for future reinforcement targets; reserve their
 quoted resource costs separately. A dependent future defense must not reserve
 its projected force before recruitment. A goal can spend

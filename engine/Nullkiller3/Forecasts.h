@@ -506,6 +506,9 @@ inline JsonNode forecastThreats(const JsonNode & world)
             JsonNode threat;
             threat["source_ref"]=enemy["ref"]; threat["town_ref"]=town["ref"];
             threat["army_interval"]=enemy["army_interval"];
+            for(const auto & approach:world["enemy_approaches"].Vector())
+                if(approach["source_ref"]==enemy["ref"] && approach["target_ref"]==town["ref"])
+                    threat["neutral_screen"]=approach;
             threat["sighting_age_days"].Integer()=age;
             threat["last_observed_distance"].Integer()=distance;
             // Private movement, spells, unseen terrain and intention preclude

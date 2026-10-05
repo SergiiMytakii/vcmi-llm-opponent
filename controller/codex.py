@@ -16,7 +16,7 @@ from prompt_context import (compact_json, encode_request, context_parts, bounded
 
 ROOT = Path(__file__).resolve().parent
 MODEL = 'gpt-5.6-terra'
-REASONING_EFFORT = 'low'
+REASONING_EFFORT = 'none'
 VERSION = 'codex-cli 0.160.0'
 TIMEOUT = 120  # NK3: recorder 130s, native exchange 140s.
 LEGACY_TIMEOUT = 60  # Deprecated protocol 1 retains its native 70s boundary.
@@ -216,6 +216,19 @@ def choose(request):
             command += ['-c', key + '=' + json.dumps(value)]
         command += ['-']
         (workspace / 'request.json').write_text(model_input, encoding='utf-8')
+        timing = {'preparation_seconds':round(time.monotonic()-started,3), 'events':[]}
+        model_started = time.monotonic()
+        event_offset = 0
+        def observe_events():
+            nonlocal event_offset
+            with (workspace / 'events.jsonl').open('rb') as events:
+                events.seek(event_offset)
+                for line in events:
+                    if not line.endswith(b'\n'):break
+                    event_offset += len(line)
+                    event = json.loads(line)
+                    timing['events'].append({'type':event.get('type'),
+                        'seconds':round(time.monotonic()-model_started,3)})
         with (workspace / 'request.json').open('rb') as stdin, \
                 (workspace / 'events.jsonl').open('wb') as stdout, \
                 (workspace / 'stderr.log').open('wb') as stderr:
@@ -224,6 +237,8 @@ def choose(request):
             child = subprocess.Popen(command, stdin=stdin, stdout=stdout, stderr=stderr, env=env, cwd=folder)
             try:
                 while child.poll() is None:
+                    # CLI milestones, not a server queue/first-token trace.
+                    observe_events()
                     if time.monotonic() - started >= timeout:
                         raise TimeoutError('Codex decision deadline exceeded')
                     if stdout.tell() > LIMIT or stderr.tell() > LIMIT:
@@ -236,7 +251,11 @@ def choose(request):
                     child.kill()
                 child.wait(timeout=1)
                 decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
+                observe_events()
+                timing['model_process_seconds'] = round(time.monotonic()-model_started,3)
+                timing['process_returncode'] = child.returncode
                 if decision_dir:
+                    (Path(decision_dir) / 'codex-timing.json').write_text(compact_json(timing),encoding='utf-8')
                     (Path(decision_dir) / 'codex-request.json').write_text(model_input, encoding='utf-8')
                     (Path(decision_dir) / 'codex-schema.json').write_text(compact_json(schema), encoding='utf-8')
                     for name in ('events.jsonl', 'stderr.log'):

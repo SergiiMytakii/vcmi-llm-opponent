@@ -32,5 +32,5 @@
   "max_seconds": 1800,
   "headless": false,
   "model": "gpt-5.6-terra",
-  "reasoning_effort": "low"
+  "reasoning_effort": "none"
 }
