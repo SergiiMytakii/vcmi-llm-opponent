@@ -14,7 +14,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / '.build/experience.sqlite3'
 CONDITIONS = ('combat', 'defense', 'economy', 'reinforcement', 'exploration', 'tempo')
-KINDS = {'attack':'combat', 'build':'economy', 'recruit':'reinforcement',
+KINDS = {'attack':'combat', 'battle':'combat', 'build':'economy', 'recruit':'reinforcement',
          'transfer':'reinforcement', 'upgrade':'reinforcement', 'explore':'exploration',
          'visit':'exploration', 'hire_hero':'exploration', 'end_turn':'tempo'}
 CONTEXT_LIMIT = 32768
@@ -28,16 +28,41 @@ def facts(request):
     """Small factual projection, with completeness explicit before inferring loss."""
     obs = request['observation']
     result = {k:obs[k] for k in ('day','player','resources','resource_order','terminal_result') if k in obs}
+    result['execution_mechanism'] = ('native_campaign_v3' if request.get('protocol')==2
+        or request.get('memory',{}).get('execution_mechanism')=='native_campaign_v3' else 'external_actions_v1')
+    if isinstance(obs.get('rules'),dict):
+        result['rules']={k:obs['rules'][k] for k in ('engine_version','engine_revision','mods') if k in obs['rules']}
     for name in ('heroes', 'towns'):
         if isinstance(obs.get(name), list):
             result[name + '_complete'] = len(obs[name]) <= 32
-            result[name] = [{k:item[k] for k in ('id','position','strength','army','buildings','daily_income') if k in item}
+            result[name] = [{k:item[k] for k in ('id','ref','position','in_boat','strength','army','army_value',
+                            'defense_value','army_holder_ref','visiting_hero_ref','buildings','daily_income') if k in item}
                             for item in obs[name][:32]]
     # Visible threats can explain the information available before a choice.
     if isinstance(obs.get('visible_objects'),list):
         result['visible_objects'] = [{k:item[k] for k in ('id','kind','owner','position','strength','army') if k in item}
                                      for item in obs['visible_objects'][:16]]
     return result
+
+
+def execution_context(observation):
+    """Rule identity and executor provenance, without historical game positions."""
+    rules=observation.get('rules',{})
+    version=rules.get('engine_version') if isinstance(rules,dict) else None
+    revision=rules.get('engine_revision') if isinstance(rules,dict) else None
+    mods=rules.get('mods') if isinstance(rules,dict) else None
+    valid_text=lambda value:isinstance(value,str) and 0<len(value)<=128
+    known=(valid_text(version) and valid_text(revision) and isinstance(mods,list)
+        # Pinned VCMI loads virtual core from builtin gameConfig; its declared
+        # version is empty. The engine revision scopes that builtin component.
+        and all(isinstance(m,dict) and valid_text(m.get('id'))
+                and (valid_text(m.get('version')) or m.get('id')=='core' and m.get('version')=='') for m in mods))
+    canonical=dict(engine_version=version,engine_revision=revision,
+        mods=sorted([(m['id'],m['version']) for m in mods])) if known else None
+    return dict(engine_version=version if valid_text(version) else None,
+        engine_revision=revision if valid_text(revision) else None,rules_known=bool(known),
+        rules_digest=hashlib.sha256(encoded(canonical).encode()).hexdigest() if known else None,
+        execution_mechanism=observation.get('execution_mechanism'))
 
 
 def signals(before, request):
@@ -83,7 +108,7 @@ def learning_schema(context):
             'conditions':{'type':'array','minItems':1,'maxItems':4,'items':{'type':'string','enum':list(CONDITIONS)}},
             'evidence_ids':{'type':'array','minItems':1,'maxItems':8,'items':{'type':'string'}},
             'explanation':{'type':'string','minLength':1,'maxLength':480}}}
-    assessments = {'type':'array','minItems':len(context['episodes']),'maxItems':2,'items':assessment} if context['episodes'] else {'type':'array','maxItems':0,'items':{'type':'string'}}
+    assessments = {'type':'array','minItems':len(context['episodes']),'maxItems':2,'items':assessment} if context['episodes'] else {'type':'array','minItems':0,'maxItems':0,'items':{'type':'string'}}
     return {'type':'object','additionalProperties':False,'required':['expectation','assessments'],
             'properties':{'expectation':{'type':'string','minLength':1,'maxLength':240},'assessments':assessments}}
 
@@ -237,7 +262,9 @@ class Experience:
                                             (eid,game,request['request_id'],day,encoded(episode)))
                             for signal in fresh:
                                 self.db.execute('INSERT OR IGNORE INTO observed_signals VALUES(?,?)',(game,signal['id']))
-        tags = {'defense','tempo'} | {KINDS[a['kind']] for a in request['actions'] if a['kind'] in KINDS}
+        tags = {'defense','tempo'} | {KINDS[a['kind']] for a in request.get('actions',[]) if a['kind'] in KINDS}
+        if request.get('protocol') == 2:
+            tags.update(CONDITIONS)  # One strategic response can coordinate all modules.
         if request['observation'].get('terminal_result') in ('win','loss'):
             tags.update(CONDITIONS)
         else:
@@ -246,6 +273,15 @@ class Experience:
                     kind = decision['action'].get('kind')
                     if kind in KINDS:
                         tags.add(KINDS[kind])
+        current=facts(request)
+        rules_source='current_observation' if 'rules' in current else 'unavailable'
+        if request['observation'].get('terminal_result') in ('win','loss') and 'rules' not in current:
+            previous=self.db.execute('SELECT payload FROM decisions WHERE game=? AND request!=? ORDER BY rowid DESC LIMIT 1',
+                                     (game,request['request_id'])).fetchone()
+            if previous and 'rules' in json.loads(previous['payload']):
+                current['rules']=json.loads(previous['payload'])['rules']
+                rules_source='last_own_decision_in_game'
+        current_context=execution_context(current)
         lessons = []
         # Retired predecessors never consume slots needed by usable replacements.
         # Filter relevance before taking six, rather than truncating unrelated rows.
@@ -259,13 +295,32 @@ class Experience:
             supports, contradictions = row['supports'],row['contradictions']
             games = self.db.execute("SELECT COUNT(DISTINCT e.game) FROM assessments a JOIN episodes e ON e.id=a.episode WHERE a.lesson=? AND a.verdict IN ('support','revise')",
                                     (row['id'],)).fetchone()[0]
+            sources={};source_keys=set();matching_games=set()
+            for evidence in self.db.execute('''SELECT e.payload,e.game,a.verdict FROM assessments a
+                    JOIN episodes e ON e.id=a.episode WHERE a.lesson=? ORDER BY e.rowid DESC''',(row['id'],)):
+                trajectory=json.loads(evidence['payload']).get('trajectory',[])
+                source=execution_context(trajectory[-1]['observation'] if trajectory else {})
+                key=encoded(source);source_keys.add(key)
+                supported=evidence['verdict'] in ('support','revise')
+                if (supported and current_context['rules_known'] and source['rules_known']
+                        and current_context['rules_digest']==source['rules_digest']
+                        and current_context['execution_mechanism']==source['execution_mechanism']):
+                    matching_games.add(evidence['game'])
+                if key not in sources and len(sources)<4:sources[key]={**source,'supporting_games':set(),'contradicting_games':set()}
+                if key in sources and evidence['verdict']!='uncertain':
+                    sources[key]['supporting_games' if supported else 'contradicting_games'].add(evidence['game'])
+            provenance=[{**source,'supporting_games':len(source['supporting_games']),
+                         'contradicting_games':len(source['contradicting_games'])} for source in sources.values()]
             lessons.append({'id':row['id'],'rule':row['rule'],'conditions':conditions,
                 'supports':supports,'contradictions':contradictions,'supporting_games':games,
+                'matching_supporting_games':len(matching_games),'evidence_contexts':provenance,
+                'evidence_contexts_complete':len(source_keys)<=4,
                 'status':'retired' if row['retired'] else 'challenged' if contradictions else 'active',
-                'confidence':'supported' if games >= 3 and contradictions == 0 else 'hypothesis'})
+                'confidence':'supported' if len(matching_games)>=3 and contradictions==0 else 'hypothesis'})
             if len(lessons) == 6:
                 break
-        context = {'mode':self.mode,'lessons':lessons,'episodes':[]}
+        context = {'mode':self.mode,'lessons':lessons,'episodes':[],
+                   'execution_context':{**current_context,'rules_source':rules_source}}
         if self.mode == 'learn':
             for row in self.db.execute('SELECT payload FROM episodes WHERE game=? AND day<=? AND assessed=0 ORDER BY rowid LIMIT 2',(game,day)):
                 episode = json.loads(row['payload'])
@@ -305,7 +360,13 @@ class Experience:
                 self.db.execute('INSERT INTO assessments VALUES(?,?,?,?,?)',(item['episode_id'],lesson_id,
                     item['verdict'],encoded(item['evidence_ids']),item['explanation']))
                 self.db.execute('UPDATE episodes SET assessed=1 WHERE id=?',(item['episode_id'],))
-            action = dict(next(a for a in request['actions'] if a['id'] == reply['action_id']))
+            if request.get('protocol') == 2:
+                plan = reply.get('plan') or request.get('campaign') or {}
+                action = {'kind':'strategic_plan','revision':plan.get('revision'),
+                          'goal_kinds':[g['kind'] for g in plan.get('goals',[])],
+                          'execution':'unconfirmed'}
+            else:
+                action = dict(next(a for a in request['actions'] if a['id'] == reply['action_id']))
             if reply.get('follow_up_action_ids'):
                 offered = {a['id']:a for a in request['actions']}
                 action['planned_follow_ups'] = [offered[i] for i in reply['follow_up_action_ids']]

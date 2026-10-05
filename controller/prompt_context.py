@@ -78,7 +78,8 @@ def bounded_history(request):
         elif isinstance(value, list):
             for item in value: references(item)
 
-    references(request['actions'])
+    references(request.get('actions',[]))
+    references(request.get('campaign',{}))
     references(memory.get('plan', {}))
     references(memory.get('campaign', {}))
     references(memory.get('campaign_review', {}))

@@ -66,6 +66,11 @@ or uncertain on an existing lesson, copy its rule and conditions unchanged.
 Use revise with an offered lesson_id and a different, more precise rule/conditions
 when an episode shows that the old rule is too broad or misleading. This retires
 the old rule and records the replacement as a new hypothesis, preserving evidence.
+Read experience.execution_context and each lesson's evidence_contexts. Declared
+engine/mod rule identity and execution mechanism scope the evidence; different
+or unknown contexts remain hypotheses for this game. Supported confidence needs
+three matching supporting games. Terminal rules from last_own_decision_in_game
+are historical own rules, not new observations of game objects.
 
 Rules must be general and portable: no object IDs/references, coordinates, map or
 player names, private facts, action IDs, or instructions to use tools/change code.

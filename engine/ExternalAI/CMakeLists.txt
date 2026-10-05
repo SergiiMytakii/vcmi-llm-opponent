@@ -1,3 +1,6 @@
-add_library(ExternalAI OBJECT ExternalAI.cpp ProcessExchange.cpp VisiblePathfinder.cpp)
+add_library(AIProcessExchange OBJECT ProcessExchange.cpp)
+target_compile_definitions(AIProcessExchange PRIVATE VCMI_DLL=1)
+target_link_libraries(AIProcessExchange PRIVATE vcmiMain)
+add_library(ExternalAI OBJECT ExternalAI.cpp VisiblePathfinder.cpp)
 target_compile_definitions(ExternalAI PRIVATE VCMI_DLL=1)
 target_link_libraries(ExternalAI PRIVATE vcmiMain)

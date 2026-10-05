@@ -28,6 +28,9 @@ token_budget current_time_reminder deferred_tool_world_state standalone_web_sear
 
 
 def validate_request(request):
+    if isinstance(request,dict) and request.get('protocol') == 2:
+        from native_strategy import validate_request as validate_native
+        return validate_native(request)
     if not isinstance(request, dict) or type(request.get('protocol')) is not int or request['protocol'] != 1:
         raise ValueError('unsupported protocol')
     if not isinstance(request.get('request_id'), str) or not request['request_id']:
@@ -49,6 +52,9 @@ def validate_request(request):
 
 
 def validate_reply(request, reply):
+    if request['protocol'] == 2:
+        from native_strategy import validate_reply as validate_native
+        return validate_native(request,reply)
     fields = {'protocol', 'request_id', 'action_id'}
     if isinstance(reply, dict) and 'follow_up_action_ids' in reply:
         fields.add('follow_up_action_ids')
@@ -115,6 +121,8 @@ def choose(request):
     """Return a validated reply and diagnostics; failures belong to caller fallback."""
     validate_request(request)
     started = time.monotonic()
+    timeout = min(TIMEOUT, request['budget']['wait_ms']/1000 - 2) if request['protocol'] == 2 else TIMEOUT
+    if timeout <= 0: raise TimeoutError('No useful strategic wait budget remains')
     executable = resolve_executable()
     env = os.environ.copy()
     for key in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'DYLD_INSERT_LIBRARIES',
@@ -127,6 +135,8 @@ def choose(request):
         workspace = Path(folder)
         projected, history = bounded_history(request)
         model_request = encode_request(projected)
+        if request['protocol'] == 2 and len(compact_json(model_request).encode('utf-8')) > SOFT_INPUT_BYTES:
+            raise ValueError('context_overflow: complete strategic facts exceed the input budget')
         shared_context = model_request is not projected
         model_input = compact_json(model_request)
         encoding = {'format':('shared-json-v2' if 'fields' in model_request else 'shared-json-v1') if shared_context else 'json',
@@ -140,7 +150,7 @@ def choose(request):
         decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
         if decision_dir:
             (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
-        instructions = (ROOT / 'instructions.txt').read_text(encoding='utf-8')
+        instructions = (ROOT / ('native_instructions.txt' if request['protocol']==2 else 'instructions.txt')).read_text(encoding='utf-8')
         references = {}
         for name in ('PROMPT', 'KNOWLEDGE'):
             path = os.environ.get('VCMI_PLAYTEST_' + name)
@@ -155,28 +165,32 @@ def choose(request):
         if history['applied']:
             instructions += '\n' + HISTORY_INSTRUCTIONS
         (workspace / 'instructions.txt').write_text(instructions, encoding='utf-8')
-        schema = {'type': 'object', 'additionalProperties': False,
-                  'required': ['protocol', 'request_id', 'action_id'], 'properties': {
-                      'protocol': {'type': 'integer', 'enum': [1]},
-                      'request_id': {'type': 'string', 'enum': [request['request_id']]},
-                      'action_id': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}}
-        if 'memory' in request:
-            schema['required'].append('strategy')
-            schema['properties']['strategy'] = strategy_schema(request)
-        if 'campaign' in request.get('memory', {}):
-            schema['required'].append('campaign')
-            schema['properties']['campaign'] = campaign_schema(request)
-        limit = request['observation'].get('batch_action_limit', 1)
-        if type(limit) is not int or not 1 <= limit <= 32:
-            raise ValueError('invalid batch action limit')
-        if limit > 1:
-            schema['required'].append('follow_up_action_ids')
-            schema['properties']['follow_up_action_ids'] = {
-                'type': 'array', 'maxItems': limit - 1,
-                'items': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}
-        if request.get('experience', {}).get('mode') == 'learn':
-            schema['required'].append('learning')
-            schema['properties']['learning'] = learning_schema(request['experience'])
+        if request['protocol'] == 2:
+            from native_strategy import reply_schema
+            schema = reply_schema(request)
+        else:
+            schema = {'type': 'object', 'additionalProperties': False,
+                      'required': ['protocol', 'request_id', 'action_id'], 'properties': {
+                          'protocol': {'type': 'integer', 'enum': [1]},
+                          'request_id': {'type': 'string', 'enum': [request['request_id']]},
+                          'action_id': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}}
+            if 'memory' in request:
+                schema['required'].append('strategy')
+                schema['properties']['strategy'] = strategy_schema(request)
+            if 'campaign' in request.get('memory', {}):
+                schema['required'].append('campaign')
+                schema['properties']['campaign'] = campaign_schema(request)
+            limit = request['observation'].get('batch_action_limit', 1)
+            if type(limit) is not int or not 1 <= limit <= 32:
+                raise ValueError('invalid batch action limit')
+            if limit > 1:
+                schema['required'].append('follow_up_action_ids')
+                schema['properties']['follow_up_action_ids'] = {
+                    'type': 'array', 'maxItems': limit - 1,
+                    'items': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}
+            if request.get('experience', {}).get('mode') == 'learn':
+                schema['required'].append('learning')
+                schema['properties']['learning'] = learning_schema(request['experience'])
         (workspace / 'schema.json').write_text(compact_json(schema), encoding='utf-8')
         config = {
             'model_provider': 'openai', 'forced_login_method': 'chatgpt',
@@ -206,7 +220,7 @@ def choose(request):
             child = subprocess.Popen(command, stdin=stdin, stdout=stdout, stderr=stderr, env=env, cwd=folder)
             try:
                 while child.poll() is None:
-                    if time.monotonic() - started >= TIMEOUT:
+                    if time.monotonic() - started >= timeout:
                         raise TimeoutError('Codex decision deadline exceeded')
                     if stdout.tell() > LIMIT or stderr.tell() > LIMIT:
                         raise ValueError('Codex output limit exceeded')
@@ -224,7 +238,7 @@ def choose(request):
                     for name in ('events.jsonl', 'stderr.log'):
                         with (workspace / name).open('rb') as stream:
                             (Path(decision_dir) / ('codex-' + name)).write_bytes(stream.read(LIMIT))
-        if time.monotonic() - started >= TIMEOUT:
+        if time.monotonic() - started >= timeout:
             raise TimeoutError('Codex decision deadline exceeded')
         events_path = workspace / 'events.jsonl'
         answer_path = workspace / 'answer.json'
@@ -240,11 +254,15 @@ def choose(request):
                 raise ValueError('unexpected Codex item: ' + str(item.get('type')))
             if event.get('type') == 'turn.completed':
                 completed, usage = True, event.get('usage')
-        if time.monotonic() - started >= TIMEOUT:
+        if time.monotonic() - started >= timeout:
             raise TimeoutError('Codex decision deadline exceeded')
         if not completed:
             raise ValueError('Codex turn did not complete')
-        reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
+        try:
+            reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
+        except ValueError as error:
+            if request['protocol'] == 2:error.usage = usage
+            raise
         return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': 'medium',
                        'cli': VERSION, 'usage': usage, 'references': references,
                        'input_encoding': encoding,

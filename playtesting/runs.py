@@ -1,5 +1,7 @@
 """Run preparation and provenance. Game data never goes into source control."""
 from datetime import datetime, timezone
+import ctypes
+import errno
 import hashlib
 import json
 import math
@@ -7,12 +9,29 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import sys
 import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
 COLORS = ("red", "blue", "tan", "green", "orange", "purple", "teal", "pink")
 DATA = Path("Library/Application Support/vcmi")
+
+
+def copy_snapshot_file(source, destination):
+    """Independent files, using APFS copy-on-write where the filesystem allows it."""
+    if sys.platform == "darwin":
+        clone = getattr(ctypes.CDLL(None, use_errno=True), "clonefile", None)
+        if clone is not None:
+            clone.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int)
+            clone.restype = ctypes.c_int
+            if clone(os.fsencode(source), os.fsencode(destination), 0) == 0:
+                shutil.copystat(source, destination)
+                return str(destination)
+            error = ctypes.get_errno()
+            if error not in (errno.EXDEV, errno.ENOTSUP, errno.EINVAL, errno.ENOSYS):
+                raise OSError(error, os.strerror(error), str(destination))
+    return shutil.copy2(source, destination)
 
 
 def now():
@@ -87,6 +106,12 @@ def prepare(config_path, out):
         raise ValueError("players must map VCMI colors to AI names")
     if config.get("purpose") not in ("integration", "training", "evaluation") or not config.get("case_id"):
         raise ValueError("case_id and purpose (integration/training/evaluation) are required")
+    if "Nullkiller3" in players.values():
+        config.setdefault("nk3_mode", "model")
+        if config["nk3_mode"] not in ("native", "model"):
+            raise ValueError("nk3_mode must be native or model")
+    elif "nk3_mode" in config:
+        raise ValueError("nk3_mode requires a Nullkiller3 player")
     finite_positive(config["max_seconds"], "max_seconds")
     experience_mode = config.get('experience_mode', 'learn')
     if experience_mode not in ('off', 'read_only', 'learn'):
@@ -117,7 +142,7 @@ def prepare(config_path, out):
         raise ValueError("run and template must be separate directory trees")
     out.mkdir(parents=True, exist_ok=False, mode=0o700)
     try:
-        shutil.copytree(profile, out / "profile")
+        shutil.copytree(profile, out / "profile", copy_function=copy_snapshot_file)
         (out / "references").mkdir()
         (out / "decisions").mkdir()
         (out / "episodes").mkdir()

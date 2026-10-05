@@ -32,6 +32,7 @@ def main():
     run("git", "apply", "--check", str(ROOT / "engine" / "integration.patch"), cwd=target)
     run("git", "apply", str(ROOT / "engine" / "integration.patch"), cwd=target)
     shutil.copytree(ROOT / "engine" / "ExternalAI", target / "AI" / "ExternalAI")
+    shutil.copytree(ROOT / "engine" / "Nullkiller3", target / "AI" / "Nullkiller3")
     print(f"Prepared {target} at {version['revision']}")
 
 

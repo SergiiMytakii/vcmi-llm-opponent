@@ -13,6 +13,34 @@ def read_json(path, default):
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else default
 
 
+def native_records(path, marker):
+    """Read bounded multiline JSON from the pinned AI logger, preserving gaps."""
+    records, errors, buffer = [], 0, ''
+    start=re.compile(r'^\[[^]]+\]\s+INFO\s+\[[^]]+\]\s+ai - '+re.escape(marker)+r' (\{.*)$')
+    decoder=json.JSONDecoder()
+    if not path.is_file():return records, errors
+    with path.open(encoding='utf-8',errors='replace') as stream:
+        for line in stream:
+            match=start.match(line)
+            if match:
+                if buffer:errors+=1
+                buffer=match[1]
+            elif buffer:
+                if line.startswith('['):
+                    errors+=1;buffer='';continue
+                buffer+=line
+            else:continue
+            if len(buffer)>1024*1024:
+                errors+=1;buffer='';continue
+            try:
+                value, unused=decoder.raw_decode(buffer)
+            except ValueError:continue
+            if isinstance(value,dict):records.append(value)
+            else:errors+=1
+            buffer=''
+    return records, errors+bool(buffer)
+
+
 def report(run):
     run = Path(run).resolve()
     manifest = load(run)
@@ -61,6 +89,15 @@ def report(run):
     counts = dict(Counter(d["status"] for d in decisions))
     ids = Counter(d.get("request_id") for d in decisions)
     logfile = run / "engine-logs/VCMI_Client_log.txt"
+    native_execution, execution_errors=native_records(logfile,'NK3_EXECUTION')
+    native_strategy, strategy_errors=native_records(logfile,'NK3_STRATEGY')
+    native_battles=[r for r in native_execution if isinstance(r.get('action'),dict) and r['action'].get('kind')=='battle'
+                    and r.get('action',{}).get('source')=='own_battle_result'
+                    and r.get('outcome') in ('battle_won','battle_lost','battle_draw')]
+    native_requests=[r for r in native_strategy if r.get('requested') is True]
+    native_waits=[r['elapsed_ms'] for r in native_requests if type(r.get('elapsed_ms')) is int and r['elapsed_ms']>=0]
+    native_wait_p95=(statistics.quantiles(native_waits,n=100,method='inclusive')[94]
+                     if len(native_waits)>1 else native_waits[0] if native_waits else None)
     assignments, selected = {}, {}
     execution_ids = Counter()
     batch_steps = []
@@ -144,6 +181,21 @@ def report(run):
         "observed_assignments": assignments, "expected_assignments": manifest["players"],
         "counts": counts, "decision_count": len(decisions), "decisions": decisions,
         "batch_steps":batch_steps,
+        "native_execution":native_execution,
+        "native_strategy":native_strategy,
+        "native_metrics":{
+            "execution_outcomes":dict(Counter(r.get('outcome','unknown') for r in native_execution)),
+            "battle_outcomes":dict(Counter(r['outcome'] for r in native_battles)),
+            "own_battle_loss_value":sum(r['action']['army_loss_value'] for r in native_battles
+                if type(r['action'].get('army_loss_value')) is int and r['action']['army_loss_value']>=0),
+            "requests_by_player_day":dict(Counter(str(r.get('player'))+':'+str(r.get('day')) for r in native_requests)),
+            "accepted_responses":sum(r.get('accepted') is True for r in native_requests),
+            "fallback_reasons":dict(Counter(r.get('fallback_reason','unknown') for r in native_requests if r.get('accepted') is False)),
+            "charged_tokens":sum(r['charged_tokens'] for r in native_requests if type(r.get('charged_tokens')) is int),
+            "wait_ms_median":statistics.median(native_waits) if native_waits else None,
+            "wait_ms_p95":native_wait_p95,
+            "record_errors":execution_errors+strategy_errors,
+            "limits":"Task records contain observed net own-state changes; battle records contain acknowledged own casualties and battle outcomes. A battle victory is not a match victory. A reconciled unknown result is not a confirmed command; effects do not prove full task completion or gross purchase cost. Request metrics cover finished/cancelled logger records; charged tokens may include conservative reservations for unknown usage."},
         "model_metrics": {'providers':dict(providers), 'usage':dict(usage),
                           'timeouts':counts.get('timeout',0), 'fallbacks':providers.get('fallback',0)},
         "campaign_metrics": {'assessments':changes, 'confirmed_reinforcements':reinforcements,
@@ -162,6 +214,7 @@ def report(run):
              f"Launch: `{value['launch']['reason']}`; assignment matches: `{value['assignment_matches']}`",
              f"Decisions: {len(decisions)}; batch steps: {len(batch_steps)}; statuses: `{json.dumps(counts)}`",
              f"Model: `{value['model_metrics']}`",
+             f"Native consequences: {len(native_execution)}; outcomes: `{value['native_metrics']['execution_outcomes']}`; incomplete records: {value['native_metrics']['record_errors']}",
              f"Latency: `{value['latency_seconds']}`; randomness: {value['randomness']}", "",
              "Selection, confirmed execution, and match outcome are separate evidence.", "",
              "| Decision | Request | Reply | Execution | Seconds | Explanation (controller declaration) |",
@@ -172,6 +225,7 @@ def report(run):
         lines.append("| " + " | ".join(str(c).replace("|", "\\|").replace("\n", " ") for c in cells) + " |")
     lines += ["", f"Episodes: {len(episodes)}; see `episodes/`. Raw exchanges: `decisions/`.",
               "Repeated request IDs (e.g. load) are left unconfirmed rather than joined ambiguously.",
+              "Native net resource changes and owned-state snapshots are in `report.json`. Unknown recovery is not command confirmation.",
               ""]
     (run / "report.md").write_text("\n".join(lines), encoding="utf-8")
     return value

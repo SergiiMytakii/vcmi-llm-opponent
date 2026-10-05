@@ -8,6 +8,7 @@
 #include "SkillChoice.h"
 #include "TurnBatch.h"
 #include "TransportJSON.h"
+#include "ObservationRules.h"
 
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/callback/Calendar.h"
@@ -235,23 +236,6 @@ std::string strategicDescription(const std::string & text)
     return text.size() <= 320 ? text : "unknown_description_exceeds_budget";
 }
 
-std::string buildingAvailability(EBuildingState state)
-{
-    switch(state)
-    {
-        case EBuildingState::ALLOWED: return "allowed_now";
-        case EBuildingState::ALREADY_PRESENT: return "built";
-        case EBuildingState::FORBIDDEN: return "forbidden";
-        case EBuildingState::NO_RESOURCES: return "insufficient_resources";
-        case EBuildingState::CANT_BUILD_TODAY: return "daily_limit";
-        case EBuildingState::PREREQUIRES: return "missing_prerequisites";
-        case EBuildingState::MISSING_BASE: return "missing_base";
-        case EBuildingState::HAVE_CAPITAL: return "another_capitol_exists";
-        case EBuildingState::NO_WATER: return "no_water";
-        case EBuildingState::ADD_MAGES_GUILD: return "mage_guild_required";
-        default: return "unknown";
-    }
-}
 
 JsonNode factionRules(const CTown * town)
 {
@@ -604,46 +588,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
 		request["observation"]["player"].Integer() = playerID.getNum();
 		request["observation"]["day"].Integer() = cb->getCalendar().getCurrentDay();
 		request["observation"]["resources"] = resourcesJSON(cb->getResourceAmount());
-        request["observation"]["rules"]["engine_version"].String() = GameConstants::VCMI_VERSION;
-        request["observation"]["rules"]["engine_revision"].String() = GameConstants::GIT_SHA1;
-        for(const auto & mod : LIBRARY->modh->getActiveMods())
-        {
-            JsonNode ruleMod;
-            ruleMod["id"].String() = mod;
-            ruleMod["version"].String() = LIBRARY->modh->getModInfo(mod).getVersion().toString();
-            request["observation"]["rules"]["mods"].Vector().push_back(ruleMod);
-        }
-        // Classify only supported generic predicates. Never serialize an event's
-        // object IDs, instance names, positions or hidden values. Icons alone
-        // cannot distinguish conquest from a custom map using the same icon.
-        const auto * header = cb->getMapHeader();
-        std::set<std::string> victoryKinds;
-        if(header)
-            for(const auto & event : header->triggeredEvents)
-                if(event.effect.type == EventEffect::VICTORY)
-                {
-                    const JsonNode predicate = event.trigger.toJson([](const EventCondition & condition) {
-                        if(condition.condition == EventCondition::STANDARD_WIN) return JsonNode("conquest");
-                        if((condition.condition == EventCondition::CONTROL || condition.condition == EventCondition::CONTROL_CURRENT)
-                            && condition.objectType.as<MapObjectID>() == MapObjectID(Obj::TOWN)
-                            && !condition.objectID.hasValue() && condition.objectInstanceName.empty()
-                            && condition.position == int3(-1, -1, -1)) return JsonNode("control_all_towns");
-                        return JsonNode("unsupported_special");
-                    });
-                    victoryKinds.insert(predicate.isString() ? predicate.String() : "unsupported_special");
-                }
-        const bool supported = victoryKinds.size() == 1 && !victoryKinds.count("unsupported_special");
-        const auto victoryKind = supported ? *victoryKinds.begin() : "unsupported_special";
-        request["observation"]["victory"]["kind"].String() = victoryKind;
-        request["observation"]["victory"]["supported"].Bool() = supported;
-        request["observation"]["victory"]["description"].String() = victoryKind == "conquest"
-            ? "Defeat all hostile teams; one captured town need not end the game."
-            : victoryKind == "control_all_towns" ? "Control all towns as required by this scenario. One captured town alone does not prove victory."
-            : "Special public victory condition is not implemented by this adapter.";
-        request["observation"]["enemy_players"].Vector();
-        for(int color = 0; color < PlayerColor::PLAYER_LIMIT.getNum(); ++color)
-            if(cb->getPlayerRelations(playerID, PlayerColor(color)) == PlayerRelations::ENEMIES)
-                request["observation"]["enemy_players"].Vector().push_back(JsonNode(color));
+        externalai::observeStrategicRules(*cb, playerID, request["observation"]);
 		request["observation"]["hero_limits"]["on_map_count"].Integer() = cb->getHeroCount(playerID, false);
 		request["observation"]["hero_limits"]["total_count"].Integer() = cb->getHeroCount(playerID, true);
 		request["observation"]["hero_limits"]["on_map_cap"].Integer() = cb->getSettings().getInteger(EGameSettings::HEROES_PER_PLAYER_ON_MAP_CAP);
@@ -825,7 +770,7 @@ bool ExternalAI::runDecision(uint64_t turn, int attempt)
                 request["observation"]["rules"]["factions"][faction] = factionRules(town->getTown());
             for(const auto & [id, building] : town->getTown()->buildings)
                 if(building->mode == CBuilding::BUILD_NORMAL)
-                    townInfo["development"][building->getJsonKey()].String() = buildingAvailability(cb->canBuildStructure(town, id));
+                    townInfo["development"][building->getJsonKey()].String() = externalai::buildingAvailability(cb->canBuildStructure(town, id));
 			townInfo["army"] = armyJSON(town);
 			townInfo["strength"].Float() = town->getArmyStrength();
 			townInfo["fort_level"].Integer() = town->fortLevel();

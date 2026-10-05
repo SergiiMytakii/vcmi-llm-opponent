@@ -85,9 +85,92 @@ class ExperienceControllerTest(unittest.TestCase):
         self.assertEqual(info['provider'],'codex')
         self.assertNotIn('learning',next_game,'engine protocol must remain unchanged')
 
+    def test_supported_confidence_requires_matching_declared_rules_and_executor(self):
+        rules=dict(engine_version='1.8',engine_revision='revision-A',
+                   mods=[dict(id='core',version=''),dict(id='vcmi',version='1.5')])
+        for number in range(3):
+            first=self.request(game='version-A-'+str(number));first['observation']['rules']=rules
+            self.call(first)
+            after=self.request(game='version-A-'+str(number),day=2,heroes=[])
+            after['observation']['rules']=rules
+            self.call(after)
+        source=MODEL.replace("mode = os.environ.get('LEARNING_TEST_MODE','support')", """
+mode = os.environ.get('LEARNING_TEST_MODE','support')
+current=context['execution_context'];lesson=lessons[0]
+assert lesson['supporting_games']==3
+assert lesson['matching_supporting_games']==int(os.environ['EXPECTED_MATCHING_GAMES'])
+assert lesson['confidence']==('supported' if os.environ['EXPECTED_MATCHING_GAMES']=='3' else 'hypothesis')
+assert lesson['evidence_contexts_complete']
+assert len(lesson['evidence_contexts'])==1
+origin=lesson['evidence_contexts'][0]
+assert origin['engine_revision']=='revision-A'
+assert origin['execution_mechanism']=='external_actions_v1'
+assert origin['supporting_games']==3
+assert current['rules_known']==(os.environ['EXPECTED_RULES_KNOWN']=='1')
+""")
+        self.env.update(codex_fixture(self.folder,source))
+        cases=[('same',rules,None,3,True),
+               ('mod-order',{**rules,'mods':list(reversed(rules['mods']))},None,3,True),
+               ('engine-version',{**rules,'engine_revision':'revision-B'},None,0,True),
+               ('mod-version',{**rules,'mods':[dict(id='vcmi',version='2.0')]},None,0,True),
+               ('unknown-mod',{**rules,'mods':[dict(id='custom',version='')]},None,0,False),
+               ('native-executor',rules,'native_campaign_v3',0,True)]
+        for name,current_rules,mechanism,matching,known in cases:
+            with self.subTest(context=name):
+                request=self.request(game='context-'+name);request['observation']['rules']=current_rules
+                if mechanism:request['memory']['execution_mechanism']=mechanism
+                _,info=self.call(request,EXPECTED_MATCHING_GAMES=str(matching),EXPECTED_RULES_KNOWN='1' if known else '0')
+                self.assertEqual(info['provider'],'codex','the current rule/executor context was misrepresented')
+
+    def test_native_episode_keeps_physical_town_army_and_visiting_defender_facts(self):
+        first=self.request(game='native-defense')
+        first['memory']['execution_mechanism']='native_campaign_v3'
+        town=dict(id=8,ref='object:1',position=[5,11,0],defense_value=5679,
+                  army_holder_ref='object:1',visiting_hero_ref='object:0')
+        first['observation']['towns']=[town]
+        first['observation']['heroes']=[dict(id=7,ref='object:0',position=[5,11,0],
+                                           army_value=22666,strength=dict(army_ai_value=22666))]
+        self.call(first)
+        source=MODEL.replace("mode = os.environ.get('LEARNING_TEST_MODE','support')", """
+mode = os.environ.get('LEARNING_TEST_MODE','support')
+assert len(episodes)==1
+for observation in (episodes[0]['trajectory'][-1]['observation'],episodes[0]['after']):
+    town=observation['towns'][0]
+    assert town['defense_value']==5679
+    assert town['army_holder_ref']=='object:1'
+    assert town['visiting_hero_ref']=='object:0'
+    assert observation['heroes'][0]['army_value']==22666
+""")
+        self.env.update(codex_fixture(self.folder,source))
+        after=copy.deepcopy(first);after['request_id']='0:2:1';after['observation']['day']=2
+        after['observation']['resources']=[6000]
+        _,info=self.call(after)
+        self.assertEqual(info['provider'],'codex','native defense facts were lost in durable episode projection')
+
     def learn_loss(self):
         self.call(self.request())
         return self.call(self.request(day=2,heroes=[]))
+
+    def test_native_episode_keeps_acknowledged_embark_state_in_the_model_context(self):
+        first=self.request(game='native-boat')
+        first['memory']['execution_mechanism']='native_campaign_v3'
+        first['observation']['heroes']=[dict(id=7,ref='object:0',position=[7,11,0],army_value=1000,in_boat=False)]
+        self.call(first)
+        source=MODEL.replace("mode = os.environ.get('LEARNING_TEST_MODE','support')", """
+mode = os.environ.get('LEARNING_TEST_MODE','support')
+assert len(episodes)==1
+before=episodes[0]['trajectory'][0]['observation']['heroes'][0]
+after=episodes[0]['after']['heroes'][0]
+assert before['position']==[7,11,0] and before['in_boat'] is False
+assert after['position']==[8,11,0] and after['in_boat'] is True
+assert before['army_value']==after['army_value']==1000
+""")
+        self.env.update(codex_fixture(self.folder,source))
+        after=copy.deepcopy(first);after['request_id']='0:2:1';after['observation']['day']=2
+        after['observation']['heroes'][0].update(position=[8,11,0],in_boat=True)
+        after['observation']['resources']=[6000]
+        _,info=self.call(after)
+        self.assertEqual(info['provider'],'codex','the actual own embark state was omitted from durable learning context')
 
     def test_contradictory_experience_retires_a_lesson_instead_of_repeating_it(self):
         self.learn_loss()
