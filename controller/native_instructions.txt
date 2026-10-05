@@ -156,6 +156,11 @@ capabilities and factual completion predicates.
 - reinforce_hero: recipient as actor; owned donor hero/town as target.
 - preserve_force: owned safe town; maintain specified floor through its day.
 - scout_frontier: supplied frontier ref, never hidden land.
+- secure_resource: for a mine, complete_when is target_owned with value equal to
+  observation.player. For a resource pile, use reserve_at_least: native code
+  requires a confirmed pickup of that target and gold at least value. Use value=0
+  when no additional gold floor is intended. A picked-up pile disappears; it
+  never becomes an owned object, so target_owned cannot prove its collection.
 
 Every depends_on ID names a goal in this returned plan; dependencies are acyclic.
 Completed old-plan goals are not implicit dependencies. Independent goals continue
@@ -204,3 +209,13 @@ share an approach category but must differ in content. Use short complete senten
 at most 160 characters per explanation field; never truncate mid-word. Output no
 game commands, executable code, hidden facts or private reasoning. Refusal/invalid
 plans leave useful native play in control.
+
+When learning is requested, return exactly one assessment per supplied episode,
+including uncertain ones. Choose at most one lesson for each episode; never repeat
+an episode_id to assess another lesson. Cite only that episode's offered signal IDs.
+For an existing lesson_id
+with support, contradict or uncertain, copy the supplied rule exactly and keep
+the same conditions; these verdicts assess the existing lesson, not a rewrite.
+Use revise only for an explicit replacement with a different, more precise rule.
+Use lesson_id=null for a new rule. Never attach new wording or conditions to an
+existing lesson under support: that invalidates the entire strategic reply.

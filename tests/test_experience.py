@@ -85,6 +85,19 @@ class ExperienceControllerTest(unittest.TestCase):
         self.assertEqual(info['provider'],'codex')
         self.assertNotIn('learning',next_game,'engine protocol must remain unchanged')
 
+    def test_one_offered_episode_does_not_allow_a_second_assessment_to_discard_the_choice(self):
+        source = MODEL.replace("    answer['learning']={'expectation':", """    if mode == 'fill-schema' and assessments:
+        capacity = schema['properties']['learning']['properties']['assessments']['maxItems']
+        while len(assessments) < capacity:
+            assessments.append({**assessments[0], 'explanation':'A second assessment of the same episode.'})
+    answer['learning']={'expectation':""")
+        self.env.update(codex_fixture(self.folder, source))
+        self.call(self.request())
+        reply, info = self.call(self.request(day=2, heroes=[]), LEARNING_TEST_MODE='fill-schema')
+        self.assertEqual(info['provider'], 'codex', 'schema permitted duplicate episode assessment')
+        self.assertEqual(reply['action_id'], 'attack')
+        self.assertEqual(info['experience']['lessons_updated'], 1)
+
     def test_supported_confidence_requires_matching_declared_rules_and_executor(self):
         rules=dict(engine_version='1.8',engine_revision='revision-A',
                    mods=[dict(id='core',version=''),dict(id='vcmi',version='1.5')])

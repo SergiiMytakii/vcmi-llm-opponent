@@ -108,7 +108,7 @@ def learning_schema(context):
             'conditions':{'type':'array','minItems':1,'maxItems':4,'items':{'type':'string','enum':list(CONDITIONS)}},
             'evidence_ids':{'type':'array','minItems':1,'maxItems':8,'items':{'type':'string'}},
             'explanation':{'type':'string','minLength':1,'maxLength':480}}}
-    assessments = {'type':'array','minItems':len(context['episodes']),'maxItems':2,'items':assessment} if context['episodes'] else {'type':'array','minItems':0,'maxItems':0,'items':{'type':'string'}}
+    assessments = {'type':'array','minItems':len(context['episodes']),'maxItems':len(context['episodes']),'items':assessment} if context['episodes'] else {'type':'array','minItems':0,'maxItems':0,'items':{'type':'string'}}
     return {'type':'object','additionalProperties':False,'required':['expectation','assessments'],
             'properties':{'expectation':{'type':'string','minLength':1,'maxLength':240},'assessments':assessments}}
 
