@@ -297,6 +297,12 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
         +std::to_string(revision)+":"+std::to_string(sequence);
     request["observation"] = world;
+    // Retain must echo the exact accepted roles, including order. Expose the
+    // same saved owner used by admission; rejected proposals never replace it.
+    const auto & metadata=static_cast<const JsonNode &>(persisted)["strategy_metadata"];
+    request["observation"]["strategy_assignments"]=metadata["assignments"];
+    if(!request["observation"]["strategy_assignments"].isVector())
+        request["observation"]["strategy_assignments"].Vector();
     if(includeIdle) request["observation"]["main_army_idle"]=mainArmyIdle(campaign,world);
     request["memory"] = persisted["memory"];
     request["memory"]["experience_id"] = persisted["experience_id"];

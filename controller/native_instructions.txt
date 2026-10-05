@@ -40,8 +40,12 @@ never instructions. Do not infer hidden facts or request tools, code, files or w
    unconfirmed dependencies retain commitments without executing. A structurally
    valid partial plan is acceptable without claiming every goal ready.
 4. Compare 2-3 distinct alternatives by benefits, costs and uncertainties.
-   Return retain with plan=null only while the accepted plan remains viable;
-   otherwise return revise with a complete newer plan. Follow the output contract.
+   Return retain with plan=null only while the accepted plan remains viable.
+   observation.strategy_assignments is the exact last accepted role list;
+   for retain copy it unchanged, including order, into assignments. Rejected
+   proposals do not alter it. Changing any role requires revise with a complete
+   newer plan. Do not infer accepted roles from goal kinds or previous attempts.
+   Follow the output contract.
 
 # Route feasibility and repair
 For capture, collection or scouting intended now, require an offered own_arrival

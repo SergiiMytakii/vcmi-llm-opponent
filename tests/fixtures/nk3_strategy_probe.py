@@ -107,6 +107,8 @@ if mode=='economy':
     reply['assignments']=[dict(hero_ref=hero['ref'],role='defender')]
     reply['reconsider_when']=[dict(goal_id='income',kind='deadline_missed')]
 if mode=='stale':reply['identity']['generation']='old'
+if mode=='rejection_feedback' and r['identity']['revision']==0:
+    reply['assignments']=[dict(hero_ref=r['observation']['heroes'][0]['ref'],role='defender')]
 if mode=='rejection_feedback' and r['identity']['revision']>0:
     hero=r['observation']['heroes'][0]['ref']
     goal.update(id='hold-a',kind='defend_area',actor_ref=hero,target_ref=town,building_id=-1,
@@ -116,6 +118,9 @@ if mode=='rejection_feedback' and r['identity']['revision']>0:
         plan['goals'].append(dict(goal,id='hold-b'))
     reply['assignments']=[dict(hero_ref=hero,role='main')]
     reply['reconsider_when']=[dict(goal_id='hold-a',kind='deadline_missed')]
+if mode=='rejection_feedback' and r['identity']['revision']>=2:
+    reply.update(decision='retain',plan=None,assignments=r['observation']['strategy_assignments'],
+                 reconsider_when=[dict(goal_id=g['id'],kind='deadline_missed') for g in r['campaign']['goals']])
 if mode=='invalid':plan['goals'][0]['required_capabilities']=['fly']
 if mode in ('timeout','slow'):
     import time

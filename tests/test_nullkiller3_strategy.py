@@ -92,18 +92,25 @@ class NativeStrategicExchangeTest(unittest.TestCase):
                         try:record=decoder.raw_decode(text[match.start(1):])[0]
                         except ValueError:continue
                         if record.get('requested'):records.append(record)
-                    if len(records)>=3:break
+                    if len(records)>=4:break
                     time.sleep(.05)
             finally:
                 (run/'STOP').touch(exist_ok=True);child.wait(timeout=15)
         self.assertTrue(json.loads((run/'launch.json').read_text())['cleanup_complete'])
         self.assertTrue(json.loads((run/'launch.json').read_text())['protected_files_unchanged'])
-        self.assertGreaterEqual(len(records),3,str(output))
+        self.assertGreaterEqual(len(records),4,str(output))
         self.assertTrue(records[0]['accepted'])
         self.assertFalse(records[1]['accepted'])
         self.assertEqual(records[1]['fallback_reason'],'conflicting_hero_obligations')
         requests=sorted((json.loads(p.read_text()) for p in (run/'decisions').glob('*/request.json')),
                         key=lambda x:int(x['request_id'].rsplit(':',1)[1]))
+        self.assertEqual(requests[0]['observation'].get('strategy_assignments'),[],
+                         'opening hides the explicitly empty native role state')
+        expected=[dict(hero_ref=requests[0]['observation']['heroes'][0]['ref'],role='defender')]
+        self.assertEqual(requests[1]['observation'].get('strategy_assignments'),expected,
+                         'next request hides the accepted roles required for retain')
+        self.assertEqual(requests[2]['observation'].get('strategy_assignments'),expected,
+                         'rejected roles replaced the authoritative assignments')
         result=next((item for item in requests[2]['memory']['recent_results']
                      if item['outcome']=='strategy_rejected'),None)
         self.assertIsNotNone(result,'next model request hides native strategic rejection')
@@ -113,6 +120,13 @@ class NativeStrategicExchangeTest(unittest.TestCase):
         self.assertEqual(result['action']['installed_revision'],records[0]['revision'])
         self.assertEqual([g['id'] for g in result['action']['proposed_goals']],['hold-a','hold-b'])
         self.assertTrue(records[2]['accepted'],'controller did not use native rejection feedback')
+        self.assertEqual(requests[3]['observation']['strategy_assignments'],
+                         [dict(hero_ref=requests[0]['observation']['heroes'][0]['ref'],role='main')])
+        self.assertTrue(records[3]['accepted'],'native rejected retain with the exact accepted role echo')
+        echoed=next(json.loads(p.read_text()) for p in (run/'decisions').glob('*/stdout.bin')
+                    if json.loads(p.read_text()).get('request_id')==requests[3]['request_id'])
+        self.assertEqual(echoed['decision'],'retain')
+
 
     def test_strategy_goal_and_invalid_reply_fallback_through_recorder(self):
         config=json.loads(Path(os.environ['VCMI_NK3_STRATEGY_CONFIG']).read_text())
