@@ -37,6 +37,19 @@ JsonNode resourceValues(const TResources & values)
     for(int index = 0; index < 7; ++index) result.Vector().emplace_back(values[GameResID(index)]);
     return result;
 }
+JsonNode armyUnits(const CArmedInstance * army)
+{
+    JsonNode result;result.Vector();
+    for(const auto & [slot,stack]:army->Slots())
+    {
+        const auto count=army->getStackCount(slot);
+        if(count<=0) continue;
+        JsonNode unit;unit["count"].Integer()=count;
+        unit["unit_value"].Integer()=stack->estimateCombatValue()/count;
+        result.Vector().push_back(unit);
+    }
+    return result;
+}
 std::string objectKind(const CGObjectInstance * object)
 {
     switch(object->ID.toEnum())
@@ -424,6 +437,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["position"] = coordinate(hero->visitablePos());
         item["in_boat"].Bool() = hero->inBoat();
         item["army_value"].Integer() = hero->estimateCombatValue();
+        item["army_units"]=armyUnits(hero);
         int64_t lastCreatureValue=0;
         if(hero->needsLastStack())
             for(const auto & [slot,stack]:hero->Slots())
@@ -450,6 +464,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["id"].Integer() = externalai::objectAlias(persisted["object_ids"], town->id.getNum());
         item["position"] = coordinate(town->visitablePos());
         item["defense_value"].Integer() = town->getUpperArmy()->estimateCombatValue();
+        item["army_units"]=armyUnits(town->getUpperArmy());
         item["army_holder_ref"].String() = reference(town->getUpperArmy());
         if(const auto * visitor=town->getVisitingHero();visitor && visitor->getOwner()==ai.playerID)
             item["visiting_hero_ref"].String()=reference(visitor);

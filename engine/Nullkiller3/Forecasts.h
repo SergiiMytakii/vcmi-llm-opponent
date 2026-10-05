@@ -253,6 +253,38 @@ inline int64_t minimumRetainedArmyValue(const std::string & pool,const JsonNode 
         if(hero["ref"].String()==pool) return std::max<int64_t>(0,hero["minimum_retained_army_value"].Integer());
     return 0; // A town's physical garrison may be emptied; a hero may not.
 }
+// A feasible whole-creature donation, conservatively chosen in at most seven
+// stack operations. It is not a maximum knapsack solution or a packing promise.
+inline int64_t wholeCreatureSourceFloor(const std::string & pool,int64_t power,
+    int64_t required,const JsonNode & world)
+{
+    required=std::max(required,minimumRetainedArmyValue(pool,world));
+    const JsonNode * units=nullptr;
+    for(const auto & hero:world["heroes"].Vector())
+        if(hero["ref"].String()==pool) units=&hero["army_units"];
+    if(!units) for(const auto & town:world["towns"].Vector())
+        if(CampaignState::armyPool(town["ref"].String(),world)==pool) units=&town["army_units"];
+    if(!units || !units->isVector()) return std::max(power,required);
+    std::vector<std::pair<int64_t,int64_t>> stacks;
+    int64_t total=0;
+    for(const auto & unit:units->Vector())
+    {
+        const auto count=unit["count"].Integer(), value=unit["unit_value"].Integer();
+        if(count<=0 || value<=0 || value>power || count>(power-total)/value)
+            return std::max(power,required);
+        total+=count*value;stacks.emplace_back(value,count);
+    }
+    if(total!=power) return std::max(power,required);
+    std::sort(stacks.rbegin(),stacks.rend());
+    auto budget=std::max<int64_t>(0,power-required);
+    int64_t donated=0;
+    for(const auto & [value,count]:stacks)
+    {
+        const auto take=std::min(count,budget/value);
+        donated+=take*value;budget-=take*value;
+    }
+    return std::max(required,power-donated);
+}
 inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState & campaign,
     const std::map<std::string,std::string> & replacements = {})
 {
@@ -269,7 +301,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
     for(const auto & [pool,power]:armies)
     {
         JsonNode item;item["holder_ref"].String()=pool;item["army_value"].Integer()=power;
-        item["reserved_value"].Integer()=std::max(campaign.exchangeForce(pool,world,replacements),minimumRetainedArmyValue(pool,world));
+        item["reserved_value"].Integer()=wholeCreatureSourceFloor(pool,power,campaign.exchangeForce(pool,world,replacements),world);
         item["unpledged_now"].Integer()=std::max<int64_t>(0,power-item["reserved_value"].Integer());
         for(const auto & ref:aliases[pool]) item["aliases"].Vector().emplace_back(ref);
         result["army_pools"].Vector().push_back(item);
@@ -286,7 +318,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
         delivery["deadline_day"]=goal["deadline_day"];delivery["required_value"]=goal["complete_when"]["value"];
         delivery["status"].String()="unknown";
         delivery["assumptions"].Vector().emplace_back("Current owned troops and one current permitted owned land/boat route, including a presently funded owned shipyard quote; no future recruitment, growth, bonuses or alternate unseen route. Army losses are native estimates; a meeting still requires legal stack packing and an acknowledged handoff.");
-        delivery["assumptions"].Vector().emplace_back("Each physical pool is counted once. This delivery may spend only its own pledge; all other force floors remain protected. Source and recipient remain owned and at the observed positions.");
+        delivery["assumptions"].Vector().emplace_back("Each physical pool is counted once. This delivery may spend only its own pledge; all other force floors remain protected. Current surplus uses a feasible selection of whole creatures; the selection is conservative, not a maximum. Source and recipient remain owned and at the observed positions.");
         if(armies.count(pool) && armies.count(recipient) && pool!=recipient)
         {
             bool townSource=false;for(const auto & town:world["towns"].Vector()) townSource |= town["ref"].String()==source;
@@ -297,7 +329,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
                     if(arrival["hero_ref"].String()==traveler
                         && (!best || arrival["day"].Integer()<(*best)["day"].Integer()
                             || (arrival["day"]==(*best)["day"] && arrival["army_loss_estimate"].Integer()<(*best)["army_loss_estimate"].Integer()))) best=&arrival;
-            const auto floor=std::max(campaign.exchangeForce(pool,world,replacements,id),minimumRetainedArmyValue(pool,world));
+            const auto floor=wholeCreatureSourceFloor(pool,armies.at(pool),campaign.exchangeForce(pool,world,replacements,id),world);
             delivery["source_army_now"].Integer()=armies.at(pool);delivery["source_floor"].Integer()=floor;
             delivery["recipient_army_now"].Integer()=armies.at(recipient);
             if(best)
