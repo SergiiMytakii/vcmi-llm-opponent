@@ -2,6 +2,7 @@
 #include "CampaignState.h"
 #include "RequestArbiter.h"
 #include "Forecasts.h"
+#include "OffensivePreparation.h"
 #include <cmath>
 
 namespace nullkiller3
@@ -29,6 +30,16 @@ inline std::vector<StrategicSignal> allocationCheckpointSignals(const CampaignSt
     const auto facts=allocationCheckpointFacts(campaign,world);
     if(facts.empty() || facts==baseline["facts"].String()) return {};
     return {{"checkpoint:allocation",facts,true,true,actionable,false}};
+}
+inline std::vector<StrategicSignal> offensiveCheckpointSignals(const JsonNode & world,const JsonNode & baseline,bool actionable)
+{
+    const auto & previous=baseline["offense"];
+    const auto now=offensiveCheckpoint(world["offensive_preparation"]);
+    if(!previous.isNull() && previous["hero_ref"]==now["hero_ref"] && previous["army_value"].Integer()>0
+        && now["army_value"].Integer()>=previous["army_value"].Integer()*1.25)
+        if(!world["offensive_preparation"]["targets"].Vector().empty())
+            return {{"checkpoint:offense",now.toCompactString(),true,true,actionable,false}};
+    return {};
 }
 inline JsonNode operationIdentity(const JsonNode & goal)
 {

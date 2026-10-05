@@ -94,9 +94,16 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     bool invalid=!validNativeAliases(saved["object_ids"]) || !validPendingTask(saved["pending_native_task"]);
     const auto & checkpoint=saved["checkpoint_baseline"];
     if(!checkpoint.isNull())
-        invalid |= !checkpoint.isStruct() || checkpoint.Struct().size()!=2
+        invalid |= !checkpoint.isStruct() || (checkpoint.Struct().size()!=2 && checkpoint.Struct().size()!=3)
             || !savedInteger(checkpoint["day"],1,2147483647) || !checkpoint["facts"].isString()
             || checkpoint["facts"].String().size()>8192;
+    if(!checkpoint["offense"].isNull())
+    {
+        const auto & offense=checkpoint["offense"];
+        invalid |= !offense.isStruct() || offense.Struct().size()!=2
+            || (!offense["hero_ref"].isNull() && (!offense["hero_ref"].isString() || offense["hero_ref"].String().size()>240))
+            || (!offense["army_value"].isNull() && !savedInteger(offense["army_value"],0,1000000000000LL));
+    }
     for(const auto * field:{"confirmed_resource_pickups","frontier_positions","local_repairs","delivery_receipts","goal_blockers"})
         invalid |= !saved[field].isNull() && !saved[field].isStruct();
     if(saved["confirmed_resource_pickups"].isStruct())

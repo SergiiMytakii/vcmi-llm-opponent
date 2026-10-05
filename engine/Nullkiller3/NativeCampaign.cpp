@@ -4,6 +4,7 @@
 #include "NativeTrace.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
+#include "OffensivePreparation.h"
 #include "StrategicDecision.h"
 #include "../../lib/StartInfo.h"
 #include "../Nullkiller2/Markers/DefendTown.h"
@@ -691,6 +692,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     }
     observeBuildingProgress();
     observeOperationProgress();
+    world["offensive_preparation"]=offensivePreparation(campaign,world);
     forecasts["route_assumptions"].String()="All visible town/mine/resource targets, complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
     traceCampaign();
 }

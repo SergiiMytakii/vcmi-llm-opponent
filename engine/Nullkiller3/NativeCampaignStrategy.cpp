@@ -2,6 +2,7 @@
 #include "NativeCampaign.h"
 #include "StrategicDecision.h"
 #include "Forecasts.h"
+#include "OffensivePreparation.h"
 #include "../ExternalAI/ProcessExchange.h"
 #include "../ExternalAI/TransportJSON.h"
 #include "../ExternalAI/StrategyMemory.h"
@@ -126,6 +127,7 @@ void NativeCampaign::recordCheckpointBaseline()
 {
     JsonNode baseline;baseline["day"]=world["day"];
     baseline["facts"].String()=allocationCheckpointFacts(campaign,world);
+    baseline["offense"]=offensiveCheckpoint(world["offensive_preparation"]);
     persisted["checkpoint_baseline"]=baseline;
 }
 std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller & ai)
@@ -135,6 +137,8 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
     const auto checkpoint=allocationCheckpointSignals(campaign,world,persisted["checkpoint_baseline"],actionable);
     result.insert(result.end(),checkpoint.begin(),checkpoint.end());
+    const auto offense=offensiveCheckpointSignals(world,persisted["checkpoint_baseline"],actionable);
+    result.insert(result.end(),offense.begin(),offense.end());
     auto losses=battleLossSignals(campaign.plan(),persisted["memory"],actionable);
     std::erase_if(losses,[&](const auto & signal) {
         if(!locallyRepairedCourierLoss(ai,signal.question.substr(std::string("battle_loss:").size()))) return false;
@@ -242,6 +246,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     generate(ai,true);
     if(persisted["checkpoint_baseline"].isNull()
         || persisted["checkpoint_baseline"]["day"].Integer()>world["day"].Integer()) recordCheckpointBaseline();
+    if(persisted["checkpoint_baseline"]["offense"].isNull())
+        persisted["checkpoint_baseline"]["offense"]=offensiveCheckpoint(world["offensive_preparation"]);
     arbiter.beginTurn(world["day"].Integer(), {280000,120000,40000});
     auto decision = arbiter.consider(strategicSignals(ai));
     JsonNode trace;
@@ -279,7 +285,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     request["signals"] = trace["signals"];
     request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
     request["budget"]["tokens"].Integer() = arbiter.remainingBudget().tokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());

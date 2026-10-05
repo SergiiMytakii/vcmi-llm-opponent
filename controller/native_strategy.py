@@ -32,6 +32,8 @@ def evidence(request):
     refs = campaign_evidence({**request, 'actions': []})
     if 'goal_feedback' in request['observation']:
         refs.append('observation:goal_feedback')
+    if 'offensive_preparation' in request['observation']:
+        refs.append('observation:offensive_preparation')
     return sorted(set(refs))
 
 

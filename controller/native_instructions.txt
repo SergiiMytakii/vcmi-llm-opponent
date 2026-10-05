@@ -37,6 +37,20 @@ A structurally valid partial plan is accepted without claiming every goal ready.
 Use an explicit dependency for preparation rather than inventing future troops.
 
 # Choose an aggressive connected operation
+Use observation.offensive_preparation to give the strongest army a connected
+operation. Compare current attacks with offered reinforced routes and own source
+options. A source with no meeting route is unknown; fundable recruitment is an
+alternative, not jointly available money. Post-meeting attack forecasts marked
+unknown are not proof. Use reinforce_hero and explicit dependencies before a
+future capture; choose a safe offered approach or useful intermediate target
+while awaiting preparation. Independent helper scouting can proceed in parallel.
+If the strongest hero has movement but no ready operation, explain its waiting
+in your reason: a concrete defense, supported reinforcement wait, or no safe
+established route. A defender role alone does not explain idling. Do not promote
+a weaker helper to main merely to avoid assigning the strongest army work.
+After substantial reinforcement, reconsider newly supported attacks rather than
+retaining a scouting-only plan automatically. Native budgets and route constraints
+still apply; do not raise the loss policy just to turn a blocked attack ready.
 Play for conquest and initiative. Prefer a funded, native-supported capture of
 known neutral/enemy towns or valuable mines by the strongest hero, followed by
 reinforcement and the next objective. Use helpers for collection, scouting and
