@@ -7,7 +7,7 @@ import time
 import subprocess
 import sqlite3
 
-from codex import choose, validate_request
+from codex import choose, validate_request, MODEL, REASONING_EFFORT, TIMEOUT, LEGACY_TIMEOUT
 from experience import Experience
 
 
@@ -63,6 +63,10 @@ def main():
         reply.pop('learning', None)
     if experience_error:
         metadata['experience_error'] = experience_error
+    metadata['requested_model'] = MODEL
+    metadata['requested_reasoning_effort'] = REASONING_EFFORT
+    metadata['decision_timeout_seconds'] = (min(TIMEOUT, request['budget']['wait_ms']/1000 - 2)
+                                            if request['protocol'] == 2 else LEGACY_TIMEOUT)
     metadata['request_bytes'] = len(raw)
     metadata.update(request_id=request['request_id'], action_id=reply.get('action_id') if reply else None)
     print(json.dumps(metadata), file=sys.stderr)

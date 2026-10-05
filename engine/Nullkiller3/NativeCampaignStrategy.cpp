@@ -240,7 +240,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
     generate(ai,true);
     if(persisted["checkpoint_baseline"].isNull()
         || persisted["checkpoint_baseline"]["day"].Integer()>world["day"].Integer()) recordCheckpointBaseline();
-    arbiter.beginTurn(world["day"].Integer(), {140000,120000,20000});
+    arbiter.beginTurn(world["day"].Integer(), {280000,120000,40000});
     auto decision = arbiter.consider(strategicSignals(ai));
     JsonNode trace;
     trace["day"] = world["day"];
@@ -261,7 +261,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai)
         if(!decision.signals.empty()) logAi->info("NK3_STRATEGY %s",trace.toCompactString());
         return false;
     }
-    decision.deadlineMs = std::min<int64_t>(decision.deadlineMs,70000);
+    decision.deadlineMs = std::min<int64_t>(decision.deadlineMs,140000);
     JsonNode request;
     request["protocol"].Integer() = 2;
     const auto revision = campaign.plan()["revision"].Integer();

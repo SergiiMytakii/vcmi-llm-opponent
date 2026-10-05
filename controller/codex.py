@@ -15,9 +15,11 @@ from prompt_context import (compact_json, encode_request, context_parts, bounded
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL = 'gpt-6.1-sol'
+MODEL = 'gpt-5.6-terra'
+REASONING_EFFORT = 'low'
 VERSION = 'codex-cli 0.160.0'
-TIMEOUT = 60  # Leaves room for the recorder (65s) and native exchange (70s).
+TIMEOUT = 120  # NK3: recorder 130s, native exchange 140s.
+LEGACY_TIMEOUT = 60  # Deprecated protocol 1 retains its native 70s boundary.
 LIMIT = 1024 * 1024
 DISABLED = '''shell_tool unified_exec shell_snapshot apps plugins remote_plugin memories
 multi_agent multi_agent_v2 goals browser_use browser_use_external computer_use image_generation
@@ -121,7 +123,7 @@ def choose(request):
     """Return a validated reply and diagnostics; failures belong to caller fallback."""
     validate_request(request)
     started = time.monotonic()
-    timeout = min(TIMEOUT, request['budget']['wait_ms']/1000 - 2) if request['protocol'] == 2 else TIMEOUT
+    timeout = min(TIMEOUT, request['budget']['wait_ms']/1000 - 2) if request['protocol'] == 2 else LEGACY_TIMEOUT
     if timeout <= 0: raise TimeoutError('No useful strategic wait budget remains')
     executable = resolve_executable()
     env = os.environ.copy()
@@ -148,8 +150,6 @@ def choose(request):
                     'history':history, 'soft_input_budget_bytes':SOFT_INPUT_BYTES,
                     'over_soft_input_budget':len(model_input.encode('utf-8')) > SOFT_INPUT_BYTES}
         decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
-        if decision_dir:
-            (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
         instructions = (ROOT / ('native_instructions.txt' if request['protocol']==2 else 'instructions.txt')).read_text(encoding='utf-8')
         references = {}
         for name in ('PROMPT', 'KNOWLEDGE'):
@@ -192,9 +192,13 @@ def choose(request):
                 schema['required'].append('learning')
                 schema['properties']['learning'] = learning_schema(request['experience'])
         (workspace / 'schema.json').write_text(compact_json(schema), encoding='utf-8')
+        encoding['instruction_bytes'] = len(instructions.encode('utf-8'))
+        encoding['reply_schema_bytes'] = len(compact_json(schema).encode('utf-8'))
+        if decision_dir:
+            (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
         config = {
             'model_provider': 'openai', 'forced_login_method': 'chatgpt',
-            'model_reasoning_effort': 'medium', 'model_catalog_json': str(ROOT / 'model.json'),
+            'model_reasoning_effort': REASONING_EFFORT, 'model_catalog_json': str(ROOT / 'model.json'),
             'model_instructions_file': str(workspace / 'instructions.txt'),
             'web_search': 'disabled', 'project_doc_max_bytes': 0, 'skills.include_instructions': False,
             'tools.update_plan.enabled': False, 'tools.experimental_request_user_input.enabled': False,
@@ -263,7 +267,7 @@ def choose(request):
         except ValueError as error:
             if request['protocol'] == 2:error.usage = usage
             raise
-        return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': 'medium',
+        return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': REASONING_EFFORT,
                        'cli': VERSION, 'usage': usage, 'references': references,
                        'input_encoding': encoding,
                        'duration_seconds': round(time.monotonic() - started, 3)}

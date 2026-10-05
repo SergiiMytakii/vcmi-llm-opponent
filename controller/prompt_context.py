@@ -7,35 +7,27 @@ HISTORY_BYTES = 32768
 SOFT_INPUT_BYTES = 131072
 
 HISTORY_INSTRUCTIONS = '''
-HISTORY PROJECTION
-Only memory is budgeted; current observation, all offered actions and learning
-evidence remain complete. A known_objects entry with facts_in_current_observation
-true uses the visible_objects record with the same id for its current facts;
-its own ref, dates and uncertainty flags still apply. Older confirmed results
-may contain only action identity, costs and outcome, without old route forecasts.
-Omitted historical sightings do not prove absence, removal, safety or ownership.
-Unknown and stale data remain unknown and stale. Current plan, unresolved results,
-referenced targets, enemy heroes/towns and wood/ore mines are protected, even when
-they exceed the history budget. Never infer a battle victory from movement progress.
+## History projection
+Only memory is budgeted; current observation, actions and learning evidence stay
+complete. In known_objects, facts_in_current_observation=true references the
+visible_objects entry with the same id; keep the memory entry's ref, dates and
+uncertainty flags. Older confirmed results may omit route forecasts. Omitted
+history proves no absence, safety, ownership change or battle victory. Active
+plans, unresolved results, referenced targets, enemy heroes/towns and wood/ore
+mines remain protected even above the history budget.
 '''
 
 
 SHARED_CONTEXT_INSTRUCTIONS = '''
-SHARED JSON INPUT
-When the input has shared, reference_key and request, the game request is inside
-request. A one-key object whose key equals reference_key is a reference: its
-integer value is a zero-based index into shared. Read it as that entire shared
-value, recursively resolving any nested references. These are exact repeated
-JSON values, not summaries or additional game facts. Apply the ordinary rules to
-the fully expanded request, including actions, memory and experience. Preserve
-each occurrence's surrounding fields and time: sharing does not merge sightings,
-change uncertainty, or confirm execution. Output original offered action IDs and
-request_id, never reference indices. Other one-key objects are ordinary data.
-If object_key and fields are present, a one-key object keyed by object_key is
-an encoded object: its array is [field_set_index, value1, value2, ...]. Pair the
-names in fields[field_set_index] with these values, resolving references and
-encoded objects recursively. Every original field is present, including null;
-an absent field is different from null. Field sets only share JSON key names.
+## Lossless JSON encoding
+With reference_key/shared/request, read the game request inside request.
+A one-key object keyed by reference_key means shared[its integer value].
+With object_key/fields, a one-key object keyed by object_key holds
+[field_set_index, value1, ...]: pair fields[field_set_index] with those values.
+Resolve both forms recursively, including strings. Other objects are ordinary
+data. Encoding preserves every field, null, occurrence, date and uncertainty;
+null differs from absence. Output original game refs, action IDs and request_id,
+never encoding indices.
 '''
 
 
@@ -60,7 +52,9 @@ def bounded_history(request):
     timing = {'ref','last_seen_day','stale','not_seen_at_last_position'}
     for index,item in enumerate(memory.get('known_objects', [])):
         facts = {key:value for key,value in item.items() if key not in timing}
-        if item.get('stale') is False and facts == visible.get(item.get('id')):
+        current = visible.get(item.get('id'))
+        if item.get('stale') is False and isinstance(current, dict) and facts == {
+                key:value for key,value in current.items() if key not in timing}:
             memory['known_objects'][index] = {
                 **{key:value for key,value in item.items() if key in timing or key == 'id'},
                 'facts_in_current_observation':True}
@@ -132,13 +126,15 @@ def encode_request(request):
         return json.dumps(value, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
 
     def count(value):
-        if isinstance(value, (dict, list)):
+        if isinstance(value, (dict, list, str)):
             counts[signature(value)] += 1
             if isinstance(value, dict):
                 keys.update(value)
                 children = value.values()
-            else:
+            elif isinstance(value, list):
                 children = value
+            else:
+                children = ()
             for child in children:
                 count(child)
 
@@ -152,7 +148,7 @@ def encode_request(request):
     shared, indices = [], {}
 
     def encode(value, definition=False):
-        if not isinstance(value, (dict, list)):
+        if not isinstance(value, (dict, list, str)):
             return value
         key = signature(value)
         if key in repeated and not definition:
@@ -163,7 +159,9 @@ def encode_request(request):
             return {marker:indices[key]}
         if isinstance(value, dict):
             return {name:encode(item) for name,item in value.items()}
-        return [encode(item) for item in value]
+        if isinstance(value, list):
+            return [encode(item) for item in value]
+        return value
 
     encoded = encode(request)
     envelope = {'reference_key':marker, 'shared':shared, 'request':encoded}

@@ -118,7 +118,7 @@ public:
             budget.waitMs - (critical ? 0 : budget.criticalReserveMs));
         // A normal decision needs a useful inference window. Critical events
         // may still spend the reserved time, including a shorter last window.
-        if(result.deadlineMs == 0 || (!critical && result.deadlineMs < 60000) || budget.tokens <= 0)
+        if(result.deadlineMs == 0 || (!critical && result.deadlineMs < 120000) || budget.tokens <= 0)
         {
             result.reason = RequestReason::BudgetExhausted;
             return result;

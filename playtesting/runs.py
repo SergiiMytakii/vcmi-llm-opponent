@@ -116,8 +116,8 @@ def prepare(config_path, out):
     experience_mode = config.get('experience_mode', 'learn')
     if experience_mode not in ('off', 'read_only', 'learn'):
         raise ValueError('experience_mode must be off, read_only or learn')
-    config.setdefault("decision_timeout_seconds", 65)
-    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 65)
+    config.setdefault("decision_timeout_seconds", 130)
+    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 130)
     controller = config["controller"]
     if not isinstance(controller, list) or not controller or any(not isinstance(a, str) for a in controller):
         raise ValueError("controller must be an argv array, without a shell")

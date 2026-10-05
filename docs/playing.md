@@ -3,7 +3,7 @@
 This is a developer workflow. macOS has native game evidence; Windows compilation
 and gameplay remain unverified. Use the matching engine built from this repository,
 Python 3.10+ and Codex CLI 0.160.0, signed in with a ChatGPT subscription. Decisions
-use `gpt-6.1-sol` with medium reasoning. There is no API-key fallback.
+use `gpt-5.6-terra` with low reasoning. There is no API-key fallback.
 
 Run commands from the repository root. Keep the repository available while playing:
 the launcher uses its controller files. Never start the engine by double-clicking
