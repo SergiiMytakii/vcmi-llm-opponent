@@ -424,6 +424,16 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["position"] = coordinate(hero->visitablePos());
         item["in_boat"].Bool() = hero->inBoat();
         item["army_value"].Integer() = hero->estimateCombatValue();
+        int64_t lastCreatureValue=0;
+        if(hero->needsLastStack())
+            for(const auto & [slot,stack]:hero->Slots())
+            {
+                const auto count=hero->getStackCount(slot);
+                if(count<=0) continue;
+                const auto unitValue=stack->estimateCombatValue()/count;
+                if(!lastCreatureValue || unitValue<lastCreatureValue) lastCreatureValue=unitValue;
+            }
+        item["minimum_retained_army_value"].Integer()=lastCreatureValue;
         item["strength"]["army_ai_value"] = item["army_value"];
         item["strength"]["hero_multiplier"].Float()=hero->getHeroStrength();
         item["strength"]["hero_combat_value"].Integer()=hero->estimateHeroCombatValue();

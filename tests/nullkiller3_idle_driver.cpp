@@ -8,6 +8,27 @@ JsonNode json(const std::string & value)
     return JsonNode(value.data(),value.size(),parser,"NK3 idle route proof");
 }
 void require(bool value,const char * message) { if(!value) throw std::runtime_error(message); }
+void lastCreatureDelivery()
+{
+    auto world=json(R"({"day":6,"days_in_week":7,"player":1,"resources":[0,0,0,0,0,0,0],"daily_income":[0,0,0,0,0,0,0],"capabilities":["land","transfer"],"heroes":[{"ref":"main","army_value":8190},{"ref":"courier","army_value":107,"minimum_retained_army_value":107}],"towns":[{"ref":"home","army_holder_ref":"courier","defense_value":107}],"forecasts":{"routes":[{"target_ref":"main","own_arrivals":[{"hero_ref":"courier","day":7,"army_value":107,"army_loss_estimate":0}]}]}})");
+    auto plan=json(R"({"version":3,"revision":1,"approach":"economy","horizon_days":3,"goals":[{"id":"deliver","kind":"reinforce_hero","actor_ref":"main","target_ref":"courier","deadline_day":7,"priority":100,"building_id":-1,"min_army_value":8297,"depends_on":[],"required_capabilities":["land","transfer"],"complete_when":{"kind":"army_at_least","value":8297}}],"reserves":[],"policy":{"max_loss_ratio":0.25,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+    nullkiller3::CampaignState campaign;std::string reason;
+    require(campaign.accept(plan,world,reason),reason.c_str());
+    auto logistics=nullkiller3::forecastCommitments(world,campaign);
+    require(logistics["deliveries"][0]["source_floor"].Integer()==107
+        && logistics["deliveries"][0]["recipient_possible_value"].Integer()==8190,
+        "forecast promised the courier's last creature as reinforcement");
+    require(!nullkiller3::supportedDeliveryWait(logistics,plan["goals"][0],6),
+        "impossible last-creature delivery suppressed idle-army review");
+    world["forecasts"]["army_pools"]=logistics["army_pools"];
+    require(nullkiller3::reinforcementSources(JsonNode("main"),world).Vector().empty(),
+        "last-creature hero or its town alias offered nonexistent surplus");
+    world["heroes"][1]["army_value"].Integer()=214;
+    logistics=nullkiller3::forecastCommitments(world,campaign);
+    require(logistics["deliveries"][0]["recipient_possible_value"].Integer()==8297
+        && nullkiller3::supportedDeliveryWait(logistics,plan["goals"][0],6),
+        "retaining one creature prevented delivery of a genuine surplus");
+}
 void blockedScoutingReview()
 {
     auto world=json(R"({"day":22,"player":1,"resources":[23,14,27,0,7,10,20285],"capabilities":["land"],"heroes":[{"ref":"main","army_value":19605,"movement":1500,"movement_per_day":1500,"position":[0,0,0]}],"towns":[],"objects":[],"frontiers":["south","west"],"frontier_options":[{"ref":"south","own_arrivals":[{"hero_ref":"main","day":24,"army_value":19605,"army_loss_estimate":11785}]},{"ref":"west","own_arrivals":[{"hero_ref":"main","day":24,"army_value":19605,"army_loss_estimate":5028}]}]})");
@@ -77,6 +98,6 @@ void blockedScoutingReview()
 }
 int main()
 {
-    try { blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n"; }
+    try { lastCreatureDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n"; }
     catch(const std::exception & error) { std::cerr<<error.what()<<"\n";return 1; }
 }

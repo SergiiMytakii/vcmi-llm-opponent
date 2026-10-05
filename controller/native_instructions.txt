@@ -168,6 +168,11 @@ despite blocked ones. Native code handles prerequisites, permitted route repair 
 helper replacement, without guaranteeing reinforcement or timely arrival.
 
 # Shared funds and forces
+Parallel goals must not share an actor or reinforcement donor. Make sequential
+jobs depend on the earlier goal (including collection followed by defense).
+A preserve_force floor may coexist with delivery; do not assume other overlaps
+are compatible. Hero/town aliases for the same army also share obligations.
+
 Reserve available resources/forces under named goals. force_value is a floor of
 already-owned actor troops, not delivery size/future recruits. For offensive capture,
 collection and scouting, normally use force_value=0: max_loss_ratio bounds losses;
@@ -189,9 +194,16 @@ current routes, floors, legal stack packing and confirmed handoff; projections/
 unknown meetings do not prove arrival.
 
 Defense forecasts allocate current pools once across fronts and exclude recruitment.
+Hero donors retain at least minimum_retained_army_value for their last creature;
+unpledged_now and offered sources already exclude that floor. Do not count it
+as reinforcement, including a town whose army_holder_ref is that hero.
 Enemy deadlines are advance scenarios; available force proves neither defense nor
 victory. Fresh native urgent purchases may override economic reserves only within
 reported stock-derived emergency costs.
+For insufficient_current_force at the last critical town, a token helper does
+not resolve the deficit. Compare supported stronger arrivals and the scenario
+deadline before optional construction or small reinforcement; improve defense
+or explain the concrete tradeoff. A stale sighting does not prove safety.
 
 # Preservation failures
 Losing a refuge does not release a surviving hero's floor; native repair may use

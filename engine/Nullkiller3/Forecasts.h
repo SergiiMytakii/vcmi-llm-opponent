@@ -247,6 +247,12 @@ inline JsonNode forecastBranches(const JsonNode & world, const JsonNode & reserv
 // Current physical army pools and own routes are sufficient to assess a
 // handoff of existing troops. Recruitment, new roads, battles and slot packing
 // are explicit conditions, never a factual future army or promised victory.
+inline int64_t minimumRetainedArmyValue(const std::string & pool,const JsonNode & world)
+{
+    for(const auto & hero:world["heroes"].Vector())
+        if(hero["ref"].String()==pool) return std::max<int64_t>(0,hero["minimum_retained_army_value"].Integer());
+    return 0; // A town's physical garrison may be emptied; a hero may not.
+}
 inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState & campaign,
     const std::map<std::string,std::string> & replacements = {})
 {
@@ -263,7 +269,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
     for(const auto & [pool,power]:armies)
     {
         JsonNode item;item["holder_ref"].String()=pool;item["army_value"].Integer()=power;
-        item["reserved_value"].Integer()=campaign.exchangeForce(pool,world,replacements);
+        item["reserved_value"].Integer()=std::max(campaign.exchangeForce(pool,world,replacements),minimumRetainedArmyValue(pool,world));
         item["unpledged_now"].Integer()=std::max<int64_t>(0,power-item["reserved_value"].Integer());
         for(const auto & ref:aliases[pool]) item["aliases"].Vector().emplace_back(ref);
         result["army_pools"].Vector().push_back(item);
@@ -291,7 +297,7 @@ inline JsonNode forecastDeliveries(const JsonNode & world, const CampaignState &
                     if(arrival["hero_ref"].String()==traveler
                         && (!best || arrival["day"].Integer()<(*best)["day"].Integer()
                             || (arrival["day"]==(*best)["day"] && arrival["army_loss_estimate"].Integer()<(*best)["army_loss_estimate"].Integer()))) best=&arrival;
-            const auto floor=campaign.exchangeForce(pool,world,replacements,id);
+            const auto floor=std::max(campaign.exchangeForce(pool,world,replacements,id),minimumRetainedArmyValue(pool,world));
             delivery["source_army_now"].Integer()=armies.at(pool);delivery["source_floor"].Integer()=floor;
             delivery["recipient_army_now"].Integer()=armies.at(recipient);
             if(best)
