@@ -68,7 +68,8 @@ inline JsonNode operationOwnFacts(const JsonNode & goal,const JsonNode & own,con
                 const auto cost=arrival["movement_cost"].Float();
                 if(std::isfinite(cost) && cost>=0 && cost<=2000)
                 {
-                    result["route_cost"].Integer()=std::llround(cost*1000000);
+                    const auto measured=std::llround(cost*1000000);
+                    if(result["route_cost"].isNull() || measured<result["route_cost"].Integer()) result["route_cost"].Integer()=measured;
                     result["route_subject"]["measure"].String()="native_travel_cost";
                 }
             }
@@ -247,6 +248,9 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     }
     else if(reply["decision"].String() != "retain" || !reply["plan"].isNull() || current.plan().isNull())
         return reject("invalid_strategic_retention");
+    trial.review(freshWorld);
+    for(const auto & [id,status]:trial.statuses().Struct())
+        if(status["reason"].String()=="no_supported_route") return reject("goal_has_no_supported_route");
     std::map<std::string, const JsonNode *> goals;
     for(const auto & goal : trial.plan()["goals"].Vector()) goals[goal["id"].String()] = &goal;
     const auto & assignments = reply["assignments"];

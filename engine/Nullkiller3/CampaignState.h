@@ -381,7 +381,32 @@ public:
         return true;
     }
 
-    JsonNode review(const JsonNode & world)
+    // Only offered routes for this actor establish current readiness. Missing
+    // observations remain unknown; dependency goals may establish readiness later.
+    bool hasSupportedRoute(const JsonNode & goal,const JsonNode & world) const
+    {
+        const auto & kind=goal["kind"].String();
+        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier") return true;
+        const auto & entries=kind=="scout_frontier" ? world["frontier_options"] : world["forecasts"]["routes"];
+        for(const auto & entry:entries.Vector())
+        {
+            const auto & target=kind=="scout_frontier" ? entry["ref"] : entry["target_ref"];
+            if(target!=goal["target_ref"]) continue;
+            for(const auto & route:entry["own_arrivals"].Vector())
+            {
+                if(route["hero_ref"]!=goal["actor_ref"]
+                    || !integer(route["day"],world["day"].Integer(),goal["deadline_day"].Integer())
+                    || !integer(route["army_value"],goal["min_army_value"].Integer(),1000000000000LL)
+                    || !integer(route["army_loss_estimate"],0,route["army_value"].Integer())) continue;
+                const auto army=route["army_value"].Integer(),loss=route["army_loss_estimate"].Integer();
+                if(loss<=army*plan()["policy"]["max_loss_ratio"].Float()
+                    && army-loss>=reservedForce(goal["actor_ref"].String(),world)) return true;
+            }
+        }
+        return false;
+    }
+
+    JsonNode review(const JsonNode & world,bool checkRoutes=true)
     {
         const auto goals = plan()["goals"];
         std::map<std::string, const JsonNode *> byID;
@@ -477,6 +502,11 @@ public:
                         status["reason"].String() = failed ? "dependency_failed" : "dependency_unconfirmed";
                     }
                 }
+            if(checkRoutes && status["state"].String()=="ready" && !hasSupportedRoute(goal,world))
+            {
+                status["state"].String()="blocked";
+                status["reason"].String()="no_supported_route";
+            }
         };
         for(const auto & [id, goal] : byID) reviewGoal(id);
         state["statuses"] = result;

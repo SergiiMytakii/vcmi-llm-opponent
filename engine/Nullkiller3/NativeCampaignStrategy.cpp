@@ -149,7 +149,7 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     {
         const auto & status = world["goal_statuses"][goal["id"].String()];
         const auto & why = status["reason"].String();
-        if(why == "executor_no_longer_owned" || why == "deadline_missed" || why=="target_no_longer_owned" || why=="dependency_failed" || why=="force_floor_breached" || why=="force_continuity_unconfirmed")
+        if(why == "no_supported_route" || why == "executor_no_longer_owned" || why == "deadline_missed" || why=="target_no_longer_owned" || why=="dependency_failed" || why=="force_floor_breached" || why=="force_continuity_unconfirmed")
             result.push_back({"commitment:"+goal["id"].String(),why,true,true,actionable,true});
     }
     bool exhausted=!campaign.plan().isNull();

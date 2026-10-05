@@ -549,7 +549,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         world["goal_statuses"]=campaign.statuses();
         endExecution(ai,"recovered_unknown");
     }
-    world["goal_statuses"] = campaign.review(world);
+    world["goal_statuses"] = campaign.review(world,false);
     if(!seedRead && campaign.plan().isNull())
     {
         seedRead = true;
@@ -565,7 +565,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
                 JsonNode seed(text.data(), text.size(), parser, "NK3 integration campaign");
                 std::string reason;
                 if(!accept(seed, reason)) logAi->warn("NK3 campaign seed rejected: %s", reason);
-                else world["goal_statuses"] = campaign.review(world);
+                else world["goal_statuses"] = campaign.review(world,false);
             }
         }
     }
@@ -638,7 +638,6 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
         const auto paths=ai.pathfinder->getPathInfo(position,false);
         for(const auto * hero:ai.cc->getHeroesInfo())
         {
-            const NK2AI::AIPath * best=nullptr;
             for(const auto & path:paths)
             {
                 if(path.targetHero!=hero || !path.heroArmy || path.getFirstBlockedAction()) continue;
@@ -646,17 +645,15 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
                 bool single=true;
                 for(const auto & step:path.nodes) single &= step.targetHero==hero;
                 if(!single) continue;
-                if(!best || path.movementCost()<best->movementCost()) best=&path;
+                JsonNode arrival;
+                arrival["hero_ref"].String()=reference(hero);
+                arrival["day"].Integer()=world["day"].Integer()+path.turn();
+                arrival["movement_cost"].Float()=path.movementCost();
+                arrival["army_loss_estimate"].Integer()=path.getTotalArmyLoss();
+                arrival["army_value"].Integer()=path.heroArmy->estimateCombatValue();
+                arrival["fighting_strength_estimate"].Integer()=path.getHeroStrength();
+                if(std::find(result.Vector().begin(),result.Vector().end(),arrival)==result.Vector().end()) result.Vector().push_back(arrival);
             }
-            if(!best) continue;
-            JsonNode arrival;
-            arrival["hero_ref"].String()=reference(hero);
-            arrival["day"].Integer()=world["day"].Integer()+best->turn();
-            arrival["movement_cost"].Float()=best->movementCost();
-            arrival["army_loss_estimate"].Integer()=best->getTotalArmyLoss();
-            arrival["army_value"].Integer()=best->heroArmy->estimateCombatValue();
-            arrival["fighting_strength_estimate"].Integer()=best->getHeroStrength();
-            result.Vector().push_back(arrival);
         }
         return result;
     };
@@ -683,6 +680,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     forecasts["defenses"]=forecastDefenses(world,campaign);
     const auto joint=forecastCommitments(world,campaign,helperSources());
     for(const auto * field:{"commitments","resource_calendar","army_pools","deliveries","stock_at_deadline"}) forecasts[field]=joint[field];
+    world["goal_statuses"]=campaign.review(world);
     observeBuildingProgress();
     observeOperationProgress();
     forecasts["route_assumptions"].String()="All visible town/mine/resource targets, complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";

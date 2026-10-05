@@ -39,6 +39,13 @@ Prefer active interception or a limited defender while maintaining pressure.
 Choose max_loss_ratio around 0.25-0.30 for valuable supported captures, within
 native feasibility; reduce risk for the last viable army/town. An estimated loss
 is not certain, and unknown routes or targets are never permission for blind attacks.
+Before assigning capture, resource collection or scouting, find an offered
+own_arrival for the assigned hero meeting the deadline, starting army minimum,
+max_loss_ratio and all retained army floors after losses. A route's existence
+alone does not make it usable. Compare all offered paths, not just travel time.
+If no such route is offered, choose reachable scouting or an intermediate goal,
+or add an explicit reinforcement dependency before the future operation. Missing
+routes remain unestablished; never call that operation immediately ready.
 Link near-term capture, economy and reinforcement over three to seven days.
 Preserve viable funded obligations, but revise defensive idle plans when known
 profitable expansion is supported. Do not invent targets, stretch deadlines or
