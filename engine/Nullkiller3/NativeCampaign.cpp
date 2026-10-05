@@ -682,6 +682,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     const auto joint=forecastCommitments(world,campaign,helperSources());
     for(const auto * field:{"commitments","resource_calendar","army_pools","deliveries","stock_at_deadline"}) forecasts[field]=joint[field];
     world["goal_statuses"]=campaign.review(world);
+    retainDefenseExecutionBlockers(campaign,world,persisted["goal_blockers"]);
     world["goal_feedback"].Vector();
     for(const auto & goal:campaign.plan()["goals"].Vector())
     {
@@ -882,7 +883,10 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
         const bool stabilizing=goal["kind"].String()=="preserve_force"
             && campaign.requiresStabilization(goal["id"].String());
         if(stabilizationOnly && !stabilizing) continue;
-        if(world["goal_statuses"][goal["id"].String()]["state"].String() != "ready" && !stabilizing) continue;
+        const auto & goalStatus=world["goal_statuses"][goal["id"].String()];
+        const bool retryDefenseBlock=goalStatus["state"].String()=="blocked"
+            && goalStatus["reason"].String()=="hero_required_for_defense";
+        if(goalStatus["state"].String() != "ready" && !stabilizing && !retryDefenseBlock) continue;
         const auto & kind = goal["kind"].String();
         if(kind!="reinforce_hero" && priorityPass != (kind == "develop_town")) continue;
         if(operationStalled(static_cast<const JsonNode &>(persisted)["operation_progress"][goal["id"].String()],world["forecasts"],goal["id"].String(),world["day"].Integer()))
@@ -1043,7 +1047,9 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
             for(const auto & delivery:world["forecasts"]["deliveries"].Vector())
                 if(delivery["goal_id"]==goal["id"] && delivery["status"].String()=="late_on_current_route"
                     && delivery["arrival_day"].Integer()>goal["deadline_day"].Integer()) late=&delivery;
-            const std::string reason=late ? "deadline_unreachable" : "route_not_established";
+            const bool defenseLocked=actor && ai.getHeroLockedReason(actor)==HeroLockedReason::DEFENCE;
+            const std::string reason=defenseLocked ? "hero_required_for_defense"
+                : late ? "deadline_unreachable" : "route_not_established";
             if(actor && actor->movementPointsRemaining()>100)
             {
                 auto & blocker=persisted["goal_blockers"][goal["id"].String()];
@@ -1055,7 +1061,15 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
             campaign.blocked(goal["id"].String(), reason);
             world["goal_statuses"] = campaign.statuses();
         }
-        else if(output.size()>countBefore) persisted["goal_blockers"].Struct().erase(goal["id"].String());
+        else if(output.size()>countBefore)
+        {
+            persisted["goal_blockers"].Struct().erase(goal["id"].String());
+            if(retryDefenseBlock)
+            {
+                world["goal_statuses"]=campaign.review(world);
+                retainDefenseExecutionBlockers(campaign,world,persisted["goal_blockers"]);
+            }
+        }
     }
     return output;
 }

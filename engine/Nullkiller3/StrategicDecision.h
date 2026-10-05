@@ -47,6 +47,21 @@ inline JsonNode operationIdentity(const JsonNode & goal)
     for(const auto * field:{"kind","actor_ref","target_ref","min_army_value","required_capabilities","complete_when"}) result[field]=goal[field];
     return result;
 }
+// Native admission owns this refusal. A geometric route alone cannot clear it;
+// generate() must admit a fresh task, or a new plan must replace the operation.
+inline void retainDefenseExecutionBlockers(CampaignState & campaign, JsonNode & world, const JsonNode & blockers)
+{
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+    {
+        const auto & id=goal["id"].String();
+        const auto & blocker=blockers[id];
+        if(blocker["revision"]==campaign.plan()["revision"]
+            && blocker["reason"].String()=="hero_required_for_defense"
+            && world["goal_statuses"][id]["state"].String()=="ready")
+            campaign.blocked(id,"hero_required_for_defense");
+    }
+    world["goal_statuses"]=campaign.statuses();
+}
 inline JsonNode mainArmyIdle(const CampaignState & campaign,const JsonNode & world)
 {
     const auto & preparation=world["offensive_preparation"];
@@ -64,6 +79,8 @@ inline JsonNode mainArmyIdle(const CampaignState & campaign,const JsonNode & wor
         const auto & status=world["goal_statuses"][goal["id"].String()];
         ready |= status["state"].String()=="ready";
         const auto & why=status["reason"].String();
+        if(why=="hero_required_for_defense")
+        { result["reason"].String()="execution_blocked";result["goal_id"]=goal["id"];return result; }
         routeBlocked |= why=="no_supported_route" || why=="route_not_established" || why=="deadline_unreachable";
         preparing |= why=="dependency_unconfirmed";
         if(goal["kind"].String()=="reinforce_hero" && supportedDeliveryWait(world["forecasts"],goal,world["day"].Integer()))

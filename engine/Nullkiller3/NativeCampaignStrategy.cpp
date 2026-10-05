@@ -244,7 +244,8 @@ bool NativeCampaign::reviewIdleArmy(NK2AI::Nullkiller & ai)
     ai.updateState();
     world["main_army_idle"]=mainArmyIdle(campaign,world);
     logAi->info("NK3_IDLE %s",world["main_army_idle"].toCompactString());
-    if(world["main_army_idle"]["reason"].String()!="no_task") return false;
+    const auto & reason=world["main_army_idle"]["reason"].String();
+    if(reason!="no_task" && reason!="execution_blocked") return false;
     return reviewStrategy(ai,true);
 }
 bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
