@@ -7,6 +7,7 @@ namespace nullkiller3
 inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNode & world)
 {
     JsonNode result;result["targets"].Vector();result["reinforcement_sources"].Vector();
+    result["frontiers"].Vector();
     result["ready_goal_ids"].Vector();result["blocked_goal_ids"].Vector();
     const JsonNode * strongest=nullptr;
     for(const auto & hero:world["heroes"].Vector())
@@ -22,6 +23,27 @@ inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNo
         else if(status["state"].String()=="blocked" || status["state"].String()=="waiting") result["blocked_goal_ids"].Vector().push_back(goal["id"]);
     }
     result["needs_idle_explanation"].Bool()=(*strongest)["movement"].Integer()>100 && result["ready_goal_ids"].Vector().empty();
+    // Use the same route constraints as execution, under the accepted policy.
+    // These seven-day comparisons do not certify a future plan's own deadline,
+    // army minimum or newly chosen reserves; that plan is checked afresh.
+    if(!campaign.plan().isNull())
+    for(const auto & frontier:world["frontier_options"].Vector())
+    {
+        JsonNode item;item["ref"]=frontier["ref"];item["route_feedback"].Vector();
+        item["deadline_day"].Integer()=world["day"].Integer()+7;
+        for(const auto & hero:world["heroes"].Vector())
+        {
+            JsonNode goal;goal["kind"].String()="scout_frontier";goal["actor_ref"]=hero["ref"];
+            goal["target_ref"]=frontier["ref"];goal["min_army_value"].Integer()=0;
+            goal["deadline_day"]=item["deadline_day"];
+            const auto feedback=campaign.routeFeedback(goal,world);
+            JsonNode actorFeedback;
+            for(const auto * field:{"actor_ref","supported","reason","assigned_routes","earliest_safe_arrival_day"})
+                if(!feedback[field].isNull()) actorFeedback[field]=feedback[field];
+            item["route_feedback"].Vector().push_back(actorFeedback);
+        }
+        result["frontiers"].Vector().push_back(item);
+    }
     // Readiness uses the accepted policy. Opening decisions still receive the
     // existing complete forecasts, before any policy has been chosen.
     if(!campaign.plan().isNull())

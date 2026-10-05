@@ -22,7 +22,8 @@ constraints. It is evidence, not a list restricting your own strategic goals.
 Compare estimated_loss_percent with allowed_loss_percent on each route. A fast
 arrival above the limit is not feasible. earliest_safe_arrival_day, when present,
 is the earliest offered arrival for the assigned actor passing army, loss and
-reserve constraints; revise the deadline if necessary. If absent, no safe arrival
+reserve constraints. If only the deadline fails, compare moving it to that safe
+arrival before abandoning a valuable target. If absent, no safe arrival
 is established for that actor. Do not treat another hero's arrival as its route.
 For a blocked goal, inspect assigned_routes. Correct the exact issue: arrival
 beyond the deadline, insufficient starting army, losses above policy, retained
@@ -39,7 +40,14 @@ Use an explicit dependency for preparation rather than inventing future troops.
 # Choose an aggressive connected operation
 Use observation.offensive_preparation to give the strongest army a connected
 operation. Compare current attacks with offered reinforced routes and own source
-options. A source with no meeting route is unknown; fundable recruitment is an
+options. Consider a supported valuable capture first, necessary reinforcement
+second, then purposeful scouting when capture needs more information.
+offensive_preparation.frontiers compares every supplied frontier for each own
+hero using the accepted loss policy and reserve floors over seven days. Check
+assigned_routes.issues and estimated_loss_percent before selecting scouting.
+Recheck the chosen deadline, army minimum and reserves of your new plan; these
+comparisons certify neither a new policy nor the unknown land beyond the frontier.
+A source with no meeting route is unknown; fundable recruitment is an
 alternative, not jointly available money. Post-meeting attack forecasts marked
 unknown are not proof. Use reinforce_hero and explicit dependencies before a
 future capture; choose a safe offered approach or useful intermediate target
@@ -94,8 +102,10 @@ or add an explicit reinforcement dependency before the future operation. Missing
 routes remain unestablished; never call that operation immediately ready.
 Link near-term capture, economy and reinforcement over three to seven days.
 Preserve viable funded obligations, but revise defensive idle plans when known
-profitable expansion is supported. Do not invent targets, stretch deadlines or
-add idle goals to prolong a plan. If no capture is supported, use purposeful
+profitable expansion is supported. Extend a deadline only to an offered safe
+arrival serving the operation, never to prolong an unsupported idle goal.
+Include independently useful funded town development alongside the operation.
+If no capture is supported, use purposeful
 scouting or reinforcement to establish the next offensive route.
 
 # Goal contract

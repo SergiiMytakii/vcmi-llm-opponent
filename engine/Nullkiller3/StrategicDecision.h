@@ -96,11 +96,27 @@ inline JsonNode mainArmyIdle(const CampaignState & campaign,const JsonNode & wor
     if(assigned) result["reason"].String()=ready ? "operation_pending" : preparing ? "waiting_preparation" : routeBlocked ? "no_safe_route" : "operation_pending";
     return result;
 }
+inline bool idleArmyNeedsReview(const JsonNode & idle)
+{
+    const auto & reason=idle["reason"].String();
+    return reason=="no_task" || reason=="no_safe_route" || reason=="execution_blocked";
+}
 inline std::vector<StrategicSignal> idleArmySignals(const CampaignState & campaign,const JsonNode & world,bool actionable)
 {
     const auto idle=mainArmyIdle(campaign,world);
-    if(idle["reason"].String()!="no_task") return {};
+    if(!idleArmyNeedsReview(idle)) return {};
     JsonNode facts=offensiveCheckpoint(world["offensive_preparation"]);facts["safe_targets"].Vector();
+    facts["reason"]=idle["reason"];facts["blocked_operations"].Vector();
+    std::set<std::string> operations;
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+        if(goal["actor_ref"]==idle["hero_ref"] && world["goal_statuses"][goal["id"].String()]["state"].String()=="blocked")
+        {
+            auto problem=operationIdentity(goal);
+            problem["reason"]=world["goal_statuses"][goal["id"].String()]["reason"];
+            problem["route_facts"].String()=campaign.routeFeedbackFacts(goal,world);
+            operations.insert(problem.toCompactString());
+        }
+    for(const auto & operation:operations) facts["blocked_operations"].Vector().emplace_back(operation);
     std::set<std::string> refs;
     for(const auto & target:world["offensive_preparation"]["targets"].Vector())
         if(target["earliest_current_safe_day"].isNumber()) refs.insert(target["target_ref"].String());

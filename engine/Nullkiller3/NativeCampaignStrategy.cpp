@@ -163,7 +163,10 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
             auto facts=why;
             if(why=="no_supported_route")
                 facts=operationIdentity(goal).toCompactString()+campaign.routeFeedbackFacts(goal,world);
-            result.push_back({"commitment:"+goal["id"].String(),facts,true,true,actionable,true});
+            // A renamed route goal for this executor is the same question.
+            // Independent live route obligations cannot share an executor.
+            const auto subject=why=="no_supported_route" ? goal["actor_ref"].String() : goal["id"].String();
+            result.push_back({"commitment:"+subject,facts,true,true,actionable,true});
         }
     }
     bool exhausted=!campaign.plan().isNull();
@@ -244,8 +247,7 @@ bool NativeCampaign::reviewIdleArmy(NK2AI::Nullkiller & ai)
     ai.updateState();
     world["main_army_idle"]=mainArmyIdle(campaign,world);
     logAi->info("NK3_IDLE %s",world["main_army_idle"].toCompactString());
-    const auto & reason=world["main_army_idle"]["reason"].String();
-    if(reason!="no_task" && reason!="execution_blocked") return false;
+    if(!idleArmyNeedsReview(world["main_army_idle"])) return false;
     return reviewStrategy(ai,true);
 }
 bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
