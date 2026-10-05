@@ -33,7 +33,7 @@ holding=next(g for g in plan['goals'] if g['kind']=='defend_area')['id']
 reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision='revise' if renumber or release or not r.get('campaign') else 'retain',
  reason='Observe actual legal delivery progress without spending the source pledge',evidence_refs=['hero:'+hero['ref']],
  victory_method='Preserve the source defense and improve the main force',
- assignments=[dict(hero_ref=hero['ref'],role='main',goal_ids=[delivery]),dict(hero_ref=helper['ref'],role='defender',goal_ids=[holding])],
+ assignments=[dict(hero_ref=hero['ref'],role='main'),dict(hero_ref=helper['ref'],role='defender')],
  alternatives=[dict(approach='defense',benefit='Keep the source pledge',cost='Troops cannot move',uncertainty='Whole creature packing'),
                dict(approach='offense',benefit='Supply the main force',cost='Change the source pledge',uncertainty='Future threats')],
  reconsider_when=[dict(goal_id=delivery,kind='route_not_established')],plan=plan if renumber or release or not r.get('campaign') else None,

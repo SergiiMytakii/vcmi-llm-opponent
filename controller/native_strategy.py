@@ -131,7 +131,7 @@ def reply_schema(request):
                   'evidence_refs':array({'type':'string','enum':evidence(request)},1,8),
                   'victory_method':text,
                   'assignments':array(_object({'hero_ref':owned_hero,
-                                               'role':{'type':'string','enum':list(ROLES)}, 'goal_ids':array(label,1)}),0,16),
+                                               'role':{'type':'string','enum':list(ROLES)}}),0,16),
                   'alternatives':array(_object({'approach':approach,'benefit':text,'cost':text,'uncertainty':text}),2,3),
                   'reconsider_when':array(_object({'goal_id':label,'kind':{'type':'string','enum':
                                               ['executor_lost','deadline_missed','route_not_established']}}),1),
@@ -209,11 +209,9 @@ def validate_reply(request, reply, wire=False):
     assigned = {a['hero_ref']:a for a in reply['assignments']}
     if len(assigned) != len(reply['assignments']) or sum(a['role']=='main' for a in assigned.values())>1:
         raise ValueError('conflicting strategic roles')
-    for assignment in assigned.values():
-        if any(name not in goals for name in assignment['goal_ids']): raise ValueError('assignment references an unknown goal')
     for goal in goals.values():
         actor = goal['actor_ref']
-        if actor is not None and (actor not in assigned or goal['id'] not in assigned[actor]['goal_ids']):
+        if actor is not None and actor not in assigned:
             raise ValueError('goal actor has no consistent role')
     if any(c['goal_id'] not in goals for c in reply['reconsider_when']): raise ValueError('unknown reconsideration goal')
     if len({json.dumps(a,sort_keys=True,ensure_ascii=False) for a in reply['alternatives']}) != len(reply['alternatives']):

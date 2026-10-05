@@ -258,17 +258,13 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     const std::set<std::string> allowedRoles{"main", "defender", "scout", "collector", "reinforcement"};
     for(const auto & assignment : assignments.Vector())
     {
-        if(!shape(assignment, {"hero_ref", "role", "goal_ids"}) || !text(assignment["hero_ref"])
+        if(!shape(assignment, {"hero_ref", "role"}) || !text(assignment["hero_ref"])
             || !text(assignment["role"]) || !allowedRoles.count(assignment["role"].String())
-            || !roles.emplace(assignment["hero_ref"].String(), &assignment).second
-            || !assignment["goal_ids"].isVector() || assignment["goal_ids"].Vector().empty()
-            || assignment["goal_ids"].Vector().size() > 12) return reject("conflicting_strategic_roles");
+            || !roles.emplace(assignment["hero_ref"].String(), &assignment).second) return reject("conflicting_strategic_roles");
         bool owned = false;
         for(const auto & hero : freshWorld["heroes"].Vector()) owned |= hero["ref"] == assignment["hero_ref"];
         if(!owned) return reject("strategic_role_not_owned");
         mainCount += assignment["role"].String() == "main";
-        for(const auto & id : assignment["goal_ids"].Vector())
-            if(!text(id,120) || !goals.count(id.String())) return reject("role_references_unknown_goal");
     }
     if(mainCount > 1) return reject("competing_main_heroes");
     for(const auto & [id, goal] : goals)
@@ -276,8 +272,6 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
         {
             const auto actor = (*goal)["actor_ref"].String();
             if(!roles.count(actor)) return reject("goal_actor_has_no_role");
-            const auto & ids = (*roles.at(actor))["goal_ids"].Vector();
-            if(std::find(ids.begin(),ids.end(),JsonNode(id)) == ids.end()) return reject("goal_actor_role_mismatch");
         }
     const auto & alternatives = reply["alternatives"];
     if(!alternatives.isVector() || alternatives.Vector().size() < 2 || alternatives.Vector().size() > 3)

@@ -12,7 +12,7 @@ goal=dict(id='capture',kind='capture_target',actor_ref=hero['ref'],target_ref=ta
 plan=dict(version=3,revision=request['identity']['revision']+1,approach='expansion',horizon_days=5,
           goals=[goal],reserves=[],policy=dict(max_loss_ratio=.2,allow_route_repair=True,
           allow_helper_replacement=True,critical_towns=[world['towns'][0]['ref']]))
-assignment=dict(hero_ref=hero['ref'],role='main',goal_ids=['capture'])
+assignment=dict(hero_ref=hero['ref'],role='main')
 if request.get('campaign'):
     goal=request['campaign']['goals'][0]
     assignment['hero_ref']=goal['actor_ref']

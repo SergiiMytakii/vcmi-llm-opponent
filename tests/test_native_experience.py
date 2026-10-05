@@ -86,10 +86,10 @@ if r['protocol']==2:
                       dict(approach='offense',benefit='Advance',cost='Army',uncertainty='Enemy strength unknown')],
         reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan)
     if os.environ.get('NK3_TEST_FINAL_BATTLE_LOSS')=='1':
-        reply['assignments']=[dict(hero_ref=hero['ref'],role='defender',goal_ids=['home'])]
+        reply['assignments']=[dict(hero_ref=hero['ref'],role='defender')]
         reply['reconsider_when']=[dict(goal_id='home',kind='deadline_missed')]
     if os.environ.get('NK3_TEST_FINAL_BATTLE_WIN')=='1':
-        reply['assignments']=[dict(hero_ref=hero['ref'],role='main',goal_ids=['capture'])]
+        reply['assignments']=[dict(hero_ref=hero['ref'],role='main')]
         reply['reconsider_when']=[dict(goal_id='capture',kind='deadline_missed')]
     if r.get('campaign'):reply.update(decision='retain',plan=None)
 if r.get('experience',{}).get('mode')=='learn':

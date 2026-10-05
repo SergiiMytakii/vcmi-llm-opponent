@@ -410,6 +410,8 @@ public:
                 const auto floor=reservedForce(route["hero_ref"].String(),world);
                 option["retained_force_floor"].Integer()=floor;
                 option["allowed_loss_ratio"]=plan()["policy"]["max_loss_ratio"];
+                if(army>0) option["estimated_loss_percent"].Float()=100.0*loss/army;
+                option["allowed_loss_percent"].Float()=100.0*plan()["policy"]["max_loss_ratio"].Float();
                 if(army<goal["min_army_value"].Integer()) issue("starting_army_below_minimum");
                 if(loss>army*plan()["policy"]["max_loss_ratio"].Float()) issue("loss_exceeds_policy");
                 if(loss>army || army-loss<floor) issue("retained_force_below_reserve");
@@ -426,6 +428,12 @@ public:
         }
         if(feedback["assigned_routes"].Vector().empty()) feedback["reason"].String()="assigned_actor_route_not_established";
         else feedback["reason"].String()=feedback["supported"].Bool() ? "supported_route" : "assigned_routes_violate_constraints";
+        // A correction keeps the chosen actor and passes army/loss/reserve
+        // constraints; only its deadline may need changing.
+        for(const auto & option:feedback["safe_options"].Vector())
+            if(option["hero_ref"]==goal["actor_ref"] && (feedback["earliest_safe_arrival_day"].isNull()
+                || option["day"].Integer()<feedback["earliest_safe_arrival_day"].Integer()))
+                feedback["earliest_safe_arrival_day"]=option["day"];
         return feedback;
     }
 

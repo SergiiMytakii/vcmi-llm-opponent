@@ -16,7 +16,7 @@ plan=dict(version=3,revision=r['identity']['revision']+1,approach='expansion',ho
 reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision='retain' if goals else 'revise',
     reason='Capture the observed mine using a legal native route',evidence_refs=['hero:'+hero['ref'],'target:'+mine['ref']],
     victory_method='Secure income for the public conquest condition',
-    assignments=[dict(hero_ref=hero['ref'],role='main',goal_ids=[goal['id']])],
+    assignments=[dict(hero_ref=hero['ref'],role='main')],
     alternatives=[dict(approach='expansion',benefit='Own the known mine',cost='Travel time',uncertainty='Route may change'),
                   dict(approach='economy',benefit='Develop home',cost='Building cost',uncertainty='Future income unknown')],
     reconsider_when=[dict(goal_id=goal['id'],kind='deadline_missed')],plan=None if goals else plan,

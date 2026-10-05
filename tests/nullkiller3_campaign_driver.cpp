@@ -249,7 +249,7 @@ int main()
         require(nullkiller3::repairQuestionFacts(proposal,blockers,campaign.statuses())!=lateBasis,
             "a materially changed owned route duration was suppressed");
         auto request = json(R"({"request_id":"fresh","identity":{"generation":"fresh"},"evidence_refs":["observation:day"]})");
-        auto reply = json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"Develop then capture","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"object:0","role":"main","goal_ids":["attack"]}],"alternatives":[{"approach":"economy","benefit":"Income","cost":"Building","uncertainty":"Unknown threats"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guard estimate"}],"reconsider_when":[{"goal_id":"attack","kind":"executor_lost"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");
+        auto reply = json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"Develop then capture","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"object:0","role":"main"}],"alternatives":[{"approach":"economy","benefit":"Income","cost":"Building","uncertainty":"Unknown threats"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guard estimate"}],"reconsider_when":[{"goal_id":"attack","kind":"executor_lost"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");
         reply["plan"] = proposal;
         nullkiller3::CampaignState initial, modelCandidate;
         require(nullkiller3::validateStrategicDecision(reply, request, world, initial, modelCandidate, reason), reason.c_str());
@@ -462,7 +462,7 @@ int main()
         deliveryPlan["goals"].Vector().clear(); deliveryPlan["reserves"].Vector().clear();
         deliveryPlan["goals"].Vector().push_back(json(R"({"id":"deliver","kind":"reinforce_hero","actor_ref":"object:0","target_ref":"object:1","deadline_day":6,"priority":80,"building_id":-1,"min_army_value":5500,"depends_on":[],"required_capabilities":["land","transfer"],"complete_when":{"kind":"army_at_least","value":5500}})"));
         auto deliveryReply=reply; deliveryReply["plan"]=deliveryPlan;
-        deliveryReply["assignments"]=json(R"([{"hero_ref":"object:0","role":"main","goal_ids":["deliver"]},{"hero_ref":"object:1","role":"reinforcement","goal_ids":["deliver"]}])");
+        deliveryReply["assignments"]=json(R"([{"hero_ref":"object:0","role":"main"},{"hero_ref":"object:1","role":"reinforcement"}])");
         deliveryReply["reconsider_when"]=json(R"([{"goal_id":"deliver","kind":"deadline_missed"}])");
         require(nullkiller3::validateStrategicDecision(deliveryReply,request,world,initial,modelCandidate,reason),"courier role cannot bind to its delivery operation");
         require(modelCandidate.participantGoals("object:1").count("deliver"),"source courier is not committed to delivery");

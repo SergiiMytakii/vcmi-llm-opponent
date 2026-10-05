@@ -18,7 +18,7 @@ else:
 reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision='retain' if r.get('campaign') else 'revise',
     reason='Evaluate the known delivery deadline before spending the travel turn',
     evidence_refs=['hero:'+hero['ref']],victory_method='Reinforce the main army for conquest',
-    assignments=[dict(hero_ref=hero['ref'],role='main',goal_ids=['supply'])],
+    assignments=[dict(hero_ref=hero['ref'],role='main')],
     alternatives=[dict(approach='offense',benefit='Deliver troops',cost='Travel',uncertainty='Deadline feasibility'),
                   dict(approach='economy',benefit='Develop locally',cost='Build cost',uncertainty='Future income')],
     reconsider_when=[dict(goal_id='supply',kind='deadline_missed')],plan=None if r.get('campaign') else plan,

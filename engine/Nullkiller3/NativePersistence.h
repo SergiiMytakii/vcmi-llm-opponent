@@ -156,7 +156,9 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
             {
                 invalid |= !assignment.isStruct();
                 if(!assignment.isStruct()) continue;
-                invalid |= !assignment["hero_ref"].isString() || !assignment["role"].isString() || !assignment["goal_ids"].isVector();
+                invalid |= !assignment["hero_ref"].isString() || !assignment["role"].isString();
+                // Older saves carry redundant goal IDs; validate before discarding.
+                invalid |= !assignment["goal_ids"].isNull() && !assignment["goal_ids"].isVector();
                 if(assignment["goal_ids"].isVector()) for(const auto & id:assignment["goal_ids"].Vector()) invalid |= !id.isString();
             }
         }
@@ -195,6 +197,9 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         for(const auto * field:{"object_ids","memory","native_campaign","strategy_metadata","local_repairs",
                                "delivery_receipts","goal_blockers","frontier_positions","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
             result.Struct().erase(field);
+    if(result["strategy_metadata"].isStruct())
+        for(auto & assignment:result["strategy_metadata"]["assignments"].Vector())
+            assignment.Struct().erase("goal_ids");
     // Derived ExternalAI review snapshots are rebuilt from the next complete
     // own list. Facts, history, aliases and spent budget remain durable.
     if(result["memory"].isStruct())

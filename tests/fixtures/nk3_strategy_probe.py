@@ -35,7 +35,7 @@ if mode=='three_force_events':
                 deadline_day=own['day']+5,priority=40,building_id=-1,min_army_value=holder['army_value'],depends_on=[],
                 required_capabilities=['land'],complete_when=dict(kind='force_preserved_until',value=own['day']+5)))
         plan['goals']=goals
-    reply['assignments']=[dict(hero_ref=g['actor_ref'],role='defender',goal_ids=[g['id']]) for g in goals]
+    reply['assignments']=[dict(hero_ref=g['actor_ref'],role='defender') for g in goals]
     reply['reconsider_when']=[dict(goal_id=g['id'],kind='deadline_missed') for g in goals]
 if mode=='force_history':
     if r.get('campaign'):
@@ -47,7 +47,7 @@ if mode=='force_history':
         goal.update(id='hold',kind='preserve_force',actor_ref=holder['ref'],target_ref=source['ref'],building_id=-1,
                     deadline_day=own['day']+5,min_army_value=holder['army_value'],required_capabilities=['land'],
                     complete_when=dict(kind='force_preserved_until',value=own['day']+5))
-    reply['assignments']=[dict(hero_ref=goal['actor_ref'],role='defender',goal_ids=['hold'])]
+    reply['assignments']=[dict(hero_ref=goal['actor_ref'],role='defender')]
     reply['reconsider_when']=[dict(goal_id='hold',kind='deadline_missed')]
     if r.get('campaign'):reply.update(decision='retain',plan=None)
     if r.get('campaign') and os.environ.get('VCMI_NK3_GARRISON_PROBE_MODE')=='force_loss':
@@ -63,13 +63,13 @@ if mode=='garrison_slots':
               deadline_day=own['day']+5,priority=40,building_id=-1,min_army_value=holder['army_value'],depends_on=[],
               required_capabilities=['land'],complete_when=dict(kind='force_preserved_until',value=own['day']+5))
     plan['goals'].append(hold)
-    reply['assignments']=[dict(hero_ref=hero['ref'],role='main',goal_ids=['deliver']),
-                          dict(hero_ref=holder['ref'],role='reinforcement',goal_ids=['deliver','hold'])]
+    reply['assignments']=[dict(hero_ref=hero['ref'],role='main'),
+                          dict(hero_ref=holder['ref'],role='reinforcement')]
     reply['reconsider_when']=[dict(goal_id='deliver',kind='deadline_missed')]
     if r.get('campaign'):
         reply.update(decision='retain',plan=None)
-        reply['assignments']=[dict(hero_ref=hero['ref'],role='main',goal_ids=['deliver']),
-                              dict(hero_ref=holder['ref'],role='reinforcement',goal_ids=['deliver','hold'])]
+        reply['assignments']=[dict(hero_ref=hero['ref'],role='main'),
+                              dict(hero_ref=holder['ref'],role='reinforcement')]
 if mode in ('scout','fronts','reachable_fronts'):
     hero=r['observation']['heroes'][0]
     choices=r['observation']['frontier_options']
@@ -80,7 +80,7 @@ if mode in ('scout','fronts','reachable_fronts'):
               if mode in ('fronts','reachable_fronts') and choices else r['observation']['frontier_options'][0])
     goal.update(id='scout',kind='scout_frontier',actor_ref=hero['ref'],target_ref=frontier['ref'],building_id=-1,
                 required_capabilities=['land'],complete_when=dict(kind='frontier_observed',value=0))
-    reply['assignments']=[dict(hero_ref=hero['ref'],role='scout',goal_ids=['scout'])]
+    reply['assignments']=[dict(hero_ref=hero['ref'],role='scout')]
     reply['reconsider_when']=[dict(goal_id='scout',kind='deadline_missed')]
     reply['evidence_refs']=['hero:'+hero['ref']]
     if mode=='reachable_fronts' and not choices and r.get('campaign'):
@@ -91,7 +91,7 @@ if mode=='resource':
     resource=min((o for o in r['observation']['visible_objects'] if o['kind']=='resource'),key=distance)
     goal.update(id='supply',kind='secure_resource',actor_ref=hero['ref'],target_ref=resource['ref'],building_id=-1,
                 required_capabilities=['land'],complete_when=dict(kind='reserve_at_least',value=1000))
-    reply['assignments']=[dict(hero_ref=hero['ref'],role='collector',goal_ids=['supply'])]
+    reply['assignments']=[dict(hero_ref=hero['ref'],role='collector')]
     reply['reconsider_when']=[dict(goal_id='supply',kind='deadline_missed')]
     reply['evidence_refs']=['hero:'+hero['ref'],'target:'+resource['ref']]
 if mode=='economy':
@@ -104,7 +104,7 @@ if mode=='economy':
               depends_on=[],required_capabilities=['land'],complete_when=dict(kind='force_preserved_until',value=r['observation']['day']+6))
     plan['goals'].append(hold)
     plan['reserves']=[dict(goal_id='defense_floor',resources=[0,0,0,0,0,0,1000],force_value=1000)]
-    reply['assignments']=[dict(hero_ref=hero['ref'],role='defender',goal_ids=['defense_floor'])]
+    reply['assignments']=[dict(hero_ref=hero['ref'],role='defender')]
     reply['reconsider_when']=[dict(goal_id='income',kind='deadline_missed')]
 if mode=='stale':reply['identity']['generation']='old'
 if mode=='invalid':plan['goals'][0]['required_capabilities']=['fly']

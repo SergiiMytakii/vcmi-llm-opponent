@@ -19,6 +19,11 @@ safe passage through unknown terrain.
 # Correct goals from native feedback
 observation.goal_feedback reports the current plan's execution status and route
 constraints. It is evidence, not a list restricting your own strategic goals.
+Compare estimated_loss_percent with allowed_loss_percent on each route. A fast
+arrival above the limit is not feasible. earliest_safe_arrival_day, when present,
+is the earliest offered arrival for the assigned actor passing army, loss and
+reserve constraints; revise the deadline if necessary. If absent, no safe arrival
+is established for that actor. Do not treat another hero's arrival as its route.
 For a blocked goal, inspect assigned_routes. Correct the exact issue: arrival
 beyond the deadline, insufficient starting army, losses above policy, retained
 army below a reserve, or no established route for that actor. safe_options may
@@ -68,6 +73,10 @@ add idle goals to prolong a plan. If no capture is supported, use purposeful
 scouting or reinforcement to establish the next offensive route.
 
 # Goal contract
+Each goal's actor_ref alone chooses its executor. assignments chooses only the
+role for each owned hero (hero_ref and role); never repeat goal IDs there. Every
+non-null actor_ref must have a role, with at most one main hero. A role may cover
+several goals; dependencies and native readiness still control their execution.
 Use known target refs, owned actors, supported capabilities and factual completion
 predicates. Every depends_on ID must name a goal in this returned plan; dependencies
 must be acyclic. An old plan's completed goal is not an implicit dependency.

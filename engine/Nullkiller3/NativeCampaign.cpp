@@ -1428,11 +1428,8 @@ std::string NativeCampaign::role(const CGHeroInstance * hero) const
     const auto obligations = campaign.participantGoals(ref,helperSources(),world);
     const auto & metadata = static_cast<const JsonNode &>(persisted)["strategy_metadata"];
     for(const auto & assignment : metadata["assignments"].Vector())
-        if(assignment["hero_ref"].isString() && assignment["hero_ref"].String() == ref)
-            for(const auto & id : assignment["goal_ids"].Vector())
+        if(assignment["hero_ref"].isString() && assignment["hero_ref"].String() == ref && !obligations.empty())
             {
-                if(!id.isString()) continue;
-                if(!obligations.count(id.String())) continue;
                 const auto & role = assignment["role"].String();
                 if(role == "main" || role == "defender") return "main";
                 if(role == "scout" || role == "collector" || role == "reinforcement") return "scout";
