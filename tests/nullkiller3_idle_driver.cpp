@@ -1,6 +1,8 @@
 #include "Global.h"
 #include "StrategicDecision.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 JsonNode json(const std::string & value)
 {
@@ -71,6 +73,30 @@ void reservedPackingDelivery()
     world["forecasts"]["army_pools"]=logistics["army_pools"];
     require(nullkiller3::reinforcementSources(JsonNode("main"),world).Vector().empty(),
         "full recipient was offered incompatible reserved donor stacks");
+    const auto request=json(R"({"request_id":"packing","identity":{"day":19},"evidence_refs":["observation:heroes"]})");
+    auto reply=json(R"({"protocol":2,"request_id":"packing","identity":{"day":19},"decision":"revise","reason":"Reinforce the main","evidence_refs":["observation:heroes"],"victory_method":"Capture hostile towns","assignments":[{"hero_ref":"main","role":"main"},{"hero_ref":"courier","role":"reinforcement"}],"alternatives":[{"approach":"economy","benefit":"Income","cost":"Gold","uncertainty":"Stock"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guards"}],"reconsider_when":[{"goal_id":"deliver","kind":"executor_lost"}],"plan":null,"usage":{"input_tokens":10,"output_tokens":10,"known":true}})");
+    reply["plan"]=plan;
+    nullkiller3::CampaignState initial,candidate;
+    require(!nullkiller3::validateStrategicDecision(reply,request,world,initial,candidate,reason)
+        && reason=="reinforcement_source_has_no_compatible_stack:deliver",
+        "strategic admission accepted a disjoint donor into a full reserved army");
+    require(candidate.plan().isNull(),"rejected packing plan changed the installed candidate");
+    auto delivered=world;
+    delivered["heroes"][0]["army_value"].Integer()=31360;
+    delivered["heroes"][0]["army_units"][6]=json(R"({"creature":20,"count":12,"unit_value":482})");
+    delivered["heroes"][1]["army_value"].Integer()=1596;
+    delivered["towns"][0]["defense_value"].Integer()=1596;
+    delivered["heroes"][1]["minimum_retained_army_value"].Integer()=532;
+    delivered["heroes"][1]["army_units"]=json(R"([{"creature":22,"count":3,"unit_value":532}])");
+    JsonNode receipt;receipt["goal"]=plan["goals"][0];receipt["day"]=delivered["day"];
+    receipt["source_ref"].String()="courier";receipt["recipient_after"].Integer()=31360;
+    delivered["confirmed_deliveries"].Vector().push_back(receipt);
+    nullkiller3::CampaignState completed;
+    require(completed.accept(plan,delivered,reason),reason.c_str());
+    require(completed.statuses()["deliver"]["state"].String()=="completed","prior delivery receipt did not complete the goal");
+    auto retained=reply;retained["decision"].String()="retain";retained["plan"]=JsonNode();
+    require(nullkiller3::validateStrategicDecision(retained,request,world,completed,candidate,reason),
+        "completed delivery was revalidated against a later incompatible army");
     // One free slot: native tries source slot20 before22, so five dendroids
     // (2410), not a different 2560-valued selection, fit this exchange.
     world["heroes"][0]["army_units"].Vector().pop_back();
@@ -83,6 +109,8 @@ void reservedPackingDelivery()
     require(fitting["deliveries"][0]["recipient_possible_value"].Integer()==27986
         && nullkiller3::supportedDeliveryWait(fitting,plan["goals"][0],19),
         "one free slot failed to receive the native first whole stack");
+    reply["plan"]=plan;
+    require(nullkiller3::validateStrategicDecision(reply,request,world,initial,candidate,reason),reason.c_str());
     // A full army can still merge the donor's Pegasus into its Pegasus slot.
     world["heroes"][0]["army_units"].Vector().push_back(json(R"({"creature":22,"count":2,"unit_value":532})"));
     world["heroes"][0]["army_value"].Integer()=26640;
@@ -160,8 +188,23 @@ void blockedScoutingReview()
     require(nullkiller3::mainArmyIdle(campaign,stationed)["reason"].String()=="waiting_delivery"
         && nullkiller3::idleArmySignals(campaign,stationed,true).empty(),"supported reinforcement wait requested idle correction");
 }
-int main()
+int main(int argc,char ** argv)
 {
-    try { lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n"; }
+    try {
+        if(argc==4)
+        {
+            auto read=[](const char * path) { std::ifstream stream(path);if(!stream) throw std::runtime_error("record unavailable");std::ostringstream data;data<<stream.rdbuf();return json(data.str()); };
+            const auto request=read(argv[1]),reply=read(argv[2]);
+            const auto & world=request["observation"];
+            nullkiller3::CampaignState current,candidate;std::string reason;
+            if(!request["campaign"].isNull())
+            { const auto acceptedRequest=read(argv[3]);require(current.accept(request["campaign"],acceptedRequest["observation"],reason),reason.c_str()); }
+            const bool accepted=nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason);
+            JsonNode result;result["accepted"].Bool()=accepted;result["reason"].String()=reason;
+            std::cout<<result.toCompactString()<<"\n";return 0;
+        }
+        require(argc==1,"expected request, reply and prior accepted request paths or no arguments");
+        lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n";
+    }
     catch(const std::exception & error) { std::cerr<<error.what()<<"\n";return 1; }
 }

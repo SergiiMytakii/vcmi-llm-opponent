@@ -422,6 +422,39 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     for(const auto & condition : conditions.Vector())
         if(!shape(condition, {"goal_id", "kind"}) || !text(condition["goal_id"],120) || !goals.count(condition["goal_id"].String())
             || !text(condition["kind"]) || !predicates.count(condition["kind"].String())) return reject("unknown_reconsideration_condition");
+    // A direct hero handoff protects the recipient's current contribution:
+    // native reserved exchange can merge or fill a slot, never swap it away.
+    // Reject a proven incompatible handoff before it replaces the live plan.
+    // Explicit preparation dependencies and town recruitment remain separate.
+    for(const auto & [id,goal]:goals)
+    {
+        if(!trial.holdsCommitment(id) || (*goal)["kind"].String()!="reinforce_hero"
+            || !(*goal)["depends_on"].Vector().empty()) continue;
+        const JsonNode * donor=nullptr,* recipient=nullptr;
+        for(const auto & hero:freshWorld["heroes"].Vector())
+        {
+            if(hero["ref"]==(*goal)["target_ref"]) donor=&hero;
+            if(hero["ref"]==(*goal)["actor_ref"]) recipient=&hero;
+        }
+        if(!donor || !recipient || (*recipient)["army_value"].Integer()<=0
+            || (*goal)["complete_when"]["value"].Integer()<=(*recipient)["army_value"].Integer()) continue;
+        const auto & source=(*donor)["army_units"], & destination=(*recipient)["army_units"];
+        if(!source.isVector() || source.Vector().empty() || !destination.isVector() || destination.Vector().size()!=7) continue;
+        std::set<int64_t> types;
+        bool known=true,matching=false;
+        for(const auto & unit:destination.Vector())
+        {
+            known &= unit["creature"].isNumber() && unit["count"].Integer()>0;
+            types.insert(unit["creature"].Integer());
+        }
+        for(const auto & unit:source.Vector())
+        {
+            known &= unit["creature"].isNumber() && unit["count"].Integer()>0;
+            matching |= types.count(unit["creature"].Integer());
+        }
+        if(known && !matching)
+        { reason="reinforcement_source_has_no_compatible_stack:"+id;return false; }
+    }
     candidate = trial;
     reason.clear();
     return true;

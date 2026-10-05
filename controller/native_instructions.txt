@@ -202,6 +202,18 @@ are independent comparisons, not jointly spendable budgets. resource_calendar sh
 funds/stock across construction and town recruitment. Delivery requires supported
 current routes, floors, legal stack packing and confirmed handoff; projections/
 unknown meetings do not prove arrival.
+A reinforce_hero goal protects the recipient's current army contribution even
+when no explicit force reserve is written. Its exchange cannot swap away existing
+stacks: a full seven-stack recipient accepts only creature IDs already present.
+Read each own hero's army_units, not just summed army_value or a meeting route.
+If a hero donor has no matching creature and the recipient has no free slot,
+its current usable reinforcement is zero. Do not cycle through such donors or
+rename that goal. Native rejection reinforcement_source_has_no_compatible_stack
+means choose a different executable operation; funded town preparation or an
+explicit preparation dependency must establish a fresh feasible delivery first.
+Empty reinforcement_sources means no currently offered source, not permission
+to sum arbitrary helper armies. A future upgrade, lost stack or newly recruited
+matching creature needs fresh native evidence; never claim it already exists.
 
 Defense forecasts allocate current pools once across fronts and exclude recruitment.
 Hero donors retain at least minimum_retained_army_value for their last creature;
