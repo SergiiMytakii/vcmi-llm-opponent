@@ -66,28 +66,25 @@ class PlaytestingTest(unittest.TestCase):
         self.settings.update(players={"red":"Nullkiller3", "blue":"Nullkiller2"}, nk3_mode="native")
         self.assertEqual(self.prepare()["nk3_mode"], "native")
 
-    def test_native_terminal_recorder_accepts_only_game_bound_own_execution(self):
-        from playtesting.launcher import review_native_terminal
-        self.settings.update(players={'red':'Nullkiller3','blue':'Nullkiller3'},nk3_mode='model',experience_mode='learn')
-        manifest=self.prepare()
-        log=self.run_dir/'engine-logs/VCMI_Client_log.txt'
-        log.parent.mkdir(exist_ok=True)
-        own=dict(experience_id='red-game',player=0,sequence=1,day=1,outcome='effects_observed',
-                 action=dict(kind='build',before=dict(player=0),after=dict(player=0)))
-        records=[own,{**own,'sequence':2,'player':1,'experience_id':'blue-game'},
-                 {**own,'sequence':3,'action':dict(kind='visit',before=dict(player=1),after=dict(player=0))},
-                 {**own,'sequence':4,'action':dict(kind='battle',player=1)},
-                 {**own,'sequence':5,'action':dict(kind='build',before=[],after=dict(player=0))},
-                 {**own,'sequence':6,'day':3},
-                 {**own,'sequence':7,'action':dict(kind='battle',player=0,source='own_battle_result')}]
-        records.append({key:value for key,value in own.items() if key!='experience_id'})
-        log.write_text(''.join('[time] INFO [thread] ai - NK3_EXECUTION '+json.dumps(r)+'\n' for r in records)
-                       +'[time] INFO [thread] ai - NK3_TERMINAL '+json.dumps(
-                           dict(experience_id='red-game',player=0,day=2,outcome='loss'))+'\n')
-        review_native_terminal(self.run_dir,manifest)
-        requests=[json.loads(p.read_text()) for p in self.run_dir.glob('decisions/*/request.json')]
-        self.assertEqual(len(requests),1)
-        self.assertEqual([r['sequence'] for r in requests[0]['memory']['recent_results']],[1,7])
+    def test_native_terminal_journal_accepts_only_recipient_own_execution(self):
+        from controller.evaluation import TelemetryCollector
+        self.settings.update(players={'red':'Nullkiller3','blue':'Nullkiller3'},experience_mode='learn')
+        manifest=self.prepare();journal=self.root/'own-turns.jsonl'
+        event=dict(version=1,game='red-game',generation='session',player=0,day=1,
+                   sequence=1,phase='execution',complete=True,observation=dict(player=0,day=1),
+                   own_result=dict(player=0,day=1,sequence=1,outcome='effects_observed',
+                       action=dict(kind='build',before=dict(player=0),after=dict(player=0))))
+        foreign={**event,'sequence':2,'own_result':{**event['own_result'],
+            'action':dict(kind='battle',player=1)}}
+        terminal={**event,'phase':'terminal','sequence':3,
+            'observation':dict(player=0,day=1,terminal_result='loss')}
+        terminal.pop('own_result')
+        journal.write_text(''.join(json.dumps(e)+'\n' for e in (event,foreign,terminal)))
+        collector=TelemetryCollector(manifest['experience']['database'],journal,{0});collector.poll()
+        with sqlite3.connect(manifest['experience']['database']) as db:
+            rows=[json.loads(r[0]) for r in db.execute('SELECT payload FROM turn_events')]
+        self.assertEqual([r['sequence'] for r in rows],[1,3])
+        self.assertEqual(rows[-1]['observation']['terminal_result'],'loss')
 
     def test_nullkiller3_rejects_ambiguous_comparison_mode(self):
         self.settings.update(players={"red":"Nullkiller3", "blue":"Nullkiller2"}, nk3_mode="silent")

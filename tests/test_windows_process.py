@@ -32,6 +32,23 @@ class WindowsProcessTest(unittest.TestCase):
             time.sleep(1)
             self.assertFalse(marker.exists(), 'descendant survived the client exit')
 
+    def test_background_job_closes_descendants_after_its_root_exits(self):
+        from windows_process import JobProcess
+        with tempfile.TemporaryDirectory(prefix='analyst Зов ') as directory:
+            root=Path(directory);ready=root/'ready';survivor=root/'survivor'
+            descendant=f'import pathlib,time;pathlib.Path({str(ready)!r}).touch();time.sleep(1);pathlib.Path({str(survivor)!r}).touch()'
+            parent=f'import subprocess,sys;subprocess.Popen([sys.executable,"-c",{descendant!r}]);sys.exit(7)'
+            with (root/'log').open('wb') as log:
+                child=JobProcess([sys.executable,'-c',parent],cwd=root,env=os.environ.copy(),log=log,cleanup_path=root/'cleanup.json')
+                try:
+                    self.assertEqual(child.wait(timeout=5),7)
+                    deadline=time.monotonic()+3
+                    while not ready.exists() and time.monotonic()<deadline:time.sleep(.01)
+                    self.assertTrue(ready.exists())
+                finally:child.close()
+            self.assertTrue(json.loads((root/'cleanup.json').read_text())['cleanup_complete'])
+            time.sleep(1.2);self.assertFalse(survivor.exists())
+
     def test_killing_launcher_closes_its_job_and_removes_descendants(self):
         with tempfile.TemporaryDirectory(prefix='launcher Зов ') as directory:
             root = Path(directory)

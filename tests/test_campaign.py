@@ -152,11 +152,10 @@ class CampaignContractTest(unittest.TestCase):
         self.assertIn('object:4', [o['ref'] for o in projected['memory']['known_objects']])
         self.assertEqual(projected['memory']['campaign_review'], request['memory']['campaign_review'])
 
-    def test_reply_size_includes_campaign_operational_plan_batch_and_learning(self):
+    def test_reply_size_includes_campaign_operational_plan_and_batch(self):
         from test_strategy import PLAN
         from prompt_context import compact_json
         request = campaign_request()
-        request['experience'] = {'mode':'learn','episodes':[],'lessons':[]}
         request['observation']['batch_action_limit'] = 32
         ids = ['step-'+str(n)+'-'+'x'*160 for n in range(31)]
         request['actions'] += [{'id':i,'kind':'visit'} for i in ids]
@@ -165,11 +164,10 @@ class CampaignContractTest(unittest.TestCase):
         for key in ('steps','reconsider_if'): operational[key] = ['x'*160]*4
         reply = {'protocol':1,'request_id':request['request_id'],'action_id':'move',
                  'strategy':operational,'campaign':campaign_update(),
-                 'learning':{'expectation':'Capture remains unconfirmed.','assessments':[]},
                  'follow_up_action_ids':ids[:1]}
         self.assertEqual(validate_reply(request, copy.deepcopy(reply)),reply)
         reply['follow_up_action_ids'] = ids
-        self.assertGreater(len(compact_json({k:v for k,v in reply.items() if k!='learning'}).encode()),8192)
+        self.assertGreater(len(compact_json(reply).encode()),8192)
         with self.assertRaisesRegex(ValueError,'transport limit'): validate_reply(request,reply)
 
     def test_real_entrypoint_applies_schema_and_never_emits_a_conflicting_batch(self):

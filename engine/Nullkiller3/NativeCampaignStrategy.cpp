@@ -426,6 +426,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     trace["remaining_tokens"].Integer() = arbiter.remainingBudget().tokens;
     trace["revision"] = campaign.plan()["revision"];
     logAi->info("NK3_STRATEGY %s",trace.toCompactString());
+    recordLearningTurn(ai,"decision");
     persist(ai);
     return true;
     }

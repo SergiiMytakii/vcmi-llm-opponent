@@ -17,14 +17,14 @@ def main():
         raise ValueError('request too large')
     request = json.loads(raw.decode('utf-8'))
     validate_request(request)
-    request.pop('experience', None)  # Only the controller's library supplies experience.
+    request.pop('experience', None)  # Raw learning context never enters strategy.
     started = time.monotonic()
     experience = None
     experience_error = None
     try:
         experience = Experience.for_request(request)
         if experience:
-            request['experience'] = experience.prepare(request)
+            experience.observe(request)
     except (OSError, ValueError, TypeError, sqlite3.Error) as error:
         experience_error = str(error)
         if experience:
@@ -49,18 +49,14 @@ def main():
             if getattr(error,'usage',None) is not None:metadata['usage'] = error.usage
     if experience:
         try:
-            if reply is not None and 'learning' in reply:
-                metadata['experience'] = experience.accept(request, reply)
-            else:
-                if reply is not None and metadata['provider'] == 'fallback':
-                    experience.record_fallback(request, reply)
-                metadata['experience'] = {'lessons_supplied':len(request['experience']['lessons'])}
+            if reply is not None:
+                if metadata['provider']=='fallback':experience.record_fallback(request,reply)
+                else:experience.record_decision(request,reply)
+            metadata['experience']={'collection_only':True,'episodes_assessed':0,'lessons_updated':0,'lessons_supplied':0}
         except (OSError, ValueError, TypeError, sqlite3.Error) as error:
             experience_error = str(error)
         finally:
             experience.close()
-    if reply is not None:
-        reply.pop('learning', None)
     if experience_error:
         metadata['experience_error'] = experience_error
     metadata['requested_model'] = MODEL

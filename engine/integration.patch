@@ -143,13 +143,14 @@ index 02b0d31bf..7a5bd6373 100644
  	asyncTasks->run([this]()
  	{
  		ScopedThreadName guard("NK2AI::AIGateway::makingTurn");
-@@ -572,6 +622,14 @@ void AIGateway::yourTurn(QueryID queryID)
+@@ -572,6 +622,15 @@ void AIGateway::yourTurn(QueryID queryID)
  	});
  }
  
 +void AIGateway::playerEndsTurn(PlayerColor player)
 +{
 +	if(player != playerID || !nullkiller->isStrategicMode()) return;
++	nullkiller->strategicCampaign->finishLearningTurn();
 +	nullkiller->strategicCampaign->cancelExchange();
 +	nullkiller->makingTurnInterruption.interruptThread();
 +	status.madeTurn();
@@ -182,7 +183,7 @@ index 02b0d31bf..7a5bd6373 100644
  {
  	try
  	{
-@@ -809,9 +875,11 @@ void AIGateway::makeTurn()
+@@ -809,12 +875,16 @@ void AIGateway::makeTurn()
  		logAi->info("Player %d (%s) starting turn, day %d", playerID, playerID.toString(), day);
  
  		std::shared_lock gsLock(CGameState::mutex);
@@ -194,7 +195,12 @@ index 02b0d31bf..7a5bd6373 100644
 +		memorizeRevisitableObjs(nullkiller->memory, playerID, cc, nullkiller->isStrategicMode());
  
  		const auto start = std::chrono::high_resolution_clock::now();
++		if(nullkiller->strategicCampaign) nullkiller->strategicCampaign->recordLearningTurn(*nullkiller,"begin");
  		nullkiller->makeTurn();
++		if(nullkiller->strategicCampaign) nullkiller->strategicCampaign->recordLearningTurn(*nullkiller,"end");
+ 		const auto timeElapsedMs = timeElapsed(start);
+ 		if(timeElapsedMs > 5000)
+ 			logAi->warn("PERFORMANCE: NK2 makeTurn took %ld ms", timeElapsedMs);
 @@ -872,7 +940,19 @@ void AIGateway::moveCreaturesToHero(const CGTownInstance * t)
  {
  	if(t->getVisitingHero() && t->armedGarrison() && t->getVisitingHero()->tempOwner == t->tempOwner)

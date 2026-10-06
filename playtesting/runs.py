@@ -119,6 +119,12 @@ def prepare(config_path, out):
     experience_mode = config.get('experience_mode', 'learn')
     if experience_mode not in ('off', 'read_only', 'learn'):
         raise ValueError('experience_mode must be off, read_only or learn')
+    for name,default,maximum in (('analysis_max_calls',12,100),('analysis_max_tokens',200000,1000000),
+                               ('analysis_idle_turns',2,30),('analysis_mine_turns',2,30),('analysis_scouting_turns',3,30)):
+        value=config.setdefault(name,default)
+        if type(value) is not int or not 1<=value<=maximum:raise ValueError(f'{name} must be an integer from 1 to {maximum}')
+    for name,default,maximum in (('analysis_timeout_seconds',60,120),('analysis_interval_seconds',5,60)):
+        finite_positive(config.setdefault(name,default),name,maximum)
     config.setdefault("decision_timeout_seconds", 130)
     finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 130)
     controller = config["controller"]
@@ -135,6 +141,9 @@ def prepare(config_path, out):
     sources = {str(absolute(p, base)): digest(absolute(p, base))
                for p in config.get("controller_sources", [])}
     sources.update({a: digest(a) for a in controller if Path(a).is_absolute() and Path(a).is_file()})
+    if str(ROOT/'controller/main.py') in controller:
+        for source in (ROOT/'controller').iterdir():
+            if source.suffix in ('.py','.txt','.json'):sources[str(source)]=digest(source)
     engine_sources = {str(absolute(p, base)): digest(absolute(p, base))
                       for p in config.get("engine_sources", [])}
     refs = {name: absolute(value, base) for name, value in config.get("references", {}).items()}
@@ -165,6 +174,10 @@ def prepare(config_path, out):
             with sqlite3.connect(library.as_uri()+'?mode=ro',uri=True) as source, sqlite3.connect(snapshot_path) as target:
                 source.backup(target)
             experience['baseline'] = {'path':snapshot_path.name,'sha256':digest(snapshot_path)}
+            if str(ROOT/'controller/main.py') in controller:
+                from .learning import publish_knowledge
+                knowledge=publish_knowledge(snapshot_path)
+                experience['baseline']['knowledge']={'path':knowledge.name,'sha256':digest(knowledge)}
         if experience_mode == 'read_only':
             if experience['baseline'] is None:
                 raise ValueError('read_only experience requires an existing lesson library')
@@ -202,6 +215,9 @@ def verify(run, check_profile=False):
     baseline = manifest.get('experience',{}).get('baseline')
     if baseline and digest(run / baseline['path']) != baseline['sha256']:
         raise ValueError('experience baseline changed since prepare')
+    if baseline and baseline.get('knowledge'):
+        knowledge=baseline['knowledge']
+        if digest(run/knowledge['path'])!=knowledge['sha256']:raise ValueError('knowledge baseline changed since prepare')
     if check_profile and snapshot(run / "profile") != manifest["profile_sha256"]:
         raise ValueError("initial profile changed since prepare; prepare a new run")
     return manifest

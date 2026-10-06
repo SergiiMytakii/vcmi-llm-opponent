@@ -4,10 +4,8 @@ import copy
 
 try:
     from .strategy import _object, _validate_shape, campaign_evidence
-    from .experience import learning_schema, validate_learning
 except ImportError:
     from strategy import _object, _validate_shape, campaign_evidence
-    from experience import learning_schema, validate_learning
 
 KINDS = ('develop_town', 'secure_resource', 'reinforce_hero', 'capture_target',
          'defend_area', 'scout_frontier', 'scout_area', 'visit_site', 'preserve_force', 'explore_passage')
@@ -147,8 +145,6 @@ def reply_schema(request):
                   'reconsider_when':array(_object({'goal_id':label,'kind':{'type':'string','enum':
                                               ['executor_lost','deadline_missed','route_not_established']}}),1),
                   'plan':{'anyOf':[{'type':'null'},plan]}}
-    if request.get('experience',{}).get('mode') == 'learn':
-        properties['learning'] = learning_schema(request['experience'])
     return _object(properties)
 
 
@@ -229,7 +225,5 @@ def validate_reply(request, reply, wire=False):
         raise ValueError('strategic alternatives must differ in content')
     if len(json.dumps(reply,ensure_ascii=False,separators=(',',':')).encode('utf-8')) > 7600:
         raise ValueError('strategy exceeds native reply budget')
-    if 'learning' in reply:
-        validate_learning(request['experience'],reply['learning'])
     if wire: reply['usage'] = usage
     return reply

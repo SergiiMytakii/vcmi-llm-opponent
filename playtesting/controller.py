@@ -104,6 +104,9 @@ def exchange(run, raw, engine_owned=False, postgame=False):
         baseline = experience.get('baseline')
         env['VCMI_EXPERIENCE_MODE'] = experience.get('mode','off') if engine_owned else 'read_only' if baseline else 'off'
         env['VCMI_EXPERIENCE_DB'] = experience.get('database','') if engine_owned else str(run / baseline['path']) if baseline else ''
+        if env['VCMI_EXPERIENCE_MODE']=='read_only':
+            env['VCMI_KNOWLEDGE_FILE']=str(Path(env['VCMI_EXPERIENCE_DB']).with_suffix('.knowledge.json'))
+        else:env.pop('VCMI_KNOWLEDGE_FILE',None)
         for name, reference in manifest["references"].items():
             env["VCMI_PLAYTEST_" + name.upper()] = str(run / reference["path"])
         with (directory / "request.json").open("rb") as stdin, \

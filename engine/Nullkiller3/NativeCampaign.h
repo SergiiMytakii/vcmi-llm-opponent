@@ -70,6 +70,10 @@ class NativeCampaign
     std::atomic<bool> exchangeCancelled{false};
     std::string generation;
     bool invalidBudget = false;
+    std::mutex learningMutex;
+    int64_t learningSequence = 0;
+    JsonNode pendingLearningEnd;
+    void writeLearningEvent(JsonNode event);
     std::atomic<bool> executionActive{false};
     std::chrono::steady_clock::time_point executionStarted;
     JsonNode executionSnapshot(NK2AI::Nullkiller & ai);
@@ -112,6 +116,9 @@ public:
                         uint64_t receiverBefore, uint64_t sourceBefore);
     void persist(NK2AI::Nullkiller & ai);
     void updateForecasts(NK2AI::Nullkiller & ai);
+    void recordLearningTurn(NK2AI::Nullkiller & ai,const std::string & phase);
+    void finishLearningTurn();
+    void recordLearningExecution(const JsonNode & result);
     bool accept(const JsonNode & proposal, std::string & reason);
     const JsonNode & observation() const { return world; }
     JsonNode observedPassages() const { return persisted["observed_passages"]; }

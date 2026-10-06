@@ -9,9 +9,11 @@
 #include "../../lib/StartInfo.h"
 #include "../Nullkiller2/Markers/DefendTown.h"
 #include "../../lib/mapObjects/IOwnableObject.h"
+#include "../../lib/mapObjects/MiscObjects.h"
 #include "../ExternalAI/StrategyMemory.h"
 #include "../ExternalAI/ObservationRules.h"
 #include "../Nullkiller2/Engine/Nullkiller.h"
+#include "../Nullkiller2/AIGateway.h"
 #include "../Nullkiller2/Behaviors/CaptureObjectsBehavior.h"
 #include "../Nullkiller2/Behaviors/GatherArmyBehavior.h"
 #include "../Nullkiller2/Goals/RecruitHero.h"
@@ -24,11 +26,148 @@
 #include "../../lib/entities/building/CBuilding.h"
 #include "../../lib/battle/CombatValue.h"
 #include "../../lib/mapping/CMap.h"
+#include "../ExternalAI/TransportJSON.h"
 #include <fstream>
 #include <cmath>
+#include <cstdlib>
 
 namespace nullkiller3
 {
+void NativeCampaign::writeLearningEvent(JsonNode event)
+{
+    const auto * path=std::getenv("VCMI_NK3_LEARNING_JOURNAL");
+    if(!path || !*path) return;
+    std::lock_guard ownLock(learningMutex);
+    event["version"].Integer()=1;
+    event["game"].String()=experienceID;
+    event["generation"].String()=generation;
+    event["sequence"].Integer()=++learningSequence;
+    event["complete"].Bool()=true;
+    // One shared append owner prevents two NK3 players interleaving JSON lines.
+    static std::mutex journalMutex;
+    std::lock_guard journalLock(journalMutex);
+    try
+    {
+        const auto raw=externalai::transportJSON(event.toCompactString());
+        if(raw.size()>512*1024) throw std::runtime_error("own learning event exceeds journal budget");
+        std::ofstream stream(path,std::ios::app);
+        stream.exceptions(std::ios::badbit|std::ios::failbit);
+        stream << raw << '\n';
+    }
+    catch(const std::exception & error) { logAi->warn("NK3 learning journal unavailable: %s",error.what()); }
+}
+void NativeCampaign::recordLearningExecution(const JsonNode & result)
+{
+    JsonNode event;
+    event["phase"].String()="execution";
+    event["player"]=result["player"];
+    event["day"]=result["day"];
+    event["observation"]["player"]=event["player"];
+    event["observation"]["day"]=event["day"];
+    event["own_result"]=result;
+    writeLearningEvent(event);
+}
+void NativeCampaign::recordLearningTurn(NK2AI::Nullkiller & ai,const std::string & phase)
+{
+    if(!std::getenv("VCMI_NK3_LEARNING_JOURNAL")) return;
+    if(phase=="begin") { std::lock_guard lock(learningMutex);pendingLearningEnd=JsonNode(); }
+    ai.aiGw->checkStrategicTurn();
+    ai.updateState(); // Existing PlayerView and forecast owners; no GPT request.
+    JsonNode event,observed;
+    event["phase"].String()=phase;
+    event["player"]=world["player"];event["day"]=world["day"];
+    event["campaign"]=campaign.plan();
+    event["reason"]=persisted["strategy_metadata"]["reason"];
+    event["results"]=persisted["memory"]["recent_results"];
+    for(const auto * field:{"day","player","resources","resource_order","daily_income","rules","heroes","towns","main_army_idle",
+            "goal_statuses","confirmed_deliveries","observed_frontiers","observed_scout_areas","strategy_assignments"})
+        observed[field]=world[field];
+    for(auto & town:observed["towns"].Vector())
+        for(const auto * field:{"building_options","recruitment","recruitment_options"}) town.Struct().erase(field);
+    observed["execution_mechanism"].String()="native_campaign_v3";
+    observed["opportunities"].Vector();observed["opportunities_complete"].Bool()=true;
+    auto add=[&](const JsonNode & route,const JsonNode & target,const std::string & kind,const std::string & category)
+    {
+        if(observed["opportunities"].Vector().size()>=32)
+        { observed["opportunities_complete"].Bool()=false;return; }
+        JsonNode option;
+        option["actor_ref"]=route["hero_ref"];option["target_ref"]=target;
+        option["kind"].String()=kind;option["category"].String()=category;
+        option["arrival_day"]=route["day"];option["route"]=route;
+        bool defenseConflict=false;
+        for(const auto & defense:world["forecasts"]["defenses"].Vector())
+            if(defense["critical"].Bool() && defense["scenario_deadline_day"].Integer()<=route["day"].Integer())
+                for(const auto & actor:defense["allocated_hero_refs"].Vector()) defenseConflict |= actor==route["hero_ref"];
+        option["available"].Bool()=!defenseConflict;
+        option["constraints_checked"].Bool()=!defenseConflict;
+        option["expected_effect"].String()=kind=="scout" ? "resolve an observed information frontier; discoveries unknown" : "known target ownership and production; capture not guaranteed";
+        if(kind=="capture_mine")
+        {
+            option["produced_resource"]=JsonNode();option["base_production_per_day"]=JsonNode();
+            const auto * mine=dynamic_cast<const CGMine *>(resolve(ai,target));
+            // An unflagged abandoned mine's randomly selected resource is hidden.
+            if(mine && (!mine->isAbandoned() || mine->getOwner()!=PlayerColor::NEUTRAL))
+            {
+                const auto resource=mine->producedResource.getNum();
+                if(resource>=0 && resource<7)
+                {
+                    option["produced_resource"].String()=GameConstants::RESOURCE_NAMES[resource];
+                    option["base_production_per_day"].Integer()=mine->defaultResProduction();
+                }
+            }
+            option["production_basis"].String()="Public mine type/base rules; future capture and own income modifiers remain conditional.";
+        }
+        option["competing_commitments"]=campaign.plan()["goals"];
+        option["defense_context"].Vector();
+        for(const auto & defense:world["forecasts"]["defenses"].Vector())
+        {
+            JsonNode summary;
+            for(const auto * field:{"town_ref","critical","status","scenario_deadline_day","allocated_hero_refs","garrison_value","conditional_force_value"}) summary[field]=defense[field];
+            option["defense_context"].Vector().push_back(summary);
+        }
+        observed["opportunities"].Vector().push_back(option);
+    };
+    for(const auto & target:world["offensive_preparation"]["targets"].Vector())
+    {
+        std::string kind;
+        for(const auto & object:world["visible_objects"].Vector()) if(object["ref"]==target["target_ref"])
+        {
+            if(object["owner"]==world["player"]) continue;
+            if(object["kind"].String()=="mine") kind="capture_mine";
+            if(object["kind"].String()=="town") kind="capture_town";
+        }
+        if(kind.empty()) continue;
+        for(const auto & route:target["current_routes"].Vector())
+            if(route["issues"].isVector() && route["issues"].Vector().empty() && route["meets_deadline"].Bool())
+                add(route,target["target_ref"],kind,kind=="capture_mine" ? "economy" : "combat");
+    }
+    observed["scouting_blocked"].Bool()=world["main_army_idle"]["reason"].String()=="no_safe_route";
+    for(const auto & area:world["scouting_options"].Vector()) for(const auto & route:area["own_arrivals"].Vector())
+    {
+        const auto army=route["army_value"].Integer(),loss=route["army_loss_estimate"].Integer();
+        const auto floor=campaign.exchangeForce(route["hero_ref"].String(),world,helperSources());
+        bool defending=false;
+        for(const auto & defense:world["forecasts"]["defenses"].Vector())
+            if(defense["critical"].Bool() && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1)
+                for(const auto & actor:defense["allocated_hero_refs"].Vector()) defending |= actor==route["hero_ref"];
+        if(!defending && army>0 && loss<=army*campaign.plan()["policy"]["max_loss_ratio"].Float()
+            && loss<=army && army-loss>=floor && route["expected_new_tiles"].Integer()>0)
+            add(route,area["ref"],"scout","exploration");
+    }
+    event["observation"]=observed;
+    if(phase=="end")
+    {
+        // Publish completion only after the server's playerEndsTurn callback.
+        std::lock_guard lock(learningMutex);pendingLearningEnd=event;
+    }
+    else writeLearningEvent(event);
+}
+void NativeCampaign::finishLearningTurn()
+{
+    JsonNode event;
+    { std::lock_guard lock(learningMutex);event=pendingLearningEnd;pendingLearningEnd=JsonNode(); }
+    if(!event.isNull()) writeLearningEvent(event);
+}
 namespace
 {
 size_t unseenInArea(const CCallback & callback,const int3 & position,int radius,PlayerColor player)
@@ -341,6 +480,13 @@ void NativeCampaign::terminalResult(int player,int day,bool won)
         // No game command or external exchange is performed under this lock.
         std::unique_lock lock(CGameState::mutex);
         applyBattleObservations();
+        JsonNode event;
+        event["phase"].String()="terminal";
+        event["player"].Integer()=player;event["day"].Integer()=day;
+        event["observation"]["player"]=event["player"];event["observation"]["day"]=event["day"];
+        event["observation"]["terminal_result"].String()=won ? "win" : "loss";
+        event["results"]=persisted["memory"]["recent_results"];
+        writeLearningEvent(event);
     }
     JsonNode result;
     result["experience_id"].String()=experienceID;
@@ -372,6 +518,7 @@ void NativeCampaign::applyBattleObservations()
         trace["experience_id"].String()=experienceID;
         trace["player"]=action["player"];
         logAi->info("NK3_EXECUTION %s",trace.toCompactString());
+        recordLearningExecution(trace);
     }
 }
 void NativeCampaign::forceChanged(const CGHeroInstance * hero, int day)
@@ -1806,6 +1953,7 @@ void NativeCampaign::endExecution(NK2AI::Nullkiller & ai,const std::string & ack
         trace["player"]=after["player"];
         if(executionActive) trace["elapsed_ms"].Integer()=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-executionStarted).count();
         logAi->info("NK3_EXECUTION %s",trace.toCompactString());
+        recordLearningExecution(trace);
         persisted.Struct().erase("pending_native_task");
     }
     {

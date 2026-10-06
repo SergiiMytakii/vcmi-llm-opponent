@@ -15,54 +15,6 @@ from .runs import COLORS, DATA, ROOT, now, snapshot, verify, write_json
 DIFFICULTIES = {"easy": 0, "normal": 1, "hard": 2, "expert": 3, "impossible": 4}
 
 
-def review_native_terminal(run, manifest):
-    """Reuse the recorder/experience owner after all engine commands have stopped."""
-    if manifest.get('nk3_mode')!='model' or manifest.get('experience',{}).get('mode')!='learn':return
-    from .controller import exchange
-    import re
-    events, errors=native_records(run/'engine-logs/VCMI_Client_log.txt','NK3_TERMINAL')
-    if errors:return  # An incomplete callback record is not terminal evidence.
-    executions, execution_errors=native_records(run/'engine-logs/VCMI_Client_log.txt','NK3_EXECUTION')
-    reviewed=set()
-    for event in events:
-        if (run/'STOP').exists():return
-        if set(event)!={'experience_id','player','day','outcome'}:continue
-        player,day,game=event['player'],event['day'],event['experience_id']
-        if type(player) is not int or not 0<=player<len(COLORS) or type(day) is not int or day<1:continue
-        if manifest['players'].get(COLORS[player])!='Nullkiller3' or event['outcome'] not in ('win','loss'):continue
-        if not isinstance(game,str) or not re.fullmatch(r'[A-Za-z0-9-]{1,64}',game) or game in reviewed:continue
-        reviewed.add(game)
-        # Logger metadata binds records to this player game. Opaque hero aliases
-        # and result sequences alone cannot distinguish two native opponents.
-        own={}
-        for result in executions:
-            if (result.get('experience_id')!=game or type(result.get('player')) is not int
-                    or result['player']!=player or type(result.get('day')) is not int
-                    or not 1<=result['day']<=day or type(result.get('sequence')) is not int
-                    or result['sequence']<1 or not isinstance(result.get('action'),dict)
-                    or not isinstance(result.get('outcome'),str)):continue
-            action=result['action']
-            if action.get('kind')=='battle':
-                if type(action.get('player')) is not int or action['player']!=player:continue
-            elif any(not isinstance(action.get(state),dict) or type(action[state].get('player')) is not int
-                     or action[state]['player']!=player for state in ('before','after')):continue
-            own[result['sequence']]={key:result[key] for key in ('sequence','day','action','outcome')}
-        recent=[];size=0
-        for result in reversed(list(own.values())):
-            cost=len(json.dumps(result,ensure_ascii=False).encode())
-            if len(recent)>=8 or size+cost>12000:continue
-            recent.append(result);size+=cost
-        memory=dict(experience_id=game,execution_mechanism='native_campaign_v3',recent_results=list(reversed(recent)),
-            execution_history=dict(observed=len(own),included=len(recent),
-                                   omitted=len(own)-len(recent),malformed_records=execution_errors))
-        request=dict(protocol=1,request_id=f'{player}:{day}:final',
-            observation=dict(player=player,day=day,terminal_result=event['outcome']),
-            memory=memory,actions=[dict(id='end',kind='end_turn')])
-        # This response is an experience assessment. It never returns to a
-        # gateway or changes a saved plan, and STOP cancels its process group.
-        exchange(run,json.dumps(request).encode(),engine_owned=True,postgame=True)
-
-
 def terminate_group(child, audit_path=None):
     # Native controllers have separate process groups but retain the session
     # created by start_new_session=True, even after a crash reparents them.
@@ -136,6 +88,8 @@ def run_game(run):
     before = [snapshot(path) for path in protected]
     write_json(run / "protected-before.json", before)
     child = None
+    from .learning import LearningRuntime
+    learning=LearningRuntime(run,manifest)
     result = {"started_at": now(), "reason": "setup_failed", "returncode": None}
     try:
         sandbox = run / "profile.sb"
@@ -204,6 +158,10 @@ def run_game(run):
             for color in COLORS:
                 if color in manifest["players"]:
                     args += ["--ai", manifest["players"][color]]
+        try:learning.start(env)
+        except (OSError,ValueError,subprocess.SubprocessError) as error:
+            result['analysis_error']=str(error)
+            env.pop('VCMI_NK3_LEARNING_JOURNAL',None)
         command = prefix + args
         write_json(run / "command.json", command)
         manifest["status"] = "running"
@@ -265,11 +223,10 @@ def run_game(run):
         after = [snapshot(path) for path in protected]
         result.update(finished_at=now(), elapsed_seconds=round(time.monotonic() - started, 3),
                       protected_files_unchanged=before == after)
-        write_json(run / "launch.json", result)
         manifest["status"] = "finished"
         write_json(run / "manifest.json", manifest)
-        if (result.get('cleanup_complete') and result.get('protected_files_unchanged')
-                and result['reason'] not in ('requested_stop','interrupted','assignment_mismatch','setup_failed')):
-            review_native_terminal(run,manifest)
+        try:learning.finish(natural=bool(result.get('cleanup_complete') and result['reason']=='process_exit'))
+        except (OSError,RuntimeError,subprocess.SubprocessError) as error:result['analysis_cleanup_error']=str(error)
+        write_json(run / 'launch.json', result)
         report(run)
     return result

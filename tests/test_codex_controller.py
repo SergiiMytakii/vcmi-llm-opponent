@@ -27,7 +27,7 @@ assert 'OPENAI_API_KEY' not in os.environ and 'CODEX_API_KEY' not in os.environ
 assert '--ignore-user-config' in args and '--ignore-rules' in args
 assert args[args.index('-m') + 1] == 'gpt-6.1-sol'
 assert 'forced_login_method="chatgpt"' in args
-assert 'model_reasoning_effort="medium"' in args
+assert 'model_reasoning_effort="low"' in args
 assert schema['properties']['action_id']['enum'] == ['end', 'build-0']
 if mode == 'timeout': time.sleep(90)
 if mode == 'late': time.sleep(38)

@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 import time
 from strategy import strategy_schema, validate_strategy, campaign_schema, validate_campaign
-from experience import learning_schema, validate_learning
 from batch import validate_batch
 from prompt_context import (compact_json, encode_request, context_parts, bounded_history, without_unknown_army_values,
                             SHARED_CONTEXT_INSTRUCTIONS, HISTORY_INSTRUCTIONS, SOFT_INPUT_BYTES)
@@ -60,8 +59,6 @@ def validate_reply(request, reply):
     fields = {'protocol', 'request_id', 'action_id'}
     if isinstance(reply, dict) and 'follow_up_action_ids' in reply:
         fields.add('follow_up_action_ids')
-    if request.get('experience', {}).get('mode') == 'learn':
-        fields.add('learning')
     if isinstance(reply, dict) and 'strategy' in reply and 'memory' in request:
         fields.add('strategy')
     if isinstance(reply, dict) and 'campaign' in reply and 'campaign' in request.get('memory', {}):
@@ -82,9 +79,7 @@ def validate_reply(request, reply):
     if request.get('memory', {}).get('campaign') and reply.get('strategy') is not None and not reply.get('campaign'):
         validate_campaign(request, {'decision':'retain', 'reason':'Operational alignment',
                                    'evidence_refs':['observation:day'], 'plan':None}, reply['strategy'])
-    if 'learning' in reply:
-        validate_learning(request['experience'], reply['learning'])
-    wire_reply = {k:v for k,v in reply.items() if k != 'learning'}
+    wire_reply = reply
     if len((compact_json(wire_reply) + '\n').encode('utf-8')) > 8192:
         raise ValueError('reply exceeds native transport limit')
     return reply
@@ -120,11 +115,56 @@ def resolve_executable(value=None):
 
 
 def choose(request):
-    """Return a validated reply and diagnostics; failures belong to caller fallback."""
     validate_request(request)
+    instructions=(ROOT/('native_instructions.txt' if request['protocol']==2 else 'instructions.txt')).read_text(encoding='utf-8')
+    references={}
+    path=os.environ.get('VCMI_PLAYTEST_PROMPT')
+    if path:
+        raw=Path(path).read_bytes()
+        if len(raw)>32768:raise ValueError('strategy reference is too large')
+        instructions+='\n\nPROMPT\n'+raw.decode('utf-8')
+        references['prompt']=hashlib.sha256(raw).hexdigest()
+    if request['protocol'] == 2:
+        from native_strategy import reply_schema
+        schema = reply_schema(request)
+    else:
+        schema = {'type': 'object', 'additionalProperties': False,
+                  'required': ['protocol', 'request_id', 'action_id'], 'properties': {
+                      'protocol': {'type': 'integer', 'enum': [1]},
+                      'request_id': {'type': 'string', 'enum': [request['request_id']]},
+                      'action_id': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}}
+        if 'memory' in request:
+            schema['required'].append('strategy')
+            schema['properties']['strategy'] = strategy_schema(request)
+        if 'campaign' in request.get('memory', {}):
+            schema['required'].append('campaign')
+            schema['properties']['campaign'] = campaign_schema(request)
+        limit = request['observation'].get('batch_action_limit', 1)
+        if type(limit) is not int or not 1 <= limit <= 32:
+            raise ValueError('invalid batch action limit')
+        if limit > 1:
+            schema['required'].append('follow_up_action_ids')
+            schema['properties']['follow_up_action_ids'] = {
+                'type': 'array', 'maxItems': limit - 1,
+                'items': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}
+
+    from knowledge import snapshot_for_request, KNOWLEDGE_INSTRUCTIONS
+    knowledge=snapshot_for_request(request)
+    if knowledge is not None:instructions+='\n'+KNOWLEDGE_INSTRUCTIONS
+    timeout=min(TIMEOUT,request['budget']['wait_ms']/1000-2) if request['protocol']==2 else LEGACY_TIMEOUT
+    answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,knowledge=knowledge,
+        decision_dir=os.environ.get('VCMI_PLAYTEST_DECISION_DIR'))
+    try:answer=validate_reply(request,answer)
+    except ValueError as error:
+        error.usage=metadata.get('usage');raise
+    metadata['references']=references
+    return answer,metadata
+
+
+def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,decision_dir=None,max_output_bytes=8192):
+    """Return a validated reply and diagnostics; failures belong to caller fallback."""
     started = time.monotonic()
-    timeout = min(TIMEOUT, request['budget']['wait_ms']/1000 - 2) if request['protocol'] == 2 else LEGACY_TIMEOUT
-    if timeout <= 0: raise TimeoutError('No useful strategic wait budget remains')
+    if timeout <= 0:raise TimeoutError('No model wait budget remains')
     executable = resolve_executable()
     env = os.environ.copy()
     for key in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'DYLD_INSERT_LIBRARIES',
@@ -135,9 +175,9 @@ def choose(request):
         raise ValueError('unsupported Codex CLI version; requires 0.160.0')
     with tempfile.TemporaryDirectory(prefix='vcmi-decision-') as folder:
         workspace = Path(folder)
-        projected, history = bounded_history(without_unknown_army_values(request) if request['protocol'] == 2 else request)
+        projected, history = bounded_history(without_unknown_army_values(request) if request.get('protocol') == 2 else request)
         model_request = encode_request(projected)
-        if request['protocol'] == 2 and len(compact_json(model_request).encode('utf-8')) > SOFT_INPUT_BYTES:
+        if request.get('protocol') == 2 and len(compact_json(model_request).encode('utf-8')) > SOFT_INPUT_BYTES:
             raise ValueError('context_overflow: complete strategic facts exceed the input budget')
         shared_context = model_request is not projected
         model_input = compact_json(model_request)
@@ -149,48 +189,10 @@ def choose(request):
                     'parts':context_parts(projected), 'original_parts':context_parts(request),
                     'history':history, 'soft_input_budget_bytes':SOFT_INPUT_BYTES,
                     'over_soft_input_budget':len(model_input.encode('utf-8')) > SOFT_INPUT_BYTES}
-        decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
-        instructions = (ROOT / ('native_instructions.txt' if request['protocol']==2 else 'instructions.txt')).read_text(encoding='utf-8')
         references = {}
-        for name in ('PROMPT', 'KNOWLEDGE'):
-            path = os.environ.get('VCMI_PLAYTEST_' + name)
-            if path:
-                raw = Path(path).read_bytes()
-                if len(raw) > 32768:
-                    raise ValueError('strategy reference is too large')
-                instructions += '\n\n' + name + '\n' + raw.decode('utf-8')
-                references[name.lower()] = hashlib.sha256(raw).hexdigest()
-        if shared_context:
-            instructions += '\n' + SHARED_CONTEXT_INSTRUCTIONS
-        if history['applied']:
-            instructions += '\n' + HISTORY_INSTRUCTIONS
+        if shared_context:instructions += '\n' + SHARED_CONTEXT_INSTRUCTIONS
+        if history['applied']:instructions += '\n' + HISTORY_INSTRUCTIONS
         (workspace / 'instructions.txt').write_text(instructions, encoding='utf-8')
-        if request['protocol'] == 2:
-            from native_strategy import reply_schema
-            schema = reply_schema(request)
-        else:
-            schema = {'type': 'object', 'additionalProperties': False,
-                      'required': ['protocol', 'request_id', 'action_id'], 'properties': {
-                          'protocol': {'type': 'integer', 'enum': [1]},
-                          'request_id': {'type': 'string', 'enum': [request['request_id']]},
-                          'action_id': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}}
-            if 'memory' in request:
-                schema['required'].append('strategy')
-                schema['properties']['strategy'] = strategy_schema(request)
-            if 'campaign' in request.get('memory', {}):
-                schema['required'].append('campaign')
-                schema['properties']['campaign'] = campaign_schema(request)
-            limit = request['observation'].get('batch_action_limit', 1)
-            if type(limit) is not int or not 1 <= limit <= 32:
-                raise ValueError('invalid batch action limit')
-            if limit > 1:
-                schema['required'].append('follow_up_action_ids')
-                schema['properties']['follow_up_action_ids'] = {
-                    'type': 'array', 'maxItems': limit - 1,
-                    'items': {'type': 'string', 'enum': [a['id'] for a in request['actions']]}}
-            if request.get('experience', {}).get('mode') == 'learn':
-                schema['required'].append('learning')
-                schema['properties']['learning'] = learning_schema(request['experience'])
         (workspace / 'schema.json').write_text(compact_json(schema), encoding='utf-8')
         encoding['instruction_bytes'] = len(instructions.encode('utf-8'))
         encoding['reply_schema_bytes'] = len(compact_json(schema).encode('utf-8'))
@@ -198,7 +200,7 @@ def choose(request):
             (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
         config = {
             'model_provider': 'openai', 'forced_login_method': 'chatgpt',
-            'model_reasoning_effort': REASONING_EFFORT, 'model_catalog_json': str(ROOT / 'model.json'),
+            'model_reasoning_effort': effort, 'model_catalog_json': str(ROOT / 'model.json'),
             'model_instructions_file': str(workspace / 'instructions.txt'),
             'web_search': 'disabled', 'project_doc_max_bytes': 0, 'skills.include_instructions': False,
             'tools.update_plan.enabled': False, 'tools.experimental_request_user_input.enabled': False,
@@ -208,9 +210,18 @@ def choose(request):
             'features.skip_host_skill_discovery': True,
         }
         config.update({'features.' + name: False for name in DISABLED})
+        if knowledge is not None:
+            snapshot=workspace/'knowledge.json'
+            snapshot.write_text(compact_json(knowledge),encoding='utf-8')
+            config.update({'mcp_servers.nk3_knowledge.command':os.sys.executable,
+                'mcp_servers.nk3_knowledge.args':[str(ROOT/'knowledge_server.py'),str(snapshot)],
+                'mcp_servers.nk3_knowledge.enabled_tools':['search_knowledge','read_lesson'],
+                'mcp_servers.nk3_knowledge.startup_timeout_sec':2,
+                'mcp_servers.nk3_knowledge.tool_timeout_sec':2,
+                'mcp_servers.nk3_knowledge.default_tools_approval_mode':'approve'})
         command = [executable, 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
                    '--skip-git-repo-check', '--json', '--color', 'never', '-s', 'read-only',
-                   '-m', MODEL, '-C', folder, '--output-schema', str(workspace / 'schema.json'),
+                   '-m', model, '-C', folder, '--output-schema', str(workspace / 'schema.json'),
                    '-o', str(workspace / 'answer.json')]
         for key, value in config.items():
             command += ['-c', key + '=' + json.dumps(value)]
@@ -250,7 +261,6 @@ def choose(request):
                 if child.poll() is None:
                     child.kill()
                 child.wait(timeout=1)
-                decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
                 observe_events()
                 timing['model_process_seconds'] = round(time.monotonic()-model_started,3)
                 timing['process_returncode'] = child.returncode
@@ -265,7 +275,7 @@ def choose(request):
             raise TimeoutError('Codex decision deadline exceeded')
         events_path = workspace / 'events.jsonl'
         answer_path = workspace / 'answer.json'
-        if events_path.stat().st_size > LIMIT or answer_path.stat().st_size > 8192:
+        if events_path.stat().st_size > LIMIT or answer_path.stat().st_size > max_output_bytes:
             raise ValueError('Codex output limit exceeded')
         completed, usage = False, None
         for line in events_path.read_text(encoding='utf-8').splitlines():
@@ -273,20 +283,19 @@ def choose(request):
             if event.get('type') in ('turn.failed', 'error'):
                 raise ValueError('Codex turn failed')
             item = event.get('item')
-            if item and item.get('type') not in ('agent_message', 'reasoning'):
-                raise ValueError('unexpected Codex item: ' + str(item.get('type')))
+            if item and item.get('type') not in ('agent_message','reasoning'):
+                if not (knowledge is not None and item.get('type')=='mcp_tool_call'
+                        and item.get('server')=='nk3_knowledge'
+                        and item.get('tool') in ('search_knowledge','read_lesson')):
+                    raise ValueError('unexpected Codex item: ' + str(item.get('type')))
             if event.get('type') == 'turn.completed':
                 completed, usage = True, event.get('usage')
         if time.monotonic() - started >= timeout:
             raise TimeoutError('Codex decision deadline exceeded')
         if not completed:
             raise ValueError('Codex turn did not complete')
-        try:
-            reply = validate_reply(request, json.loads(answer_path.read_text(encoding='utf-8')))
-        except ValueError as error:
-            if request['protocol'] == 2:error.usage = usage
-            raise
-        return reply, {'provider': 'codex', 'model': MODEL, 'reasoning_effort': REASONING_EFFORT,
+        reply=json.loads(answer_path.read_text(encoding='utf-8'))
+        return reply, {'provider': 'codex', 'model': model, 'reasoning_effort': effort,
                        'cli': VERSION, 'usage': usage, 'references': references,
                        'input_encoding': encoding,
                        'duration_seconds': round(time.monotonic() - started, 3)}

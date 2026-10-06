@@ -177,6 +177,14 @@ def report(run):
                 main_losses.append(loss)
                 seen_losses.add(identity)
         decision.pop('observed_memory', None)
+    analysis = {'status':'not_started','calls':0,'charged_tokens':0}
+    analysis_log=run/'learning/runtime.log'
+    if analysis_log.is_file():
+        for line in analysis_log.read_text(errors='replace').splitlines():
+            try:
+                item=json.loads(line)
+                if isinstance(item,dict) and 'status' in item:analysis=item
+            except ValueError:pass
     value = {
         "run_id": manifest["run_id"], "case_id": manifest["case_id"], "purpose": manifest["purpose"],
         "generated_at": now(), "match_outcome": outcome.get("outcome", "unconfirmed"),
@@ -217,6 +225,7 @@ def report(run):
         "unattributed_build_results": unattributed,
         "episodes": episodes, "references": manifest["references"],
         "experience":manifest.get('experience',{}),
+        "analysis_metrics":analysis,
         "randomness": "uncontrolled" if manifest.get("seed") is None else "declared; engine application unconfirmed",
     }
     write_json(run / "report.json", value)
