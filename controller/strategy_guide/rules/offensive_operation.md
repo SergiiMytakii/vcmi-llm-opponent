@@ -10,7 +10,7 @@ Check offensive_preparation, current versus reinforced arrivals, source/meeting 
 Compare supported hostile/neutral town capture with mines, necessary reinforcement and purposeful scouting. Prefer supported enemy-town capture; if choosing otherwise, compare that offered town in alternatives and give a concrete reason: defense, losses, travel, preparation or greater operational value.
 
 ## Benefits, costs and risks
-Conquest gains income and initiative at the cost of travel and losses. Reinforcement costs time/funds but may unlock the target. Scouting is useful when capture needs information. Use the strongest viable strike army; helpers collect/scout/provide limited defense. A weaker main needs a specific operational reason and a currently executable operation; unused movement alone is no reason.
+Conquest gains income and initiative at the cost of travel and losses. Compare losses across successive fights: a profitable first capture can leave no viable force for the next. Preserve useful combat capabilities when reported; equal nominal army values need not imply equal commanders or combat options. Reinforcement costs time/funds but may unlock the target. Scouting is useful when capture needs information. Use the strongest viable strike army; helpers collect/scout/provide limited defense. A weaker main needs a specific operational reason and a currently executable operation; unused movement alone is no reason.
 
 ## When to reconsider
 Reconsider the next attack after substantial reinforcement rather than automatically retaining scouting. Review route changes, receipts, commander loss and target ownership; continue the next useful objective.

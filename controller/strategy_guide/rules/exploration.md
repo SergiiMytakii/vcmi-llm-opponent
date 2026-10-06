@@ -10,7 +10,7 @@ Compare supplied scouting_options, visible unvisited scholar/chest/obelisk sites
 Compare safe area observation, a useful site visit, ordinary frontier scouting, exploration of a visible gate and an onward operation through an already learned passage. Prefer a useful onward operation over repeating an explored entrance merely because an old surface route failed. A return through a learned passage needs a concrete follow-up purpose.
 
 ## Benefits, costs and risks
-Scouting may establish targets and routes but spends movement and exposes the actor. A site may improve the hero or map knowledge, while its unseen contents remain uncertain. A gate may reveal another level with unknown exit danger. Choose a scout or army whose exposure is justified; avoid using a critical defender or main army merely because a gate is visible.
+Scouting may establish targets and routes but spends movement and exposes the actor. A site may improve the hero or map knowledge, while its unseen contents remain uncertain. A gate may reveal another level with unknown exit danger. Choose a scout or army whose exposure is justified; avoid using a critical defender or main army merely because a gate is visible. Compare offered routes along known roads with detours: let a suitable helper collect safely when that preserves the main's progress toward a supported objective. Roads alone establish no hidden town or safe route.
 
 ## When to reconsider
 After a confirmed visit or crossing, compare newly observed frontiers and targets. Reassess if useful routes appear, the actor becomes needed elsewhere or a preservation commitment conflicts with exploration; revise that commitment explicitly if the new operation justifies it.

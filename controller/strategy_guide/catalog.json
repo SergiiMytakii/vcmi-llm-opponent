@@ -11,7 +11,7 @@
     {
       "id": "development",
       "title": "Development",
-      "applicability": "Balancing income, army production, mines, hero growth and reinforcement delivery.",
+      "applicability": "Balancing income payback, construction chains, weekly growth, army production and delivery.",
       "file": "rules/development.md",
       "enabled": true
     },
@@ -32,7 +32,7 @@
     {
       "id": "recovery",
       "title": "Recovery",
-      "applicability": "Preserving a viable army after losses and connecting commander, delivery and next operation.",
+      "applicability": "Preserving a viable army after losses; commander, mana recovery, delivery and next operation.",
       "file": "rules/recovery.md",
       "enabled": true
     },

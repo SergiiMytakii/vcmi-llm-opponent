@@ -1,10 +1,10 @@
 # Recovery
 
 ## When useful
-After substantial acknowledged battle loss or loss of the main executor.
+After substantial acknowledged battle loss, loss of the main executor, or depleted mana constraining the next operation.
 
 ## Facts and unknowns
-Compare commander_options: hero_multiplier, hero_combat_value, mana, movement and offered source/meeting options rather than troops or level alone. A transfer or unexplained force change is not a battle-loss receipt. Estimates guarantee no win.
+Compare commander_options: hero_multiplier, hero_combat_value, mana, movement and offered source/meeting options rather than troops or level alone. A transfer or unexplained force change is not a battle-loss receipt. Estimates guarantee no win. Compare current mana with the next battle need when known. Under confirmed classic guild rules, replenishment requires starting a new day in the town; arrival does not instantly restore mana. Account for exposure until then.
 
 ## Alternatives to compare
 Compare immediate safe capture, reinforcement followed by a dependent capture, preservation, and purposeful scouting. If follow-up forecasts are unknown, keep funded reinforcement as the concrete task and reassess after arrival; helpers can scout/collect while the commander rebuilds.

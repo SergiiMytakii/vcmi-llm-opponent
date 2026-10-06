@@ -10,7 +10,7 @@ Check own armies, commander capability, offered routes, income, funds, building 
 Compare supported expansion by a viable main; useful independent scouting; income or troop production; saving funds for demonstrated defense.
 
 ## Benefits, costs and risks
-Expansion gains assets with battle exposure. Scouting costs movement and exposure. Construction spends shared funds and can delay recruitment. A new hero needs a concrete uncovered defense, reinforcement or collection job; cash and starting troops alone are no job.
+Expansion gains assets with battle exposure. Scouting costs movement and exposure. Construction spends shared funds and can delay recruitment. A new hero needs a concrete uncovered defense, reinforcement or collection job; cash and starting troops alone are no job. Prioritize a supported mine when its known resource output addresses the next funded bottleneck; an unknown subtype cannot justify that claim.
 
 ## When to reconsider
 Reassess after discovery of a useful target, route changes, income loss, a threatened last town or confirmed delivery.

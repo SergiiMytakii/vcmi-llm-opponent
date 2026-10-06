@@ -47,3 +47,11 @@ not demonstrate a token saving or better play. Offline tests prove delivery and
 contract validity, not victories or successful native garrison/interception.
 
 The experience library and its existing tools are independent of this guide.
+
+External advice and provenance: [Heroes III / VCMI sources, 2026-10-06](../../docs/research/2026-10-06-heroes3-strategy-guide-sources.md)
+maps the additions to their verified sources and records exclusions. Read it
+when updating sourced advice or checking game-version assumptions. The runtime
+loads the catalog and selected cards only. Source popularity does not establish
+compatibility: current observations, loaded mod rules and native quotes govern
+costs, movement, growth and supported actions. Keep fixed template schedules,
+manual battle tactics and old-engine exploits out of executable guidance.
