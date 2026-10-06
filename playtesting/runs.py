@@ -157,7 +157,8 @@ def prepare(config_path, out):
         raise ValueError('strategy_guide requires mode on/off and an optional path')
     guide = (StrategyGuide(absolute(guide_config.get('path',str(DEFAULT_ROOT)),base))
              if guide_config['mode']=='on' else None)
-    sources[str(ROOT/'controller/strategy_guide.py')] = digest(ROOT/'controller/strategy_guide.py')
+    for name in ('strategy_guide.py','strategy_guide_server.py'):
+        sources[str(ROOT/'controller'/name)] = digest(ROOT/'controller'/name)
     out = Path(out).resolve()
     if out == profile or out.is_relative_to(profile) or profile.is_relative_to(out):
         raise ValueError("run and template must be separate directory trees")

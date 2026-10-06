@@ -9,6 +9,49 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class StrategicRequestsTest(unittest.TestCase):
+    def test_token_usage_and_old_saves_do_not_block_new_decisions(self):
+        source = r'''
+#include "RequestArbiter.h"
+#include <cassert>
+using namespace nullkiller3;
+int main() {
+    RequestArbiter arbiter;
+    arbiter.beginTurn(5, {280000, 120000, 40000});
+    const StrategicSignal opening{"opening", "no_campaign", true, true, true, false};
+    auto first = arbiter.consider({opening});
+    assert(first.request);
+    arbiter.dispatched(first);
+    arbiter.finished(10000, 120000);
+    assert(arbiter.remainingBudget().tokens == 0);
+    assert(arbiter.remainingBudget().waitMs == 270000);
+    RequestArbiter restored(arbiter.save());
+    restored.beginTurn(5, {280000, 120000, 40000});
+    assert(restored.requestsThisTurn() == 1);
+    assert(restored.remainingBudget().tokens == 0);
+    assert(restored.remainingBudget().waitMs == 270000);
+    assert(!restored.consider({opening}).request);
+    const StrategicSignal threat{"front", "enemy_arrived", true, true, true, false};
+    auto second = restored.consider({threat});
+    assert(second.request && second.deadlineMs == 230000);
+    restored.dispatched(second);
+    // Saving during a request never refunds its unknown walltime.
+    RequestArbiter interrupted(restored.save());
+    interrupted.beginTurn(5, {280000, 120000, 40000});
+    assert(interrupted.requestsThisTurn() == 2);
+    assert(interrupted.remainingBudget().waitMs == 40000);
+    assert(!interrupted.consider({threat}).request);
+    const StrategicSignal another{"army", "changed", true, true, true, false};
+    auto exhausted = interrupted.consider({another});
+    assert(!exhausted.request && exhausted.reason == RequestReason::BudgetExhausted);
+    const StrategicSignal critical{"town", "capital_threatened", true, true, true, true};
+    auto reserved = interrupted.consider({critical});
+    assert(reserved.request && reserved.deadlineMs == 40000);
+    restored.finished(10000, 120000);
+    assert(restored.consider({another}).request);
+}
+'''
+        self.compile_and_run(source)
+
     def test_coalesces_modules_and_allows_three_independent_revisions(self):
         source = r'''
 #include "RequestArbiter.h"
@@ -69,6 +112,9 @@ int main() {
     assert(restored.remainingBudget().tokens == 10500);
 }
 '''
+        self.compile_and_run(source)
+
+    def compile_and_run(self, source):
         with tempfile.TemporaryDirectory() as directory:
             cpp = Path(directory) / 'proof.cpp'
             binary = Path(directory) / 'proof'

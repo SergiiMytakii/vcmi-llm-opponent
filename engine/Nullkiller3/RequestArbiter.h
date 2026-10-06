@@ -23,6 +23,8 @@ struct StrategicSignal
 struct RequestBudget
 {
     int64_t waitMs;
+    // Legacy remaining-token ledger retained for save compatibility and traces.
+    // Token exhaustion is informational; each transport request has its own limit.
     int64_t tokens;
     int64_t criticalReserveMs;
 };
@@ -118,7 +120,7 @@ public:
             budget.waitMs - (critical ? 0 : budget.criticalReserveMs));
         // A normal decision needs a useful inference window. Critical events
         // may still spend the reserved time, including a shorter last window.
-        if(result.deadlineMs == 0 || (!critical && result.deadlineMs < 120000) || budget.tokens <= 0)
+        if(result.deadlineMs == 0 || (!critical && result.deadlineMs < 120000))
         {
             result.reason = RequestReason::BudgetExhausted;
             return result;

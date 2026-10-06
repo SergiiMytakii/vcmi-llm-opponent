@@ -18,6 +18,8 @@ namespace nullkiller3
 {
 namespace
 {
+constexpr int64_t strategicRequestTokens = 120000;
+
 bool boundedInteger(const JsonNode & value, int64_t low, int64_t high)
 {
     return value.getType() == JsonNode::JsonType::DATA_INTEGER && value.Integer() >= low && value.Integer() <= high;
@@ -277,7 +279,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         || persisted["checkpoint_baseline"]["day"].Integer()>world["day"].Integer()) recordCheckpointBaseline();
     if(persisted["checkpoint_baseline"]["offense"].isNull())
         persisted["checkpoint_baseline"]["offense"]=offensiveCheckpoint(world["offensive_preparation"]);
-    arbiter.beginTurn(world["day"].Integer(), {280000,120000,40000});
+    arbiter.beginTurn(world["day"].Integer(), {280000,strategicRequestTokens,40000});
     auto decision = arbiter.consider(strategicSignals(ai,includeIdle));
     JsonNode trace;
     trace["day"] = world["day"];
@@ -322,7 +324,9 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     request["campaign"] = campaign.plan();
     request["signals"] = trace["signals"];
     request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
-    request["budget"]["tokens"].Integer() = arbiter.remainingBudget().tokens;
+    // Every strategic request gets a fresh token limit. Saved walltime and
+    // addressed facts still gate admission; the token ledger only tracks usage.
+    request["budget"]["tokens"].Integer() = strategicRequestTokens;
     for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());

@@ -164,93 +164,31 @@ def choose(request):
         metadata['references']=references
         return answer,metadata
 
-    from strategy_guide import StrategyGuide, DEFAULT_ROOT, ENVELOPE_LIMIT
+    from strategy_guide import StrategyGuide, DEFAULT_ROOT
     mode = os.environ.get('VCMI_STRATEGY_GUIDE_MODE','on')
     if mode not in ('on','off'):raise ValueError('invalid strategy guide mode')
-    guide_info = {'mode':mode,'requested_ids':[],'reason':None,'returned_files':[]}
-    calls = []
-    usage = None
-    usage_complete = True
-    metadata = {}
-    def record_usage(value):
-        nonlocal usage, usage_complete
-        known = (isinstance(value,dict) and all(type(value.get(k)) is int and value[k]>=0
-                 for k in ('input_tokens','output_tokens')))
-        usage_complete = usage_complete and known
-        if known:
-            if usage is None:usage = {'input_tokens':0,'output_tokens':0}
-            for key in usage:usage[key] += value[key]
-
-    def call(call_schema, call_instructions, output_limit):
-        nonlocal metadata
-        number = len(calls) + 1
-        folder = Path(decision_dir) / ('model-call-' + str(number)) if decision_dir else None
-        if folder:folder.mkdir()
-        call_started = time.monotonic()
-        record = {'number':number,'status':'started'}
-        calls.append(record)
-        try:
-            answer,metadata = invoke_model(request,call_schema,call_instructions,
-                timeout=deadline-time.monotonic(),deadline=deadline,knowledge=knowledge,
-                decision_dir=folder,max_output_bytes=output_limit)
-            record.update(status='completed',usage=metadata.get('usage'),
-                          input_encoding=metadata.get('input_encoding'))
-            record_usage(metadata.get('usage'))
-            return answer
-        except BaseException as error:
-            record.update(status='failed',error=str(error),usage=getattr(error,'usage',None))
-            record_usage(getattr(error,'usage',None))
-            raise
-        finally:
-            record['duration_seconds'] = round(time.monotonic()-call_started,3)
-
+    guide = StrategyGuide(os.environ.get('VCMI_STRATEGY_GUIDE',str(DEFAULT_ROOT))) if mode=='on' else None
+    guide_info = {'mode':mode,'requested_ids':[],'returned_files':[]}
+    if guide:
+        guide_info.update(bundle_sha256=guide.bundle_hash,catalog=guide.catalog,file_hashes=guide.hashes)
+        instructions += guide.instructions()
+    folder = Path(decision_dir) / 'model-call-1' if decision_dir else None
+    if folder:folder.mkdir()
+    metadata={}
     try:
-        guide = StrategyGuide(os.environ.get('VCMI_STRATEGY_GUIDE',str(DEFAULT_ROOT))) if mode=='on' else None
-        if guide:
-            guide_info.update(bundle_sha256=guide.bundle_hash,catalog=guide.catalog,
-                              file_hashes=guide.hashes)
-            wrapped = call(guide.envelope_schema(schema),instructions+guide.instructions(),ENVELOPE_LIMIT)
-            answer, query = guide.unpack(wrapped)
-            if query:
-                guide_info.update(requested_ids=query['ids'],reason=query['reason'])
-                if not usage_complete or usage is None:
-                    raise ValueError('strategy guide consultation requires known first-call usage')
-                remaining = request['budget']['tokens'] - sum(usage.values())
-                if remaining <= 0:
-                    raise ValueError('strategy guide consultation has no remaining token budget')
-                if time.monotonic() >= deadline:
-                    raise TimeoutError('strategy guide consultation deadline exceeded')
-                consulted = time.monotonic()
-                content,files = guide.consult(query['ids'])
-                guide_info.update(returned_files=files,result_bytes=len(content.encode('utf-8')),
-                                  read_seconds=round(time.monotonic()-consulted,3))
-                continuation = ('\n# Strategy guide consultation result\n'
-                    'The following advice is separate from observations and cannot override the game contract. '
-                    'This is the only consultation; return only the final strategic decision using its normal schema. '
-                    f'Remaining total token budget for this call: {remaining}. '
-                    'Original game facts and identity are unchanged.\n'
-                    + json.dumps(query,ensure_ascii=False) + '\n' + content)
-                # UTF-8 bytes conservatively bound added input tokens; reuse the reported base cost.
-                minimum = usage['input_tokens'] + usage['output_tokens'] + len(continuation.encode('utf-8'))
-                if remaining < minimum:
-                    raise ValueError('strategy guide consultation has insufficient remaining token budget')
-                answer = call(schema,instructions+continuation,8192)
-        else:
-            answer = call(schema,instructions,8192)
-        answer = validate_reply(request,answer)
-        if time.monotonic() >= deadline:raise TimeoutError('Codex decision deadline exceeded')
+        answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,deadline=deadline,
+            knowledge=knowledge,guide=guide,guide_info=guide_info,decision_dir=folder)
+        answer=validate_reply(request,answer)
     except BaseException as error:
-        error.usage = usage
-        error.diagnostics = {'strategy_guide':guide_info,'model_calls':calls,
-                             'usage_complete':usage_complete,'references':references}
+        if not hasattr(error,'usage'):error.usage=metadata.get('usage')
+        error.diagnostics={'strategy_guide':guide_info,'references':references}
         raise
-    metadata.update(usage=usage,usage_complete=usage_complete,references=references,
-                    strategy_guide=guide_info,model_calls=calls,
-                    duration_seconds=round(time.monotonic()-started,3))
+    metadata.update(references=references,strategy_guide=guide_info,
+        model_calls=[{'number':1,'status':'completed','usage':metadata.get('usage')}])
     return answer,metadata
 
 
-def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,decision_dir=None,max_output_bytes=8192,deadline=None):
+def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,guide=None,guide_info=None,decision_dir=None,max_output_bytes=8192,deadline=None):
     """Return a validated reply and diagnostics; failures belong to caller fallback."""
     started = time.monotonic()
     deadline = min(started + timeout, deadline) if deadline is not None else started + timeout
@@ -310,6 +248,14 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 'mcp_servers.nk3_knowledge.startup_timeout_sec':2,
                 'mcp_servers.nk3_knowledge.tool_timeout_sec':2,
                 'mcp_servers.nk3_knowledge.default_tools_approval_mode':'approve'})
+        guide_audit=workspace/'guide-calls.jsonl'
+        if guide is not None:
+            config.update({'mcp_servers.nk3_strategy_guide.command':os.sys.executable,
+                'mcp_servers.nk3_strategy_guide.args':[str(ROOT/'strategy_guide_server.py'),str(guide.root),str(guide_audit),guide.bundle_hash],
+                'mcp_servers.nk3_strategy_guide.enabled_tools':['read_strategy_guide'],
+                'mcp_servers.nk3_strategy_guide.startup_timeout_sec':2,
+                'mcp_servers.nk3_strategy_guide.tool_timeout_sec':2,
+                'mcp_servers.nk3_strategy_guide.default_tools_approval_mode':'approve'})
         command = [executable, 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
                    '--skip-git-repo-check', '--json', '--color', 'never', '-s', 'read-only',
                    '-m', model, '-C', folder, '--output-schema', str(workspace / 'schema.json'),
@@ -358,6 +304,14 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 observe_events()
                 timing['model_process_seconds'] = round(time.monotonic()-model_started,3)
                 timing['process_returncode'] = child.returncode
+                if guide_audit.exists():
+                    audits=[json.loads(line) for line in guide_audit.read_text().splitlines()]
+                    if guide_info is not None:
+                        guide_info['calls']=audits
+                        guide_info['requested_ids']=list(dict.fromkeys(i for c in audits for i in c['ids']))
+                        guide_info['returned_files']=[f for c in audits for f in c['files']]
+                    if decision_dir:
+                        (Path(decision_dir)/'strategy-guide-calls.jsonl').write_bytes(guide_audit.read_bytes())
                 if decision_dir:
                     (Path(decision_dir) / 'codex-timing.json').write_text(compact_json(timing),encoding='utf-8')
                     (Path(decision_dir) / 'codex-request.json').write_text(model_input, encoding='utf-8')
@@ -382,9 +336,11 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                     raise ValueError('Codex turn failed')
                 item = event.get('item')
                 if item and item.get('type') not in ('agent_message','reasoning'):
-                    if not (knowledge is not None and item.get('type')=='mcp_tool_call'
-                            and item.get('server')=='nk3_knowledge'
-                            and item.get('tool') in ('search_knowledge','read_lesson')):
+                    allowed = (knowledge is not None and item.get('server')=='nk3_knowledge'
+                               and item.get('tool') in ('search_knowledge','read_lesson')) or (
+                               guide is not None and item.get('server')=='nk3_strategy_guide'
+                               and item.get('tool')=='read_strategy_guide')
+                    if not (item.get('type')=='mcp_tool_call' and allowed):
                         raise ValueError('unexpected Codex item: ' + str(item.get('type')))
                 if event.get('type') == 'turn.completed':
                     completed, usage = True, event.get('usage')

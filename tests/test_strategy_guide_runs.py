@@ -49,36 +49,38 @@ class StrategyGuideRunsTest(unittest.TestCase):
             output,result=exchange(self.run,json.dumps(request).encode())
             self.assertEqual(result['status'],'reply_valid',result)
             self.assertEqual(json.loads(output)['identity'],request['identity'])
-            call=json.loads((self.root/'call-2.json').read_text())
-            self.assertNotIn('Changed original',call['instructions'])
+            result=json.loads((self.root/'tool-result.json').read_text())
+            sections=json.loads(result['result']['content'][0]['text'])
+            self.assertEqual(sections[0]['text'].encode(),original)
             (self.run/'strategy-guide/rules/opening.md').write_text('Changed snapshot')
             output,result=exchange(self.run,json.dumps(request).encode())
             self.assertEqual(output,b'');self.assertEqual(result['status'],'recording_error')
             self.assertIn('strategy guide',result['error'])
-            self.assertEqual(len(list(self.root.glob('call-*.json'))),2)
+            self.assertEqual(len(list(self.root.glob('call-*.json'))),1)
 
-    def test_recorder_cancels_the_second_call_without_a_game_reply(self):
+    def test_recorder_cancels_model_and_guide_tool_without_a_game_reply(self):
         self.settings['decision_timeout_seconds']=.7
         self.prepare();request=strategic_request()
         env={**codex_fixture(self.root,MODEL),'CAPTURE':str(self.root),
-            'FINAL_REPLY':json.dumps(final_reply(request)),'GUIDE_TEST_MODE':'second_timeout'}
+            'FINAL_REPLY':json.dumps(final_reply(request)),'GUIDE_TEST_MODE':'consult_timeout'}
         from unittest.mock import patch
         with patch.dict(os.environ,env):
             output,result=exchange(self.run,json.dumps(request).encode())
         self.assertEqual(output,b'')
         self.assertEqual(result['status'],'timeout',result)
-        self.assertTrue((self.root/'second-pid').is_file(),'second call must have started')
+        self.assertTrue((self.root/'model-pid').is_file(),'tool consultation must have started')
         if os.name!='nt':
             import time
-            pid=int((self.root/'second-pid').read_text())
-            # The recorder terminates the owned controller group; the OS reaps its children.
-            for _ in range(50):
-                try:os.kill(pid,0)
-                except ProcessLookupError:break
-                time.sleep(.02)
-            else:self.fail('cancelled fixture model remains alive')
+            # Cancellation covers both the model and its read-only tool server.
+            for filename in ('model-pid','tool-pid'):
+                pid=int((self.root/filename).read_text())
+                for _ in range(50):
+                    try:os.kill(pid,0)
+                    except ProcessLookupError:break
+                    time.sleep(.02)
+                else:self.fail('cancelled fixture process remains alive: '+filename)
         decision=next((self.run/'decisions').iterdir())
-        self.assertTrue((decision/'model-call-1/codex-events.jsonl').is_file())
+        self.assertEqual(json.loads((decision/'result.json').read_text())['status'],'timeout')
 
     def test_added_snapshot_file_is_detected(self):
         self.prepare();(self.run/'strategy-guide/rules/extra.md').write_text('Extra')

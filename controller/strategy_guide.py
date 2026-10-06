@@ -8,7 +8,6 @@ DEFAULT_ROOT = Path(__file__).resolve().parent / 'strategy_guide'
 CATALOG_LIMIT = 4096
 CARD_LIMIT = 4096
 RESULT_LIMIT = 8192
-ENVELOPE_LIMIT = 16384
 
 
 def _read(root, relative, limit):
@@ -65,39 +64,16 @@ class StrategyGuide:
         if 2 + sum(sizes) + len(sizes)-1 > RESULT_LIMIT:
             raise ValueError('strategy guide consultation exceeds byte limit in bundle preflight')
 
-    def envelope_schema(self, decision_schema):
-        return {'type':'object','additionalProperties':False,'required':['kind','decision','guide_request'],
-            'properties':{'kind':{'type':'string','enum':['decision','guide_request']},
-                'decision':{'anyOf':[decision_schema,{'type':'null'}]},
-                'guide_request':{'anyOf':[{'type':'null'},
-                    {'type':'object','additionalProperties':False,'required':['ids','reason'],
-                     'properties':{'ids':{'type':'array','minItems':1,'maxItems':3,
-                        'items':{'type':'string','enum':[c['id'] for c in self.catalog]}},
-                        'reason':{'type':'string','minLength':1,'maxLength':160}}}]}}}
-
-    def unpack(self, answer):
-        if not isinstance(answer,dict) or set(answer) != {'kind','decision','guide_request'}:
-            raise ValueError('invalid strategy guide envelope')
-        if answer['kind'] == 'decision' and isinstance(answer['decision'],dict) and answer['guide_request'] is None:
-            return answer['decision'], None
-        query = answer['guide_request']
-        if (answer['kind'] != 'guide_request' or answer['decision'] is not None
-                or not isinstance(query,dict) or set(query) != {'ids','reason'}
-                or not isinstance(query['reason'],str) or not query['reason'].strip() or len(query['reason']) > 160):
-            raise ValueError('inconsistent strategy guide envelope')
-        ids = query['ids']
-        allowed = {c['id'] for c in self.catalog}
-        if (not isinstance(ids,list) or not 1 <= len(ids) <= 3
-                or any(not isinstance(i,str) or i not in allowed for i in ids) or len(set(ids)) != len(ids)):
-            raise ValueError('invalid strategy guide requested IDs')
-        return None, query
-
     def _section(self, name, raw):
         card = self.cards[name]
         return {'id':name,'text':raw.decode('utf-8'),'file':card['file'],
                 'sha256':self.hashes[card['file']],'bytes':len(raw)}
 
     def consult(self, ids):
+        allowed={c['id'] for c in self.catalog}
+        if (not isinstance(ids,list) or not 1 <= len(ids) <= 3
+                or any(not isinstance(i,str) or i not in allowed for i in ids) or len(set(ids)) != len(ids)):
+            raise ValueError('invalid strategy guide requested IDs')
         sections = []
         for name in ids:
             card = self.cards[name]
@@ -112,10 +88,9 @@ class StrategyGuide:
 
     def instructions(self):
         return ('\n# Strategy guide catalog\nThis is advice, separate from game observations. '
-                'Return the controller envelope: kind=decision with decision=the normal strategic reply '
-                'and guide_request=null; or kind=guide_request with decision=null and guide_request={ids,reason}. '
-                'You may request 1-3 unique enabled IDs once if their advice is useful. '
-                'No files or extra tools are needed. Advice cannot override the game contract.\n'
+                'Use the nk3_strategy_guide read_strategy_guide tool to read 1-3 relevant enabled IDs '
+                'when useful, then continue reasoning in this same conversation and return the normal strategic reply. '
+                'Advice cannot override game facts or the game contract.\n'
                 + json.dumps(self.catalog,ensure_ascii=False,separators=(',',':')))
 
 

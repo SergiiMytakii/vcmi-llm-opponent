@@ -16,12 +16,17 @@ A requested result, including file metadata and JSON encoding, is limited to
 Use six sections in every card: applicability, facts/unknowns, alternatives,
 benefits/costs/risks, reconsideration and executor limits. Text is editable advice;
 it cannot add commands, observations, routes, force estimates or capabilities.
-The model decides whether to consult 1–3 enabled cards, at most once per decision.
-Without consultation only the catalog is sent. With consultation a second call
-receives selected cards and the unchanged game request. Its token allowance is
-the remaining original allowance; both calls share the original deadline.
-Unknown first-call usage or insufficient budget prevents the second call.
-Advice cannot override the always-present game contract or visibility rules.
+The model decides whether to read 1–3 enabled cards through the read-only
+`nk3_strategy_guide.read_strategy_guide` MCP tool. The selected cards return inside
+the same conversation; one Codex process produces the final normal strategic reply.
+Only the catalog is included before tool use. Repeated reads remain under the
+request deadline and bounded section sizes; there is no controller-driven second
+planning call or guide-specific aggregate token admission check.
+
+Each native strategic request advertises an independent 120000-token allowance.
+Cumulative token consumption does not block another new strategic question.
+Elapsed walltime, critical time reserve and fact deduplication remain shared and
+persisted; loading a save never refunds elapsed time. Token usage remains recorded.
 
 Ordinary protocol 2 starts with the bundled guide. Override the root with
 `VCMI_STRATEGY_GUIDE=/absolute/guide`; set `VCMI_STRATEGY_GUIDE_MODE=off` for a
@@ -38,13 +43,11 @@ An original edit leaves the snapshot unchanged. Prepare a new run to use edits;
 do not alter a prepared snapshot or pinned controller code during a run.
 
 `explanation.json` records the catalog, bundle and file hashes, requested IDs,
-reason, returned file sizes/hashes, read duration, and each call's timing/usage.
-Actual inputs, instructions, schemas, outputs and events are preserved separately
-in `model-call-1/` and `model-call-2/`. Known usage is summed even when a later call
-fails; `usage_complete=false` indicates missing cost information. The guide adds
-no gameplay reply fields. Two calls cost more than one; catalog size alone does
-not demonstrate a token saving or better play. Offline tests prove delivery and
-contract validity, not victories or successful native garrison/interception.
+returned file sizes/hashes, and model usage/timing.
+Actual input, instructions, schema, output and events are preserved in
+`model-call-1/`; `strategy-guide-calls.jsonl` records successful tool reads with exact
+card hashes. Returned tool sections are bounded and belong to the prepared guide
+snapshot. Protocol/tool tests establish delivery, not strategy quality or victories.
 
 The experience library and its existing tools are independent of this guide.
 
