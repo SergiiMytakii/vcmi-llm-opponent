@@ -41,3 +41,11 @@ target_include_directories(nullkiller3-idle-driver PRIVATE
     "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
 target_link_libraries(nullkiller3-idle-driver PRIVATE "${VCMI_LIBRARY}")
 add_test(NAME nullkiller3-idle COMMAND nullkiller3-idle-driver)
+
+add_executable(strategic-candidates-driver ../strategic_candidates_driver.cpp)
+target_compile_features(strategic-candidates-driver PRIVATE cxx_std_20)
+target_compile_definitions(strategic-candidates-driver PRIVATE VCMI_DLL=1 BOOST_ALL_DYN_LINK)
+target_include_directories(strategic-candidates-driver PRIVATE
+    ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
+    "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
+target_link_libraries(strategic-candidates-driver PRIVATE "${VCMI_LIBRARY}")

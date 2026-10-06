@@ -5,6 +5,7 @@
 #include "Forecasts.h"
 #include "NativePersistence.h"
 #include "OffensivePreparation.h"
+#include "StrategicCandidates.h"
 #include "StrategicDecision.h"
 #include "../../lib/StartInfo.h"
 #include "../Nullkiller2/Markers/DefendTown.h"
@@ -1010,7 +1011,10 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     world["enemy_approaches"]=observedEnemyApproaches(ai);
     forecasts["threats"]=forecastThreats(world);
 
+    std::map<std::tuple<std::string,bool,bool>,JsonNode> arrivalQuotes;
     auto arrivals = [&](const JsonNode & pos, bool frontier, bool area=false) {
+        const auto key=std::tuple{pos.toCompactString(),frontier,area};
+        if(const auto known=arrivalQuotes.find(key);known!=arrivalQuotes.end()) return known->second;
         JsonNode result;result.Vector();
         const int3 position(pos[0].Integer(),pos[1].Integer(),pos[2].Integer());
         const auto paths=ai.pathfinder->getPathInfo(position,false);
@@ -1036,56 +1040,42 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
                 if(std::find(result.Vector().begin(),result.Vector().end(),arrival)==result.Vector().end()) result.Vector().push_back(arrival);
             }
         }
+        arrivalQuotes.emplace(key,result);
         return result;
     };
-    for(auto & frontier:world["frontier_options"].Vector())
-        frontier["own_arrivals"]=arrivals(frontier["position"],true);
-    world["scouting_options"].Vector();
-    const auto size=ai.cc->getMapSize();
-    for(int z=0;z<size.z;++z) for(int y=0;y<size.y;++y) for(int x=0;x<size.x;++x)
+    // Select viewpoints and object objectives before asking the pathfinder for
+    // detailed quotes. Required intentions retain their original destinations.
+    auto screening=world;
+    for(const auto & goal:campaign.plan()["goals"].Vector())
     {
-        const int3 center(x,y,z);
-        if(!ai.cc->isVisible(center)) continue;
-        const auto * terrain=ai.cc->getTile(center,false);
-        if(!terrain || !terrain->isLand() || terrain->blocked()) continue;
-        JsonNode option;option["position"]=coordinate(center);
-        auto routes=arrivals(option["position"],true,true);
-        option["own_arrivals"].Vector();
-        for(auto route:routes.Vector())
+        if(goal["kind"].String()!="scout_area" && goal["kind"].String()!="scout_frontier") continue;
+        const auto & pos=static_cast<const JsonNode &>(persisted)["frontier_positions"][goal["target_ref"].String()];
+        if(!pos.isVector() || pos.Vector().size()!=3) continue;
+        if(std::none_of(screening["frontier_options"].Vector().begin(),screening["frontier_options"].Vector().end(),
+            [&](const auto & option){return option["ref"]==goal["target_ref"];}))
         {
-            const auto * hero=dynamic_cast<const CGHeroInstance *>(resolve(ai,route["hero_ref"]));
-            if(!hero || hero->getSightRadius()<1 || hero->getSightRadius()>64) continue;
-            const auto unseen=unseenInArea(*ai.cc,center,hero->getSightRadius(),ai.playerID);
-            if(!unseen) continue;
-            route["sight_radius"].Integer()=hero->getSightRadius();
-            route["expected_new_tiles"].Integer()=unseen;
-            option["own_arrivals"].Vector().push_back(route);
+            JsonNode option;option["ref"]=goal["target_ref"];option["position"]=pos;
+            screening["frontier_options"].Vector().push_back(option);
         }
-        if(option["own_arrivals"].Vector().empty()) continue;
-        const auto ref="tile:"+option["position"].toCompactString();
-        option["ref"].String()=ref;
-        persisted["frontier_positions"][ref]=option["position"];
-        world["scouting_options"].Vector().push_back(option);
     }
-    forecasts["routes"].Vector();
-    for(const auto & object:world["visible_objects"].Vector())
-    {
-        const auto & kind=object["kind"].String();
-        if(kind!="hero" && kind!="town" && kind!="mine" && kind!="resource" && kind!="subterranean_gate"
-            && kind!="scholar" && kind!="treasure_chest" && kind!="obelisk") continue;
-        const auto & pos=object["position"];
-        JsonNode route;
-        route["target_ref"]=object["ref"];
-        route["own_arrivals"]=arrivals(pos,kind=="subterranean_gate");
-        forecasts["routes"].Vector().push_back(route);
-    }
-    // Own hero destinations are known even when a garrisoned hero is absent
-    // from the map's visitable-object list. They support courier meetings only.
-    for(const auto & hero:world["heroes"].Vector())
-    {
-        JsonNode route;route["target_ref"]=hero["ref"];route["own_arrivals"]=arrivals(hero["position"],false);
-        forecasts["routes"].Vector().push_back(route);
-    }
+    const auto scouts=generateScoutCandidates(screening,campaign.plan(),[&](const JsonNode & pos,int radius) {
+        FowTilesType hidden;
+        ai.cc->getTilesInRange(hidden,int3(pos[0].Integer(),pos[1].Integer(),pos[2].Integer()),radius,ETileVisibility::HIDDEN,ai.playerID);
+        std::set<std::string> result;
+        for(const auto & tile:hidden) result.insert(coordinate(tile).toCompactString());
+        return result;
+    },arrivals);
+    world["frontier_options"]=scouts["frontiers"];
+    world["scouting_options"]=scouts["scouting"];
+    for(const auto & option:world["scouting_options"].Vector()) persisted["frontier_positions"][option["ref"].String()]=option["position"];
+    const auto targets=generateTargetCandidates(world,campaign.plan(),arrivals);
+    forecasts["routes"]=targets["routes"];
+    world["candidate_generation"]["scout_probes"]=scouts["probes"];
+    world["candidate_generation"]["scout_centers_considered"]=scouts["considered_centers"];
+    world["candidate_generation"]["target_probes"]=targets["probes"];
+    world["candidate_generation"]["scout_choices_per_hero"].Integer()=SCOUT_CHOICES_PER_HERO;
+    world["candidate_generation"]["target_choices_per_group"].Integer()=TARGET_CHOICES_PER_GROUP;
+    world["candidate_generation"]["scope"].String()="Bounded native proposals by additional unseen coverage, distance and objective class; not all opportunities. Screening distance is not an arrival forecast. Required goals and own defense/logistics are preserved. Unknown targets and alternative directions remain unknown, not absent. Native command admission remains authoritative.";
     forecasts["defenses"]=forecastDefenses(world,campaign);
     forecasts["town_choices"]=forecastTownChoices(world,campaign,helperSources());
     const auto joint=forecastCommitments(world,campaign,helperSources());

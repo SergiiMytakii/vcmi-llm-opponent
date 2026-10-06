@@ -92,6 +92,8 @@ inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNo
     for(const auto & object:world["visible_objects"].Vector())
     {
         if((object["kind"].String()!="town" && object["kind"].String()!="mine") || object["owner"]==world["player"]) continue;
+        if(world["candidate_generation"].isStruct() && std::none_of(world["forecasts"]["routes"].Vector().begin(),
+            world["forecasts"]["routes"].Vector().end(),[&](const auto & route){return route["target_ref"]==object["ref"];})) continue;
         JsonNode goal;goal["id"].String()="preparation";goal["kind"].String()="capture_target";
         goal["actor_ref"]=actor;goal["target_ref"]=object["ref"];goal["min_army_value"].Integer()=0;
         goal["deadline_day"].Integer()=world["day"].Integer()+7;

@@ -3,6 +3,7 @@
 #include "StrategicDecision.h"
 #include "Forecasts.h"
 #include "OffensivePreparation.h"
+#include "StrategicCandidates.h"
 #include "../ExternalAI/ProcessExchange.h"
 #include "../ExternalAI/TransportJSON.h"
 #include "../ExternalAI/StrategyMemory.h"
@@ -304,7 +305,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     request["request_id"].String() = persisted["experience_id"].String()+":"+generation+":"
         +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
         +std::to_string(revision)+":"+std::to_string(sequence);
-    request["observation"] = world;
+    request["observation"] = strategicCandidateView(world,campaign.plan());
     // Retain must echo the exact accepted roles, including order. Expose the
     // same saved owner used by admission; rejected proposals never replace it.
     const auto & metadata=static_cast<const JsonNode &>(persisted)["strategy_metadata"];
@@ -312,7 +313,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     if(!request["observation"]["strategy_assignments"].isVector())
         request["observation"]["strategy_assignments"].Vector();
     if(includeIdle) request["observation"]["main_army_idle"]=mainArmyIdle(campaign,world);
-    request["memory"] = persisted["memory"];
+    request["memory"] = strategicCandidateMemory(persisted["memory"],request["observation"]);
     request["memory"]["experience_id"] = persisted["experience_id"];
     request["campaign"] = campaign.plan();
     request["signals"] = trace["signals"];
@@ -322,7 +323,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
-    for(const auto & object : world["objects"].Vector()) request["evidence_refs"].Vector().emplace_back("target:"+object["ref"].String());
+    for(const auto & object : request["observation"]["objects"].Vector()) request["evidence_refs"].Vector().emplace_back("target:"+object["ref"].String());
     const auto input = externalai::transportJSON(request.toCompactString());
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
