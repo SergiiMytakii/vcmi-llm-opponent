@@ -25,6 +25,8 @@ def analysis_schema(context):
     assessment=learning_schema(context)['properties']['assessments']
     if context['episodes']:
         properties=assessment['items']['properties']
+        evidence_ids=list(dict.fromkeys(s['id'] for e in context['episodes'] for s in e['signals']))
+        properties['evidence_ids']['items']={'type':'string','enum':evidence_ids}
         properties['exceptions']={'type':'array','minItems':0,'maxItems':4,'items':{'type':'string','maxLength':160}}
         properties['mechanism']={'type':'string','maxLength':240}
         assessment['items']['required']+=['exceptions','mechanism']
@@ -114,8 +116,12 @@ def analyze_once(database,*,timeout=60,model=MODEL,effort=REASONING_EFFORT,recor
         answer,metadata=invoke_model(payload,analysis_schema(context),
             (ROOT/'analysis_instructions.txt').read_text(),timeout=timeout,model=model,effort=effort,
             decision_dir=record_dir,max_output_bytes=16384)
-        learning,details=validate_analysis(context,answer)
-        result=store.assess(row['game'],context,learning,evaluations=answer['evaluations'],lesson_details=details)
+        try:
+            learning,details=validate_analysis(context,answer)
+            result=store.assess(row['game'],context,learning,evaluations=answer['evaluations'],lesson_details=details)
+        except (ValueError,TypeError,KeyError,sqlite3.Error) as error:
+            error.usage=metadata.get('usage')
+            raise
         with store.db:store.db.execute('INSERT INTO analysis_usage(usage,result) VALUES(?,?)',
             (encoded(metadata.get('usage')),encoded(result)))
         publish(database)
@@ -178,8 +184,11 @@ def main():
                             calls+=1;usage=result.get('usage') or {};tokens+=usage.get('input_tokens',args.max_tokens)+usage.get('output_tokens',0)
                 except (OSError,ValueError,TypeError,KeyError,sqlite3.Error,TimeoutError,subprocess.SubprocessError) as error:
                     calls+=1;result={'status':'error','reason':str(error)}
-                    # Unknown spent usage is charged conservatively.
-                    tokens=args.max_tokens
+                    usage=getattr(error,'usage',None)
+                    known=isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0
+                        for k in ('input_tokens','output_tokens'))
+                    # Invalid answers still consume their known usage; unknown costs exhaust the budget.
+                    tokens+=usage['input_tokens']+usage['output_tokens'] if known else args.max_tokens
                 result={**result,'calls':calls,'charged_tokens':tokens}
                 if result!=previous:print(json.dumps(result,ensure_ascii=False),flush=True)
                 previous=result

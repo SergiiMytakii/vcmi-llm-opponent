@@ -81,6 +81,61 @@ class LearningFlowTest(unittest.TestCase):
             self.assertEqual(db.execute('SELECT COUNT(*) FROM episodes WHERE assessed=0').fetchone()[0],1)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM assessments').fetchone()[0],0)
 
+    def test_analysis_schema_only_offers_current_episode_evidence(self):
+        self.call(self.request())
+        self.call(self.request(day=2,heroes=[]))
+        analyst=ANALYST.replace("evaluations=[];assessments=[]", """schema=json.loads(pathlib.Path(sys.argv[sys.argv.index('--output-schema')+1]).read_text())
+allowed=schema['properties']['assessments']['items']['properties']['evidence_ids']['items']['enum']
+assert set(allowed)=={s['id'] for e in r['episodes'] for s in e['signals']}
+evaluations=[];assessments=[]""")
+        env={**self.env,**codex_fixture(self.folder,analyst)}
+        result=subprocess.run([sys.executable,str(ROOT/'controller/analyze.py'),
+            '--database',str(self.database),'--once'],text=True,capture_output=True,env=env,timeout=10)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'],'assessed')
+
+    def test_invalid_analysis_charges_known_usage_and_can_learn_on_next_call(self):
+        self.call(self.request())
+        self.call(self.request(day=2,heroes=[]))
+        marker=self.folder/'first-call'
+        finish=self.folder/'finish'
+        analyst=ANALYST.replace("answer={'evaluations':evaluations,'assessments':assessments}",
+            f"""marker=pathlib.Path({str(marker)!r})
+if not marker.exists():
+ marker.touch()
+ assessments[0]['evidence_ids']=['old-lesson-only-evidence']
+else:
+ pathlib.Path({str(finish)!r}).touch()
+answer={{'evaluations':evaluations,'assessments':assessments}}""")
+        env={**self.env,**codex_fixture(self.folder,analyst)}
+        result=subprocess.run([sys.executable,str(ROOT/'controller/analyze.py'),
+            '--database',str(self.database),'--max-calls','2','--max-tokens','100',
+            '--interval','0.01','--finish-file',str(finish)],
+            text=True,capture_output=True,env=env,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        events=[json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(events[0]['status'],'error')
+        self.assertEqual(events[0]['charged_tokens'],13)
+        self.assertEqual(events[-1]['status'],'assessed')
+        self.assertEqual(events[-1]['charged_tokens'],26)
+        self.assertEqual(events[-1]['calls'],2)
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assessments').fetchone()[0],1)
+        self.assertEqual(json.loads(self.database.with_suffix('.knowledge.json').read_text())['lessons'][0]['supports'],1)
+
+    def test_invalid_analysis_with_unknown_usage_exhausts_budget_without_publishing(self):
+        self.call(self.request())
+        self.call(self.request(day=2,heroes=[]))
+        analyst=ANALYST.replace("'evidence_ids':ids[:1]", "'evidence_ids':['unoffered-evidence']").replace(
+            "{'input_tokens':8,'output_tokens':5}", "{'input_tokens':None,'output_tokens':5}")
+        env={**self.env,**codex_fixture(self.folder,analyst)}
+        result=subprocess.run([sys.executable,str(ROOT/'controller/analyze.py'),
+            '--database',str(self.database),'--once','--max-tokens','100'],
+            text=True,capture_output=True,env=env,timeout=10)
+        self.assertEqual(result.returncode,1)
+        self.assertEqual(json.loads(result.stdout)['charged_tokens'],100)
+        self.assertEqual(json.loads(self.database.with_suffix('.knowledge.json').read_text())['lessons'],[])
+
     def test_separate_analysis_publishes_a_lesson_without_repeating_its_evidence(self):
         self.call(self.request())
         self.call(self.request(day=2,heroes=[]))
