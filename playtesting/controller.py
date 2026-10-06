@@ -107,6 +107,10 @@ def exchange(run, raw, engine_owned=False, postgame=False):
         if env['VCMI_EXPERIENCE_MODE']=='read_only':
             env['VCMI_KNOWLEDGE_FILE']=str(Path(env['VCMI_EXPERIENCE_DB']).with_suffix('.knowledge.json'))
         else:env.pop('VCMI_KNOWLEDGE_FILE',None)
+        guide = manifest.get('strategy_guide',{'mode':'off'})
+        env['VCMI_STRATEGY_GUIDE_MODE'] = guide['mode']
+        env.pop('VCMI_STRATEGY_GUIDE',None)
+        if guide['mode']=='on':env['VCMI_STRATEGY_GUIDE'] = str(run / guide['path'])
         for name, reference in manifest["references"].items():
             env["VCMI_PLAYTEST_" + name.upper()] = str(run / reference["path"])
         with (directory / "request.json").open("rb") as stdin, \

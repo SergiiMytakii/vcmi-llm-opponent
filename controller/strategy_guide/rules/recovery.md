@@ -1,0 +1,19 @@
+# Recovery
+
+## When useful
+After substantial acknowledged battle loss or loss of the main executor.
+
+## Facts and unknowns
+Compare commander_options: hero_multiplier, hero_combat_value, mana, movement and offered source/meeting options rather than troops or level alone. A transfer or unexplained force change is not a battle-loss receipt. Estimates guarantee no win.
+
+## Alternatives to compare
+Compare immediate safe capture, reinforcement followed by a dependent capture, preservation, and purposeful scouting. If follow-up forecasts are unknown, keep funded reinforcement as the concrete task and reassess after arrival; helpers can scout/collect while the commander rebuilds.
+
+## Benefits, costs and risks
+Recovery spends time and shared funds while retaining viable force. Transfers must preserve affected_operations: continue the same target with a suitable commander, or explain preparation/abandonment. Changing holders alone does not justify replacing conquest with scouting. A weaker commander requires a concrete operational benefit; do not strip a stronger one for an unrelated chain.
+
+## When to reconsider
+Recovery completes only on confirmed handoff to the named recipient and fresh validation of the next route. Review commander loss, unavailable source, changed target and failed delivery; explain missing conditions when recovery is unestablished.
+
+## Executor limits
+Bought stock is not delivery. Native army protection preserves other active captures and shared defense floors. A future capture needs a supported follow-up route and explicit dependency; do not claim it ready before receipt.

@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "cards": [
+    {
+      "id": "opening",
+      "title": "Opening",
+      "applicability": "Choosing the initial commander, reconnaissance, battles, income and construction.",
+      "file": "rules/opening.md",
+      "enabled": true
+    },
+    {
+      "id": "development",
+      "title": "Development",
+      "applicability": "Balancing income, army production, mines, hero growth and reinforcement delivery.",
+      "file": "rules/development.md",
+      "enabled": true
+    },
+    {
+      "id": "offensive_operation",
+      "title": "Offensive operation",
+      "applicability": "Choosing a next objective, routes, losses, reinforcement and follow-up.",
+      "file": "rules/offensive_operation.md",
+      "enabled": true
+    },
+    {
+      "id": "main_army_idle",
+      "title": "Main army idle",
+      "applicability": "Distinguishing intentional defense from blocked routes, execution and unsupported goals.",
+      "file": "rules/main_army_idle.md",
+      "enabled": true
+    },
+    {
+      "id": "recovery",
+      "title": "Recovery",
+      "applicability": "Preserving a viable army after losses and connecting commander, delivery and next operation.",
+      "file": "rules/recovery.md",
+      "enabled": true
+    },
+    {
+      "id": "defense",
+      "title": "Defense",
+      "applicability": "Town importance, established near threats, limited defenders and multiple fronts.",
+      "file": "rules/defense.md",
+      "enabled": true
+    },
+    {
+      "id": "town_after_capture",
+      "title": "Town after capture",
+      "applicability": "Comparing departure, separate recruitment, detachment, interception and holding.",
+      "file": "rules/town_after_capture.md",
+      "enabled": true
+    }
+  ]
+}

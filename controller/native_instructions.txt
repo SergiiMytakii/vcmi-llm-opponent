@@ -31,11 +31,8 @@ Only the supplied search_knowledge and read_lesson tools may be used for advice.
 1. Review accepted-plan feedback, results and commitments. Keep viable funded
    obligations and independent valid goals; repair blocked goals using the route
    rules below. Feedback is evidence, not a restriction on strategic goal choices.
-2. Choose a connected 3-7 day operation linking conquest, economy and reinforcement.
-   Apply offensive, recovery and defense rules; add independently useful funded
-   town development. A substantial main army should advance or reinforce, not
-   idle for days because enemy strength is unknown. When capture lacks support,
-   reinforce or scout to establish the next offensive route.
+2. Choose a connected 3-7 day operation and independently useful funded goals.
+   Consult available strategy-guide sections when their situational advice is useful.
 3. Validate goals' executors, routes, deadlines, starting armies, losses, reserves,
    capabilities, funding and dependencies. Ready goals execute; blocked goals and
    unconfirmed dependencies retain commitments without executing. A structurally
@@ -72,74 +69,7 @@ offered approach or intermediate target, or explicit reinforcement dependencies 
 future operations. Future troops, unknown post-delivery forecasts and missing
 routes cannot make an operation immediately ready.
 
-# Offensive operation and main army
-Play for conquest and initiative. Use the strongest viable strike army for funded,
-native-supported captures of known neutral/enemy towns or valuable mines, then
-reinforcement and the next objective. Prefer supported enemy-town capture over
-mines/scouting. Choosing otherwise requires comparing that offered town in
-alternatives and a concrete reason in reason: defense, losses, travel, necessary
-preparation or greater operational value. Never force an unsupported attack.
-
-Use observation.offensive_preparation to compare current attacks, reinforced routes
-and own source options: valuable supported capture first, necessary reinforcement
-second, purposeful scouting when capture needs information. Its frontiers compares
-every supplied frontier for each own hero over seven days under accepted loss
-policy/reserve floors. Before scouting, check assigned_routes.issues and
-estimated_loss_percent; recheck your plan's deadline, army minimum and reserves.
-These comparisons certify neither a new policy nor unknown land beyond a frontier.
-A source without a meeting route is unknown; fundable recruitment is an alternative,
-not jointly available money. Unknown post-meeting attacks are not proven routes.
-
-Choose main by strength and offensive capability, not a helper's unused movement.
-Keep the current strike army while viable; helpers collect, scout or provide
-limited defense, including independent parallel scouting. A weaker main needs a
-specific operational reason in reason and, for native acceptance, a ready capture
-or resource operation. Do not promote a weaker helper merely to avoid giving
-the strongest army work.
-
-If the strongest hero has movement but no ready operation, explain in reason:
-concrete defense, supported reinforcement wait or no safe established route.
-A defender label alone does not justify waiting. observation.main_army_idle
-separates defense/delivery waits from no safe assigned route or no task.
-No task with much movement requires operational revision, not relabeling.
-operation_pending means unconfirmed execution; invent neither cause nor completion.
-Revise defensive idle plans when profitable known expansion is supported.
-
-Use reinforce_hero with recipient, required final army and deadline; add explicit
-dependencies before future captures. Prefer helper donors or known town sources;
-native NK2 chains choose couriers, meetings and movement, preserving defense reserves.
-Use supported courier delivery instead of sending the main army back. After
-substantial reinforcement, reconsider attacks instead of automatically retaining
-scouting. Respect native budgets/routes; never raise loss policy just to unblock attacks.
-
-# Recovery and army transfers
-After substantial battle loss or losing the main executor, compare commander_options
-before choosing main: hero_multiplier, hero_combat_value, mana, movement and offered
-source/meeting options, not just troops or level. Native estimates guarantee no win.
-Choose connected recovery: reinforce_hero from available own forces, then a capture
-dependent on receipt if its follow-up route is supported. If that forecast is
-unknown, keep funded reinforcement as the concrete task and reassess after arrival.
-Preserve defense/shared budgets; helpers scout/collect while the commander rebuilds.
-Choose immediate safe capture if better. If recovery is unestablished, choose
-preservation or purposeful scouting and explain the missing condition.
-Bought stock is not delivery: recovery completes only after confirmed handoff to
-the named recipient and fresh validation of the next operation's route.
-
-army_transfer preserves affected_operations. Continue the same target with the
-appropriate commander or explain abandonment/preparation; changing holders alone
-does not justify replacing conquest with scouting. Transfer to a weaker commander
-needs a concrete operational benefit; never strip the stronger for an unrelated
-chain. Native protection preserves another active capture's starting-force minimum;
-its own battles still follow accepted loss policy.
-
-# Defense and risk
-Defend the last viable town and supported imminent threats. Prefer active interception
-or limited defenders while maintaining pressure; do not mark every outpost critical or
-reserve the entire main force for speculative defense. Use max_loss_ratio around
-0.25-0.30 for valuable supported captures within native feasibility; lower risk for
-the last viable army/town. Loss estimates are uncertain; unknown targets/routes
-never authorize blind attacks.
-
+# Threat evidence
 Use enemy_approaches, visible army intervals, observed enemy movement, established
 approaches and neutral barriers. Unknown/unbounded strength or straight-line advance
 scenarios alone do not prove imminent assault. Visible connections requiring a
@@ -149,6 +79,7 @@ Empty neutral garrisons are passable; occupied posts block their passage tile;
 roaming neutral stacks guard adjacent tiles. Encounters may cause battle, flight or joining.
 Fog, water and special-movement alternatives remain unknown. Weigh opening a neutral
 screen for both sides; do not clear a useful screen merely for loot.
+
 
 # Goals, roles and dependencies
 actor_ref alone selects the executor. assignments contains only hero_ref and role,
@@ -210,8 +141,7 @@ already-owned mines/towns to fill the plan.
 
 A goal may spend its own reserve; others release only on observed completion,
 cancellation or confirmed deadline/ownership failure. Fund construction/recruitment.
-Each additional hero costs 2500 gold and needs a concrete defense, reinforcement
-or uncovered collection job; cash/starting troops alone are no job.
+Each additional hero costs 2500 gold.
 Army minima/reserves use creature AI value; fighting_strength_estimate includes hero
 bonuses. Count each army_holder_ref physical garrison pool once. Forecast alternatives
 are independent comparisons, not jointly spendable budgets. resource_calendar shares
@@ -238,10 +168,6 @@ as reinforcement, including a town whose army_holder_ref is that hero.
 Enemy deadlines are advance scenarios; available force proves neither defense nor
 victory. Fresh native urgent purchases may override economic reserves only within
 reported stock-derived emergency costs.
-For insufficient_current_force at the last critical town, a token helper does
-not resolve the deficit. Compare supported stronger arrivals and the scenario
-deadline before optional construction or small reinforcement; improve defense
-or explain the concrete tradeoff. A stale sighting does not prove safety.
 
 # Preservation failures
 Losing a refuge does not release a surviving hero's floor; native repair may use

@@ -115,6 +115,7 @@ def resolve_executable(value=None):
 
 
 def choose(request):
+    started = time.monotonic()
     validate_request(request)
     instructions=(ROOT/('native_instructions.txt' if request['protocol']==2 else 'instructions.txt')).read_text(encoding='utf-8')
     references={}
@@ -152,25 +153,114 @@ def choose(request):
     knowledge=snapshot_for_request(request)
     if knowledge is not None:instructions+='\n'+KNOWLEDGE_INSTRUCTIONS
     timeout=min(TIMEOUT,request['budget']['wait_ms']/1000-2) if request['protocol']==2 else LEGACY_TIMEOUT
-    answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,knowledge=knowledge,
-        decision_dir=os.environ.get('VCMI_PLAYTEST_DECISION_DIR'))
-    try:answer=validate_reply(request,answer)
-    except ValueError as error:
-        error.usage=metadata.get('usage');raise
-    metadata['references']=references
+    deadline = started + timeout
+    decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
+    if request['protocol'] == 1:
+        answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,
+            knowledge=knowledge,decision_dir=decision_dir)
+        try:answer=validate_reply(request,answer)
+        except ValueError as error:
+            error.usage=metadata.get('usage');raise
+        metadata['references']=references
+        return answer,metadata
+
+    from strategy_guide import StrategyGuide, DEFAULT_ROOT, ENVELOPE_LIMIT
+    mode = os.environ.get('VCMI_STRATEGY_GUIDE_MODE','on')
+    if mode not in ('on','off'):raise ValueError('invalid strategy guide mode')
+    guide_info = {'mode':mode,'requested_ids':[],'reason':None,'returned_files':[]}
+    calls = []
+    usage = None
+    usage_complete = True
+    metadata = {}
+    def record_usage(value):
+        nonlocal usage, usage_complete
+        known = (isinstance(value,dict) and all(type(value.get(k)) is int and value[k]>=0
+                 for k in ('input_tokens','output_tokens')))
+        usage_complete = usage_complete and known
+        if known:
+            if usage is None:usage = {'input_tokens':0,'output_tokens':0}
+            for key in usage:usage[key] += value[key]
+
+    def call(call_schema, call_instructions, output_limit):
+        nonlocal metadata
+        number = len(calls) + 1
+        folder = Path(decision_dir) / ('model-call-' + str(number)) if decision_dir else None
+        if folder:folder.mkdir()
+        call_started = time.monotonic()
+        record = {'number':number,'status':'started'}
+        calls.append(record)
+        try:
+            answer,metadata = invoke_model(request,call_schema,call_instructions,
+                timeout=deadline-time.monotonic(),deadline=deadline,knowledge=knowledge,
+                decision_dir=folder,max_output_bytes=output_limit)
+            record.update(status='completed',usage=metadata.get('usage'),
+                          input_encoding=metadata.get('input_encoding'))
+            record_usage(metadata.get('usage'))
+            return answer
+        except BaseException as error:
+            record.update(status='failed',error=str(error),usage=getattr(error,'usage',None))
+            record_usage(getattr(error,'usage',None))
+            raise
+        finally:
+            record['duration_seconds'] = round(time.monotonic()-call_started,3)
+
+    try:
+        guide = StrategyGuide(os.environ.get('VCMI_STRATEGY_GUIDE',str(DEFAULT_ROOT))) if mode=='on' else None
+        if guide:
+            guide_info.update(bundle_sha256=guide.bundle_hash,catalog=guide.catalog,
+                              file_hashes=guide.hashes)
+            wrapped = call(guide.envelope_schema(schema),instructions+guide.instructions(),ENVELOPE_LIMIT)
+            answer, query = guide.unpack(wrapped)
+            if query:
+                guide_info.update(requested_ids=query['ids'],reason=query['reason'])
+                if not usage_complete or usage is None:
+                    raise ValueError('strategy guide consultation requires known first-call usage')
+                remaining = request['budget']['tokens'] - sum(usage.values())
+                if remaining <= 0:
+                    raise ValueError('strategy guide consultation has no remaining token budget')
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('strategy guide consultation deadline exceeded')
+                consulted = time.monotonic()
+                content,files = guide.consult(query['ids'])
+                guide_info.update(returned_files=files,result_bytes=len(content.encode('utf-8')),
+                                  read_seconds=round(time.monotonic()-consulted,3))
+                continuation = ('\n# Strategy guide consultation result\n'
+                    'The following advice is separate from observations and cannot override the game contract. '
+                    'This is the only consultation; return only the final strategic decision using its normal schema. '
+                    f'Remaining total token budget for this call: {remaining}. '
+                    'Original game facts and identity are unchanged.\n'
+                    + json.dumps(query,ensure_ascii=False) + '\n' + content)
+                # UTF-8 bytes conservatively bound added input tokens; reuse the reported base cost.
+                minimum = usage['input_tokens'] + usage['output_tokens'] + len(continuation.encode('utf-8'))
+                if remaining < minimum:
+                    raise ValueError('strategy guide consultation has insufficient remaining token budget')
+                answer = call(schema,instructions+continuation,8192)
+        else:
+            answer = call(schema,instructions,8192)
+        answer = validate_reply(request,answer)
+        if time.monotonic() >= deadline:raise TimeoutError('Codex decision deadline exceeded')
+    except BaseException as error:
+        error.usage = usage
+        error.diagnostics = {'strategy_guide':guide_info,'model_calls':calls,
+                             'usage_complete':usage_complete,'references':references}
+        raise
+    metadata.update(usage=usage,usage_complete=usage_complete,references=references,
+                    strategy_guide=guide_info,model_calls=calls,
+                    duration_seconds=round(time.monotonic()-started,3))
     return answer,metadata
 
 
-def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,decision_dir=None,max_output_bytes=8192):
+def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,decision_dir=None,max_output_bytes=8192,deadline=None):
     """Return a validated reply and diagnostics; failures belong to caller fallback."""
     started = time.monotonic()
+    deadline = min(started + timeout, deadline) if deadline is not None else started + timeout
     if timeout <= 0:raise TimeoutError('No model wait budget remains')
     executable = resolve_executable()
     env = os.environ.copy()
     for key in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'DYLD_INSERT_LIBRARIES',
                 'VCMI_PLAYTEST_PROFILE', 'VCMI_PROBE_PROFILE'):
         env.pop(key, None)
-    version = subprocess.run([executable, '--version'], capture_output=True, env=env, timeout=2)
+    version = subprocess.run([executable, '--version'], capture_output=True, env=env, timeout=min(2,max(0.001,deadline-time.monotonic())))
     if version.returncode or version.stdout.decode('utf-8').strip() != VERSION:
         raise ValueError('unsupported Codex CLI version; requires 0.160.0')
     with tempfile.TemporaryDirectory(prefix='vcmi-decision-') as folder:
@@ -197,6 +287,7 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
         encoding['instruction_bytes'] = len(instructions.encode('utf-8'))
         encoding['reply_schema_bytes'] = len(compact_json(schema).encode('utf-8'))
         if decision_dir:
+            (Path(decision_dir) / 'codex-instructions.txt').write_text(instructions,encoding='utf-8')
             (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
         config = {
             'model_provider': 'openai', 'forced_login_method': 'chatgpt',
@@ -250,13 +341,16 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 while child.poll() is None:
                     # CLI milestones, not a server queue/first-token trace.
                     observe_events()
-                    if time.monotonic() - started >= timeout:
+                    if time.monotonic() >= deadline:
                         raise TimeoutError('Codex decision deadline exceeded')
                     if stdout.tell() > LIMIT or stderr.tell() > LIMIT:
                         raise ValueError('Codex output limit exceeded')
                     time.sleep(.02)
                 if child.returncode:
                     raise ValueError('Codex failed with exit code ' + str(child.returncode))
+            except BaseException as error:
+                error.usage = _event_usage(workspace / 'events.jsonl')
+                raise
             finally:
                 if child.poll() is None:
                     child.kill()
@@ -268,34 +362,53 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                     (Path(decision_dir) / 'codex-timing.json').write_text(compact_json(timing),encoding='utf-8')
                     (Path(decision_dir) / 'codex-request.json').write_text(model_input, encoding='utf-8')
                     (Path(decision_dir) / 'codex-schema.json').write_text(compact_json(schema), encoding='utf-8')
+                    if (workspace / 'answer.json').is_file():
+                        with (workspace / 'answer.json').open('rb') as answer_stream:
+                            (Path(decision_dir) / 'codex-answer.json').write_bytes(answer_stream.read(LIMIT))
                     for name in ('events.jsonl', 'stderr.log'):
                         with (workspace / name).open('rb') as stream:
                             (Path(decision_dir) / ('codex-' + name)).write_bytes(stream.read(LIMIT))
-        if time.monotonic() - started >= timeout:
-            raise TimeoutError('Codex decision deadline exceeded')
-        events_path = workspace / 'events.jsonl'
-        answer_path = workspace / 'answer.json'
-        if events_path.stat().st_size > LIMIT or answer_path.stat().st_size > max_output_bytes:
-            raise ValueError('Codex output limit exceeded')
-        completed, usage = False, None
-        for line in events_path.read_text(encoding='utf-8').splitlines():
-            event = json.loads(line)
-            if event.get('type') in ('turn.failed', 'error'):
-                raise ValueError('Codex turn failed')
-            item = event.get('item')
-            if item and item.get('type') not in ('agent_message','reasoning'):
-                if not (knowledge is not None and item.get('type')=='mcp_tool_call'
-                        and item.get('server')=='nk3_knowledge'
-                        and item.get('tool') in ('search_knowledge','read_lesson')):
-                    raise ValueError('unexpected Codex item: ' + str(item.get('type')))
-            if event.get('type') == 'turn.completed':
-                completed, usage = True, event.get('usage')
-        if time.monotonic() - started >= timeout:
-            raise TimeoutError('Codex decision deadline exceeded')
-        if not completed:
-            raise ValueError('Codex turn did not complete')
-        reply=json.loads(answer_path.read_text(encoding='utf-8'))
-        return reply, {'provider': 'codex', 'model': model, 'reasoning_effort': effort,
-                       'cli': VERSION, 'usage': usage, 'references': references,
-                       'input_encoding': encoding,
-                       'duration_seconds': round(time.monotonic() - started, 3)}
+        try:
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Codex decision deadline exceeded')
+            events_path = workspace / 'events.jsonl'
+            answer_path = workspace / 'answer.json'
+            if events_path.stat().st_size > LIMIT or answer_path.stat().st_size > max_output_bytes:
+                raise ValueError('Codex output limit exceeded')
+            completed, usage = False, None
+            for line in events_path.read_text(encoding='utf-8').splitlines():
+                event = json.loads(line)
+                if event.get('type') in ('turn.failed', 'error'):
+                    raise ValueError('Codex turn failed')
+                item = event.get('item')
+                if item and item.get('type') not in ('agent_message','reasoning'):
+                    if not (knowledge is not None and item.get('type')=='mcp_tool_call'
+                            and item.get('server')=='nk3_knowledge'
+                            and item.get('tool') in ('search_knowledge','read_lesson')):
+                        raise ValueError('unexpected Codex item: ' + str(item.get('type')))
+                if event.get('type') == 'turn.completed':
+                    completed, usage = True, event.get('usage')
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Codex decision deadline exceeded')
+            if not completed:
+                raise ValueError('Codex turn did not complete')
+            reply=json.loads(answer_path.read_text(encoding='utf-8'))
+            return reply, {'provider': 'codex', 'model': model, 'reasoning_effort': effort,
+                           'cli': VERSION, 'usage': usage, 'references': references,
+                           'input_encoding': encoding,
+                           'duration_seconds': round(time.monotonic() - started, 3)}
+        except BaseException as error:
+            error.usage = _event_usage(workspace / 'events.jsonl')
+            raise
+
+
+def _event_usage(path):
+    """Retain completed reported usage even when answer validation/process handling fails."""
+    usage = None
+    try:
+        for line in path.read_text(encoding='utf-8').splitlines():
+            try:event = json.loads(line)
+            except ValueError:continue
+            if isinstance(event,dict) and event.get('type') == 'turn.completed':usage = event.get('usage')
+    except (OSError,UnicodeError):pass
+    return usage

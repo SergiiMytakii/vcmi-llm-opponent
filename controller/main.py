@@ -36,6 +36,8 @@ def main():
         reply = None
         metadata = {'provider': 'fallback', 'reason': str(error), 'retryable': request['protocol'] == 1,
                     'duration_seconds': round(time.monotonic() - started, 3)}
+        metadata.update(getattr(error,'diagnostics',{}))
+        if getattr(error,'usage',None) is not None:metadata['usage']=error.usage
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
         if request['protocol'] == 2:
             reply = None
@@ -44,6 +46,7 @@ def main():
             reply = {'protocol': 1, 'request_id': request['request_id'], 'action_id': action['id']}
         metadata = {'provider': 'fallback', 'reason': str(error),
                     'duration_seconds': round(time.monotonic() - started, 3)}
+        metadata.update(getattr(error,'diagnostics',{}))
         if request['protocol'] == 2:
             metadata['failure_kind'] = 'invalid_reply' if isinstance(error,(ValueError,TypeError)) else 'controller_error'
             if getattr(error,'usage',None) is not None:metadata['usage'] = error.usage
@@ -75,7 +78,7 @@ def main():
         raise SystemExit(1 if request['protocol']==2 and metadata.get('failure_kind') else 75)
     if request['protocol'] == 2:
         usage = metadata.get('usage')
-        known = isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0 for k in ('input_tokens','output_tokens'))
+        known = metadata.get('usage_complete',True) and isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0 for k in ('input_tokens','output_tokens'))
         reply['usage'] = {k:usage[k] if known else 0 for k in ('input_tokens','output_tokens')}
         reply['usage']['known'] = known
     sys.stdout.buffer.write((json.dumps(reply, ensure_ascii=False, separators=(',', ':')) + "\n").encode('utf-8'))

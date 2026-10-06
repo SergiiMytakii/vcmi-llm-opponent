@@ -110,6 +110,8 @@ if sys.argv[1:]==['--version']:
  print('codex-cli 0.160.0');sys.exit(0)
 r=json.load(sys.stdin);pathlib.Path(os.environ['PROMPT_CAPTURE']).write_text(json.dumps(r))
 answer=json.loads(pathlib.Path(os.environ['PROBE_REPLY']).read_text())
+schema=json.loads(pathlib.Path(sys.argv[sys.argv.index('--output-schema')+1]).read_text())
+if 'kind' in schema['properties']:answer={'kind':'decision','decision':answer,'guide_request':None}
 pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps(answer))
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_tokens':1}}))
 """

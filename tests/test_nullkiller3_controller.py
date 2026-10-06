@@ -52,6 +52,7 @@ if mode=='command':answer['command']='build'
 if mode=='refusal':sys.exit(4)
 if r.get('experience',{}).get('mode')=='learn':
  answer['learning']={'expectation':'Develop before expanding.','assessments':[]}
+if 'kind' in schema['properties']:answer={'kind':'decision','decision':answer,'guide_request':None}
 pathlib.Path(args[args.index('-o')+1]).write_text(json.dumps(answer))
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':120,'output_tokens':40}}))
 ''')

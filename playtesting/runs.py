@@ -149,6 +149,15 @@ def prepare(config_path, out):
     refs = {name: absolute(value, base) for name, value in config.get("references", {}).items()}
     if any(name not in ("prompt", "knowledge") or not path.is_file() for name, path in refs.items()):
         raise ValueError("references supports existing prompt and knowledge files")
+    from controller.strategy_guide import StrategyGuide, DEFAULT_ROOT
+    guide_config = config.get('strategy_guide', {'mode':'on'})
+    if (not isinstance(guide_config,dict) or not set(guide_config) <= {'mode','path'}
+            or guide_config.get('mode') not in ('on','off')
+            or ('path' in guide_config and not isinstance(guide_config['path'],str))):
+        raise ValueError('strategy_guide requires mode on/off and an optional path')
+    guide = (StrategyGuide(absolute(guide_config.get('path',str(DEFAULT_ROOT)),base))
+             if guide_config['mode']=='on' else None)
+    sources[str(ROOT/'controller/strategy_guide.py')] = digest(ROOT/'controller/strategy_guide.py')
     out = Path(out).resolve()
     if out == profile or out.is_relative_to(profile) or profile.is_relative_to(out):
         raise ValueError("run and template must be separate directory trees")
@@ -159,6 +168,14 @@ def prepare(config_path, out):
         (out / "decisions").mkdir()
         (out / "episodes").mkdir()
         (out / "evidence").mkdir()
+        guide_snapshot = {'mode':guide_config['mode']}
+        if guide:
+            guide_root = out / 'strategy-guide'
+            for name,raw in guide.files.items():
+                dest = guide_root / name
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                dest.write_bytes(raw)
+            guide_snapshot.update(path='strategy-guide',files=guide.hashes,bundle_sha256=guide.bundle_hash)
         references = {}
         for name, path in refs.items():
             dest = out / "references" / (name + ".md")
@@ -187,7 +204,7 @@ def prepare(config_path, out):
             "engine": str(engine), "engine_sha256": digest(engine),
             "engine_sources": engine_sources,
             "controller": controller, "controller_sources": sources, "references": references,
-            "experience":experience,
+            "experience":experience, "strategy_guide":guide_snapshot,
             "map_sha256": digest(out / "profile" / DATA / resource),
             "save_sha256": digest(out / "profile" / DATA / save_resource) if save_resource else None,
             "profile_sha256": snapshot(out / "profile"),
@@ -212,6 +229,17 @@ def verify(run, check_profile=False):
     for ref in manifest["references"].values():
         if digest(run / ref["path"]) != ref["sha256"]:
             raise ValueError("reference snapshot changed since prepare")
+    guide_info = manifest.get('strategy_guide')
+    if guide_info and guide_info['mode']=='on':
+        from controller.strategy_guide import StrategyGuide
+        root = run / guide_info['path']
+        if root.is_symlink() or any(p.is_symlink() for p in root.rglob('*')):
+            raise ValueError('strategy guide snapshot symlink changed since prepare')
+        if snapshot(root) != guide_info['files']:
+            raise ValueError('strategy guide snapshot changed since prepare')
+        guide = StrategyGuide(root)
+        if guide.bundle_hash != guide_info['bundle_sha256']:
+            raise ValueError('strategy guide bundle changed since prepare')
     baseline = manifest.get('experience',{}).get('baseline')
     if baseline and digest(run / baseline['path']) != baseline['sha256']:
         raise ValueError('experience baseline changed since prepare')
