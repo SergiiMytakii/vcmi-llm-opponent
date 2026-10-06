@@ -24,25 +24,80 @@ int main(int argc,char ** argv)
         {
             auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":5000,"position":[1,1,0]}],"towns":[{"ref":"home","buildings":[],"position":[1,1,0]}],"objects":[]})");
             auto plan=json(R"({"version":3,"revision":1,"approach":"defense","horizon_days":3,"goals":[{"id":"hold","kind":"defend_area","actor_ref":"main","target_ref":"home","deadline_day":7,"priority":50,"building_id":-1,"min_army_value":5000,"depends_on":[],"required_capabilities":[],"complete_when":{"kind":"held_until","value":7}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
-            auto request=json(R"({"request_id":"fresh","identity":{"generation":"fresh"},"evidence_refs":["observation:day"],"campaign":{"approach":"defense"},"signals":[{"question":"campaign_exhausted"}]})");
-            auto reply=json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"Wait for growth then reconsider offense","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"main","role":"defender"}],"alternatives":[{"approach":"defense","benefit":"Growth","cost":"Time","uncertainty":"Enemy"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guard"}],"reconsider_when":[{"goal_id":"hold","kind":"deadline_missed"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");reply["plan"]=plan;
+            auto request=json(R"({"request_id":"fresh","identity":{"generation":"fresh"},"evidence_refs":["observation:day"],"campaign":null,"signals":[]})");
+            auto reply=json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"Wait for growth then reconsider offense","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"main","role":"defender"}],"alternatives":[{"approach":"defense","benefit":"Growth","cost":"Time","uncertainty":"Enemy"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guard"}],"reconsider_when":[{"goal_id":"hold","kind":"deadline_missed"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");
+            const auto exit=json(R"({"waiting_for":"Known next growth day","expected_gain":"Available troops after growth","next_step":"Reconsider the best supported route after growth"})");
             nullkiller3::CampaignState current,candidate;std::string reason;
-            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),"repeat hold accepted without concrete exit");
-            reply["defense_exit"]=JsonNode();
-            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),"repeat hold accepted null exit");
-            reply["defense_exit"]=json(R"({"waiting_for":"Known next growth day","expected_gain":"Available troops after growth","next_step":"Reconsider a supported offensive route"})");
+            // The initial plan retains the ordinary closed response shape.
+            reply["plan"]=plan;
             require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
-            auto longExit=reply;longExit["defense_exit"]["next_step"].String()=std::string(641,'x');
-            require(!nullkiller3::validateStrategicDecision(longExit,request,world,current,candidate,reason),"oversized exit accepted");
-            auto malformed=reply;malformed["defense_exit"]["extra"].String()="unexpected";
-            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason),"open exit shape accepted");
+            auto extra=reply;extra["defense_exit"]=exit;
+            require(!nullkiller3::validateStrategicDecision(extra,request,world,current,candidate,reason),"unrequested exit shape accepted");
+            for(const auto * kind:{"defend_area","preserve_force"})
+                for(const auto * approach:{"defense","scouting","economy","expansion","offense"})
+                    for(const auto * signal:{"campaign_exhausted","helper_hired:helper","battle_loss:helper",""})
+                    {
+                        auto previous=plan;previous["approach"].String()=approach;
+                        previous["goals"][0]["kind"].String()=kind;
+                        previous["goals"][0]["complete_when"]["kind"].String()=std::string(kind)=="preserve_force" ? "force_preserved_until" : "held_until";
+                        current=nullkiller3::CampaignState();
+                        require(current.accept(previous,world,reason),reason.c_str());
+                        request["campaign"]=current.plan();request["signals"].Vector().clear();
+                        if(*signal) { JsonNode event;event["question"].String()=signal;request["signals"].Vector().push_back(event); }
+                        for(const auto * decision:{"revise","retain"})
+                        {
+                            reply["decision"].String()=decision;
+                            reply["plan"]=std::string(decision)=="retain" ? JsonNode() : previous;
+                            if(!reply["plan"].isNull()) reply["plan"]["revision"].Integer()=2;
+                            reply.Struct().erase("defense_exit");
+                            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
+                                && reason=="missing_defense_exit","previous hold accepted without concrete reconsideration");
+                            reply["defense_exit"]=JsonNode();
+                            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
+                                && reason=="missing_defense_exit","previous hold accepted null reconsideration");
+                            reply["defense_exit"]=exit;
+                            require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
+                        }
+                    }
+            auto malformed=reply;malformed["defense_exit"]["next_step"].String()=std::string(641,'x');
+            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason)
+                && reason=="invalid_defense_exit","oversized exit accepted");
+            malformed=reply;malformed["defense_exit"]["extra"].String()="unexpected";
+            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason)
+                && reason=="invalid_defense_exit","open exit shape accepted");
             malformed=reply;malformed["defense_exit"]["next_step"].String()="";
-            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason),"empty exit step accepted");
-            auto ordinary=request;ordinary["signals"].Vector().clear();
-            require(!nullkiller3::validateStrategicDecision(reply,ordinary,world,current,candidate,reason),"unrequested exit shape accepted");
+            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason)
+                && reason=="invalid_defense_exit","empty exit step accepted");
+            // Leaving the hold for movement is allowed with an explicit null.
+            world["frontiers"].Vector().push_back(JsonNode(std::string("edge")));
+            auto moving=plan;moving["revision"].Integer()=2;moving["approach"].String()="scouting";
+            moving["goals"][0]["kind"].String()="scout_frontier";moving["goals"][0]["target_ref"].String()="edge";
+            moving["goals"][0]["complete_when"]["kind"].String()="frontier_observed";moving["goals"][0]["complete_when"]["value"].Integer()=0;
+            reply["decision"].String()="revise";reply["plan"]=moving;reply["defense_exit"]=JsonNode();
+            require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
             reply.Struct().erase("defense_exit");
-            require(nullkiller3::validateStrategicDecision(reply,ordinary,world,current,candidate,reason),"legacy ordinary hold response no longer accepted");
-            std::cout << "NK3 repeat defense requires explicit gain and exit, legacy normal response proof passed\n";return 0;
+            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
+                && reason=="missing_defense_exit","moving revision omitted required nullable field");
+            // A safe second-town hold still needs a concrete reason, even if the main hero moves.
+            world["heroes"].Vector().push_back(json(R"({"ref":"helper","army_value":1000,"position":[2,2,0]})"));
+            world["towns"].Vector().push_back(json(R"({"ref":"second","buildings":[],"position":[2,2,0]})"));
+            auto mixed=moving;auto secondHold=plan["goals"][0];secondHold["id"].String()="second_hold";
+            secondHold["actor_ref"].String()="helper";secondHold["target_ref"].String()="second";secondHold["min_army_value"].Integer()=1000;
+            mixed["goals"].Vector().push_back(secondHold);
+            reply["assignments"].Vector().push_back(json(R"({"hero_ref":"helper","role":"defender"})"));
+            reply["plan"]=mixed;reply["defense_exit"]=JsonNode();
+            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
+                && reason=="missing_defense_exit","safe second-town hold accepted null reconsideration");
+            reply["defense_exit"]=exit;
+            require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
+            // A previous moving campaign does not introduce the exit field, including a new hold.
+            current=nullkiller3::CampaignState();moving["revision"].Integer()=1;
+            require(current.accept(moving,world,reason),reason.c_str());request["campaign"]=current.plan();
+            reply.Struct().erase("defense_exit");reply["plan"]=plan;reply["plan"]["revision"].Integer()=2;
+            require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
+            reply["decision"].String()="retain";reply["plan"]=JsonNode();
+            require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
+            std::cout << "NK3 universal hold reconsideration, retain, safe multi-town, movement and initial-plan proof passed\n";return 0;
         }
         if(argc==2 && std::string(argv[1])=="--helper-hiring")
         {

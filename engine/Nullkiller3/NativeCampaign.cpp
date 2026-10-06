@@ -998,9 +998,19 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         }
     }
 }
-JsonNode NativeCampaign::observedEnemyApproaches(NK2AI::Nullkiller & ai)
+namespace
 {
-    std::map<int3,size_t> index;std::vector<KnownLandTile> land;
+struct VisibleLandGraph
+{
+    std::map<int3,size_t> index;
+    std::vector<KnownLandTile> land;
+    JsonNode positions;
+};
+VisibleLandGraph visibleLandGraph(NK2AI::Nullkiller & ai,const JsonNode & world,
+    const std::function<std::string(const CGObjectInstance *)> & objectReference)
+{
+    VisibleLandGraph graph;graph.positions.Vector();
+    auto & index=graph.index;auto & land=graph.land;
     const auto size=ai.cc->getMapSize();
     const auto & view=ai.gameInfo();
     for(int z=0;z<size.z;++z) for(int y=0;y<size.y;++y) for(int x=0;x<size.x;++x)
@@ -1012,8 +1022,9 @@ JsonNode NativeCampaign::observedEnemyApproaches(NK2AI::Nullkiller & ai)
         KnownLandTile cell;
         for(const auto * guard:view.getGuardingCreatures(position))
             if(guard->ID==Obj::MONSTER && guard->getOwner()==PlayerColor::NEUTRAL)
-                cell.neutralGuards.push_back(reference(guard));
+                cell.neutralGuards.push_back(objectReference(guard));
         index.emplace(position,land.size());land.push_back(std::move(cell));
+        graph.positions.Vector().push_back(coordinate(position));
     }
     // Occupied neutral garrisons block their visitable tile, not an adjacent
     // monster guard zone. Use the ordinary visible army interval, never hidden stacks.
@@ -1032,6 +1043,11 @@ JsonNode NativeCampaign::observedEnemyApproaches(NK2AI::Nullkiller & ai)
             if(dx || dy)
                 if(const auto next=index.find(position+int3(dx,dy,0));next!=index.end())
                     land[id].neighbors.push_back(next->second);
+    return graph;
+}
+JsonNode enemyApproaches(const JsonNode & world,const VisibleLandGraph & graph)
+{
+    const auto & index=graph.index;const auto & land=graph.land;
     JsonNode result;result.Vector();
     for(const auto & enemy:world["visible_objects"].Vector())
     {
@@ -1052,12 +1068,14 @@ JsonNode NativeCampaign::observedEnemyApproaches(NK2AI::Nullkiller & ai)
     }
     return result;
 }
+}
 void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
 {
     repairedSourcesChanged |= repairDeliverySources(ai);
     world["forecasts"] = forecastBranches(world,campaign.reservedResources());
     auto & forecasts=world["forecasts"];
-    world["enemy_approaches"]=observedEnemyApproaches(ai);
+    const auto landGraph=visibleLandGraph(ai,world,[&](const auto * object){return reference(object);});
+    world["enemy_approaches"]=enemyApproaches(world,landGraph);
     forecasts["threats"]=forecastThreats(world);
 
     std::map<std::tuple<std::string,bool,bool>,JsonNode> arrivalQuotes;
@@ -1069,6 +1087,15 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
         const auto paths=ai.pathfinder->getPathInfo(position,false);
         for(const auto * hero:ai.cc->getHeroesInfo())
         {
+            CGPath ownPath;JsonNode routeNodes;routeNodes.Vector();
+            const bool ownRoute=!(frontier || area) || ai.getPathsInfo(hero)->getPath(ownPath,position,EPathfindingLayer::LAND);
+            if((frontier || area) && ownRoute && ownPath.nodes.size()>1)
+                for(auto step=ownPath.nodes.rbegin()+1;step!=ownPath.nodes.rend();++step)
+                {
+                    JsonNode node;node["position"]=coordinate(step->coord);node["turn"].Integer()=step->turns;
+                    node["interaction"].Bool()=step->action!=EPathNodeAction::NORMAL || step->layer!=EPathfindingLayer::LAND;
+                    routeNodes.Vector().push_back(node);
+                }
             for(const auto & path:paths)
             {
                 if(path.targetHero!=hero || !path.heroArmy || path.getFirstBlockedAction()) continue;
@@ -1086,6 +1113,28 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
                 arrival["army_loss_estimate"].Integer()=path.getTotalArmyLoss();
                 arrival["army_value"].Integer()=path.heroArmy->estimateCombatValue();
                 arrival["fighting_strength_estimate"].Integer()=path.getHeroStrength();
+                if(frontier || area)
+                {
+                    // Native paths compress ordinary tiles into waypoints.
+                    // Every retained waypoint must agree, in movement order,
+                    // with the player route used by ordinary native movement.
+                    JsonNode nativeWaypoints,playerWaypoints;nativeWaypoints.Vector();playerWaypoints.Vector();
+                    for(auto node=path.nodes.rbegin();node!=path.nodes.rend();++node)
+                    {
+                        JsonNode waypoint;waypoint["position"]=coordinate(node->coord);waypoint["turn"].Integer()=node->turns;
+                        nativeWaypoints.Vector().push_back(waypoint);
+                    }
+                    for(auto node=ownPath.nodes.rbegin();node!=ownPath.nodes.rend();++node)
+                    {
+                        JsonNode waypoint;waypoint["position"]=coordinate(node->coord);waypoint["turn"].Integer()=node->turns;
+                        playerWaypoints.Vector().push_back(waypoint);
+                    }
+                    const bool ordinary=ownRoute && path.exchangeCount<=1
+                        && std::all_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node) {
+                            return node.targetHero==hero && !node.specialAction && node.layer==EPathfindingLayer::LAND;
+                        }) && scoutRouteCorresponds(nativeWaypoints,playerWaypoints);
+                    arrival["end_turn_exposure"]=scoutStopExposure(coordinate(hero->visitablePos()),routeNodes,ordinary,world,landGraph.land,landGraph.positions);
+                }
                 if(std::find(result.Vector().begin(),result.Vector().end(),arrival)==result.Vector().end()) result.Vector().push_back(arrival);
             }
         }

@@ -53,6 +53,7 @@ class DefenseExitControllerTest(unittest.TestCase):
         goal=dict(id='hold',kind='defend_area',actor_ref='object:0',target_ref='object:1',
             deadline_day=3,priority=90,building_id=-1,min_army_value=4000,depends_on=[],
             required_capabilities=['land'],complete_when=dict(kind='held_until',value=3))
+        request['campaign']['goals']=[copy.deepcopy(goal)]
         answer=reply(request,goal)
         with self.assertRaises(ValueError):validate_reply(request,answer)
         answer['defense_exit']=None
@@ -64,3 +65,22 @@ class DefenseExitControllerTest(unittest.TestCase):
         answer['plan']['goals'][0].update(kind='capture_target',target_ref='object:2',complete_when=dict(kind='target_owned',value=0))
         answer['defense_exit']=None
         validate_reply(request,answer)
+
+    def test_hold_reassessment_covers_all_signals_approaches_and_retention(self):
+        goal=dict(id='hold',kind='preserve_force',actor_ref='object:0',target_ref='object:1',
+            deadline_day=3,priority=90,building_id=-1,min_army_value=4000,depends_on=[],
+            required_capabilities=['land'],complete_when=dict(kind='force_preserved_until',value=3))
+        for approach in ('scouting','offense','defense'):
+            for signal in ('helper_hired:scout','battle_loss:scout','repair_exhausted','defense:object:1'):
+                request=strategic_request();request['campaign']=reply(request,goal)['plan']
+                request['campaign']['approach']=approach
+                request['signals']=[dict(question=signal,facts='new')]
+                for decision in ('revise','retain'):
+                    with self.subTest(approach=approach,signal=signal,decision=decision):
+                        a=reply(request,goal)
+                        if decision=='retain':a.update(decision='retain',plan=None)
+                        with self.assertRaises(ValueError):validate_reply(request,a)
+                        a['defense_exit']=None
+                        with self.assertRaises(ValueError):validate_reply(request,a)
+                        a['defense_exit']=dict(waiting_for='New own route quotes',expected_gain='Compare viable departure',next_step='Reassess departure versus justified protection')
+                        validate_reply(request,a)

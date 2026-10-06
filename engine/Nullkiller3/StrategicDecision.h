@@ -370,11 +370,12 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
         return value.getType() == JsonNode::JsonType::DATA_INTEGER && value.Integer() >= low && value.Integer() <= high;
     };
     if(!reply.isStruct()) return reject("invalid_or_stale_strategic_identity");
-    bool exhaustedDefense=false;
-    if(request["campaign"]["approach"].String()=="defense")
-        for(const auto & signal:request["signals"].Vector()) exhaustedDefense |= signal["question"].String()=="campaign_exhausted";
+    const bool previousHold=std::any_of(request["campaign"]["goals"].Vector().begin(),
+        request["campaign"]["goals"].Vector().end(),[](const auto & goal) {
+            return goal["kind"].String()=="defend_area" || goal["kind"].String()=="preserve_force";
+        });
     auto replyShape=reply;
-    if(exhaustedDefense)
+    if(previousHold)
     {
         if(!replyShape.Struct().count("defense_exit")) return reject("missing_defense_exit");
         replyShape.Struct().erase("defense_exit");
@@ -409,7 +410,7 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     else if(reply["decision"].String() != "retain" || !reply["plan"].isNull() || current.plan().isNull())
         return reject("invalid_strategic_retention");
     trial.review(freshWorld);
-    if(exhaustedDefense && reply["defense_exit"].isNull())
+    if(previousHold && reply["defense_exit"].isNull())
         for(const auto & goal:trial.plan()["goals"].Vector())
             if(goal["kind"].String()=="defend_area" || goal["kind"].String()=="preserve_force") return reject("missing_defense_exit");
     std::map<std::string, const JsonNode *> goals;

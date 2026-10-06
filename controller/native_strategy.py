@@ -75,8 +75,8 @@ def completed_interceptions(request):
 
 
 def needs_defense_exit(request):
-    return ((request.get('campaign') or {}).get('approach')=='defense'
-            and any(s.get('question')=='campaign_exhausted' for s in request.get('signals',[])))
+    return any(g.get('kind') in ('defend_area','preserve_force')
+               for g in (request.get('campaign') or {}).get('goals',[]))
 
 
 def reply_schema(request):

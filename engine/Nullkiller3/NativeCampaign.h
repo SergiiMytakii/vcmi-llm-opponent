@@ -81,7 +81,6 @@ class NativeCampaign
     void restoreArbiter();
     void saveArbiter();
     void traceCampaign() const;
-    JsonNode observedEnemyApproaches(NK2AI::Nullkiller & ai);
     void observeBuildingProgress();
     void observeOperationProgress();
     void recordCheckpointBaseline();
