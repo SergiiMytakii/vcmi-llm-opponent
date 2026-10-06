@@ -6,5 +6,5 @@
 int main()
 {
 	const std::string input{std::istreambuf_iterator<char>(std::cin), {}};
-	std::cout << externalai::transportJSON(input);
+	std::cout << ai_transport::transportJSON(input);
 }

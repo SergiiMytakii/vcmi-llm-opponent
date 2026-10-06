@@ -31,7 +31,7 @@
 #include "../../lib/entities/hero/CHero.h"
 #include "../../lib/battle/CombatValue.h"
 #include "../../lib/mapping/CMap.h"
-#include "../ExternalAI/TransportJSON.h"
+#include "../TransportJSON/TransportJSON.h"
 #include <fstream>
 #include <cmath>
 #include <cstdlib>
@@ -53,7 +53,7 @@ void NativeCampaign::writeLearningEvent(JsonNode event)
     std::lock_guard journalLock(journalMutex);
     try
     {
-        const auto raw=externalai::transportJSON(event.toCompactString());
+        const auto raw=ai_transport::transportJSON(event.toCompactString());
         if(raw.size()>512*1024) throw std::runtime_error("own learning event exceeds journal budget");
         std::ofstream stream(path,std::ios::app);
         stream.exceptions(std::ios::badbit|std::ios::failbit);

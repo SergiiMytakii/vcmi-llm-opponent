@@ -5,7 +5,7 @@
 #include "OffensivePreparation.h"
 #include "StrategicCandidates.h"
 #include "../ExternalAI/ProcessExchange.h"
-#include "../ExternalAI/TransportJSON.h"
+#include "../TransportJSON/TransportJSON.h"
 #include "../ExternalAI/StrategyMemory.h"
 #include "../Nullkiller2/Engine/Nullkiller.h"
 #include "../Nullkiller2/AIGateway.h"
@@ -334,7 +334,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
     for(const auto & object : request["observation"]["objects"].Vector()) request["evidence_refs"].Vector().emplace_back("target:"+object["ref"].String());
-    const auto input = externalai::transportJSON(request.toCompactString());
+    const auto input = ai_transport::transportJSON(request.toCompactString());
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
     recordCheckpointBaseline(); // A timeout/invalid reply cannot repeat this same choice.

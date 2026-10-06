@@ -1,10 +1,8 @@
-#pragma once
-#include <string>
+#include "TransportJSON.h"
 
-namespace externalai
+namespace ai_transport
 {
-// Remove only JSON whitespace outside strings; preserve the engine's value encoding.
-inline std::string transportJSON(const std::string & json)
+std::string transportJSON(const std::string & json)
 {
 	std::string result;
 	result.reserve(json.size());
