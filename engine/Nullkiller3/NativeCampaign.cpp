@@ -194,6 +194,14 @@ NK2AI::Goals::TGoalVec NativeCampaign::deliveryTasks(NK2AI::Nullkiller & ai,cons
     if(!actor || !target) return {};
     Goals::TGoalVec generated;
     if(!collectFromTown) generated=Goals::GatherArmyBehavior(actor,target,prospectiveSources).decompose(&ai);
+    if(const auto * helper=dynamic_cast<const CGHeroInstance *>(target))
+        if(directDeliveryValue(actor,helper,prospectiveSources)>0)
+        {
+            auto paths=ai.pathfinder->getPathInfo(helper->visitablePos(),false);
+            std::erase_if(paths,[&](const AIPath & path){return !safeStabilizationPath(path,actor,ai);});
+            auto pickup=Goals::CaptureObjectsBehavior::getVisitGoals(paths,&ai,helper,true);
+            generated.insert(generated.end(),pickup.begin(),pickup.end());
+        }
     if(collectFromTown) if(const auto * town=dynamic_cast<const CGTownInstance *>(target))
     {
         auto paths=ai.pathfinder->getPathInfo(town->visitablePos(),false);
