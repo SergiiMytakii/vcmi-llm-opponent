@@ -121,6 +121,24 @@ inline std::vector<StrategicSignal> idleArmySignals(const CampaignState & campai
     for(const auto & target:world["offensive_preparation"]["targets"].Vector())
         if(target["earliest_current_safe_day"].isNumber()) refs.insert(target["target_ref"].String());
     for(const auto & ref:refs) facts["safe_targets"].Vector().emplace_back(ref);
+    // A consumed site changes the idle army's remaining useful agenda even
+    // when it changes neither army strength nor known conquest routes.
+    std::set<std::string> sites;
+    for(const auto & site:world["objects"].Vector())
+    {
+        const auto & kind=site["kind"].String();
+        if(!site["visible"].Bool() || !site["visited"].isBool() || site["visited"].Bool()
+            || (kind!="scholar" && kind!="treasure_chest" && kind!="obelisk")) continue;
+        for(const auto & route:world["forecasts"]["routes"].Vector()) if(route["target_ref"]==site["ref"])
+            for(const auto & arrival:route["own_arrivals"].Vector())
+                if(arrival["hero_ref"]==idle["hero_ref"] && arrival["army_loss_estimate"].isNumber()
+                    && arrival["army_loss_estimate"].Float()==0 && arrival["day"].isNumber()
+                    && arrival["day"].Integer()>=world["day"].Integer()
+                    && arrival["day"].Integer()<=world["day"].Integer()+3)
+                    sites.insert(site["ref"].String());
+    }
+    facts["safe_sites"].Vector();
+    for(const auto & ref:sites) facts["safe_sites"].Vector().emplace_back(ref);
     auto basis=facts.toCompactString();if(basis.size()>8192) basis=offensiveCheckpoint(world["offensive_preparation"]).toCompactString();
     return {{"idle_army:"+idle["hero_ref"].String(),basis,true,true,actionable,false}};
 }

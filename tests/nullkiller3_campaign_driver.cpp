@@ -19,6 +19,47 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--idle-sites")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            auto world=input["world"];
+            nullkiller3::CampaignState campaign;
+            std::string reason;
+            require(campaign.accept(input["plan"],world,reason),reason.c_str());
+            const auto signals=nullkiller3::idleArmySignals(campaign,world,true);
+            require(signals.size()==1,"fixture has no idle main army signal");
+            nullkiller3::RequestArbiter arbiter;
+            arbiter.beginTurn(world["day"].Integer(),{280000,120000,40000});
+            const auto first=arbiter.consider(signals);
+            require(first.request,"initial idle agenda was not offered");
+            arbiter.dispatched(first);arbiter.finished(1000,1000);
+            require(!arbiter.consider(signals).request,"unchanged idle agenda retried");
+            auto consumed=world;
+            bool found=false;
+            for(auto & site:consumed["objects"].Vector()) if(site["ref"]==input["site_ref"])
+            {require(site["visible"].Bool() && !site["visited"].Bool(),"fixture site not visible and unvisited");site["visited"].Bool()=true;found=true;}
+            require(found,"fixture has no consumed site");
+            const auto changed=nullkiller3::idleArmySignals(campaign,consumed,true);
+            require(arbiter.consider(changed).request,"a confirmed useful site visit was suppressed as an unchanged idle agenda");
+            auto reordered=world;std::reverse(reordered["objects"].Vector().begin(),reordered["objects"].Vector().end());
+            std::reverse(reordered["forecasts"]["routes"].Vector().begin(),reordered["forecasts"]["routes"].Vector().end());
+            require(!arbiter.consider(nullkiller3::idleArmySignals(campaign,reordered,true)).request,"object or quote order retried idle review");
+            auto tomorrow=world;tomorrow["day"].Integer()++;
+            for(auto & route:tomorrow["forecasts"]["routes"].Vector()) for(auto & arrival:route["own_arrivals"].Vector()) arrival["day"].Integer()++;
+            require(!arbiter.consider(nullkiller3::idleArmySignals(campaign,tomorrow,true)).request,"calendar or quote day alone retried idle review");
+            auto hidden=consumed;
+            for(auto & site:hidden["objects"].Vector()) if(site["ref"]==input["site_ref"])
+            {site["visible"].Bool()=false;site["visited"].Bool()=false;}
+            require(nullkiller3::idleArmySignals(campaign,hidden,true)[0].facts==changed[0].facts,"hidden sites altered idle agenda");
+            auto unsafe=world;
+            for(auto & route:unsafe["forecasts"]["routes"].Vector()) if(route["target_ref"]==input["site_ref"])
+                for(auto & arrival:route["own_arrivals"].Vector()) arrival["army_loss_estimate"].Integer()=1;
+            require(nullkiller3::idleArmySignals(campaign,unsafe,true)[0].facts==changed[0].facts,"unsafe visits were offered as safe useful sites");
+            nullkiller3::RequestArbiter restored(arbiter.save());
+            require(restored.consider(changed).request && !restored.consider(signals).request,"save/load lost changed-agenda or unchanged-agenda identity");
+            std::cout<<"Idle useful-site agenda change and deduplication proof passed\n";
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--visit-site")
         {
             const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
