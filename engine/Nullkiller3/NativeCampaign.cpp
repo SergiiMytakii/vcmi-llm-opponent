@@ -4,6 +4,8 @@
 #include "NativeTrace.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
+#include "ReturnedHeroRecovery.h"
+#include "../../lib/entities/artifact/CArtifactInstance.h"
 #include "OffensivePreparation.h"
 #include "StrategicCandidates.h"
 #include "StrategicDecision.h"
@@ -296,8 +298,12 @@ bool safeStabilizationPath(const NK2AI::AIPath & path,const CGHeroInstance * act
     return true;
 }
 }
-NativeCampaign::NativeCampaign(const JsonNode & saved) : persisted(restoreNativeNamespace(saved)), campaign(persisted["native_campaign"])
+NativeCampaign::NativeCampaign(const JsonNode & saved,const JsonNode & returnNamespaces) : persisted(restoreNativeNamespace(saved)), campaign(persisted["native_campaign"])
 {
+    // Validate the original namespace before adding independent callback facts.
+    // A missing namespace must retain fresh-game budget semantics.
+    persisted=restoreOwnHeroReturns(persisted,returnNamespaces);
+    persisted["own_returned_heroes"]=restoreReturnedHeroes(persisted["own_returned_heroes"]);
     if(!campaign.restoreReason().empty()) logAi->warn("NK3 saved campaign discarded: %s", campaign.restoreReason());
     if(!saved.isNull() && persisted!=saved) logAi->debug("NK3 saved namespace validated before restoring intentions");
     externalai::initializeObjectAliases(persisted);
@@ -574,6 +580,7 @@ void NativeCampaign::applyBattleObservations()
     { std::lock_guard lock(visitMutex);observed.swap(completedBattles); }
     for(auto & action:observed)
     {
+        recordOwnHeroReturn(persisted["own_returned_heroes"],action);
         const auto day=action["day"].Integer();
         const auto won=action["won"].Bool(),draw=action["draw"].Bool();
         const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
@@ -688,6 +695,23 @@ void NativeCampaign::recordDelivery(NK2AI::Nullkiller & ai, const CGHeroInstance
 }
 void NativeCampaign::observe(NK2AI::Nullkiller & ai)
 {
+    applyBattleObservations();
+    // A returned hero stays urgent only while this exact own instance remains
+    // in the player-visible tavern roster. Do not inspect the global hero pool.
+    bool rosterObservable=false;
+    std::set<std::pair<int,int>> availableReturns;
+    for(const auto * town:ai.cc->getTownsInfo())
+        if(town->getOwner()==ai.playerID && town->hasBuilt(BuildingID::TAVERN))
+        {
+            rosterObservable=true;
+            for(const auto * candidate:ai.cc->getAvailableHeroes(town))
+                if(candidate) availableReturns.emplace(candidate->getHeroTypeID().getNum(),candidate->id.getNum());
+        }
+    if(rosterObservable) std::erase_if(persisted["own_returned_heroes"].Struct(),[&](const auto & marker) {
+        const bool expired=!availableReturns.count({static_cast<int>(marker.second["hero_type_id"].Integer()),static_cast<int>(marker.second["engine_object_id"].Integer())});
+        if(expired) ai.cc->saveLocalState(consumedOwnHeroReturnUpdate(marker.second["hero_type_id"].Integer()));
+        return expired;
+    });
     world = JsonNode();
     world["day"].Integer() = ai.cc->getCalendar().getCurrentDay();
     world["player"].Integer() = ai.playerID.getNum();
@@ -814,6 +838,23 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
             option["hero_type_id"].Integer()=candidate->getHeroTypeID().getNum();
             option["ref"].String()="tavern:"+std::to_string(candidate->getHeroTypeID().getNum());
             option["name"].String()=candidate->getHeroType()->getNameTranslated();
+            option["own_returned_hero"].Bool()=isOwnReturnedHero(persisted["own_returned_heroes"],candidate->getHeroTypeID().getNum(),candidate->id.getNum());
+            option["level"].Integer()=candidate->level;
+            option["primary_skills"].Vector();
+            for(int skill=0;skill<4;++skill) option["primary_skills"].Vector().push_back(JsonNode(candidate->getPrimSkillLevel(PrimarySkill(skill))));
+            option["secondary_skills"].Vector();
+            for(const auto & [skill,level]:candidate->secSkills) if(skill!=SecondarySkill::NONE)
+            {
+                JsonNode entry;entry["skill_id"].Integer()=skill.getNum();entry["level"].Integer()=level;
+                option["secondary_skills"].Vector().push_back(entry);
+            }
+            option["equipped_artifact_ids"].Vector();option["backpack_artifact_ids"].Vector();
+            for(const auto & [slot,info]:candidate->artifactsWorn)
+                if(const auto * artifact=info.getArt();artifact && !info.locked)
+                    option["equipped_artifact_ids"].Vector().push_back(JsonNode(artifact->getTypeId().getNum()));
+            for(const auto & info:candidate->artifactsInBackpack)
+                if(const auto * artifact=info.getArt();artifact && !info.locked)
+                    option["backpack_artifact_ids"].Vector().push_back(JsonNode(artifact->getTypeId().getNum()));
             option["army_value"].Integer()=candidate->estimateCombatValue();
             option["army_units"]=armyUnits(candidate);
             option["strength"]["army_ai_value"]=option["army_value"];
@@ -1355,6 +1396,12 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
     using namespace NK2AI::Goals;
     if(repairedSourcesChanged) { repairedSourcesChanged=false;ai.updateState(); }
     TGoalVec output;
+    if(priorityPass)
+        for(const auto * town:ai.cc->getTownsInfo())
+            for(const auto * candidate:ai.cc->getAvailableHeroes(town))
+                if(candidate && isOwnReturnedHero(persisted["own_returned_heroes"],candidate->getHeroTypeID().getNum(),candidate->id.getNum())
+                    && heroHireReason(ai,town,candidate).starts_with("recover_own:"))
+                    output.push_back(sptr(RecruitHero(town,candidate)));
     if(stabilizationOnly && !priorityPass)
     {
         const auto addressed=arbiter.save().addressed;
@@ -1773,6 +1820,14 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
         if(goal["kind"].String()=="hire_helper") selectedGoal=&goal;
     }
     if(!namedGoal) return {};
+    const bool recovering=goalID.empty() && isOwnReturnedHero(persisted["own_returned_heroes"],candidate->getHeroTypeID().getNum(),candidate->id.getNum());
+    if(recovering)
+    {
+        if(!town->hasBuilt(BuildingID::TAVERN) || ai.heroManager->heroCapReached() || !helperHireSlotAvailable(ai,town)) return {};
+        const auto available=ai.cc->getAvailableHeroes(town);
+        if(std::find(available.begin(),available.end(),candidate)==available.end()
+            || !recoveryFundsAvailable(resourceValues(ai.cc->getResourceAmount()),resourceValues(ai.getLockedResources()),campaign.reservedResources(),GameConstants::HERO_GOLD_COST)) return {};
+    }
     TResources price;price[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
     if(!selectedGoal)
     { if(!ai.getFreeResources().canAfford(price)) return {}; }
@@ -1796,7 +1851,7 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
             || (job->ID==Obj::MINE && job->getOwner()==ai.playerID))) return {};
     }
     const auto heroes=ai.cc->getHeroesInfo();
-    if(!selectedGoal && heroes.empty()) return "main:no_owned_hero";
+    if(!selectedGoal && !recovering && heroes.empty()) return "main:no_owned_hero";
     // Compare the accepted shared spending calendar before and after hiring.
     // A discretionary purchase must not make funded construction/delivery fail.
     auto before=world;
@@ -1809,6 +1864,7 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
             if(funded["status"].String()=="conditional")
                 for(const auto & remaining:reduced[category].Vector())
                     if(remaining["goal_id"]==funded["goal_id"] && remaining["status"].String()!="conditional") return {};
+    if(recovering) return "recover_own:"+std::to_string(candidate->getHeroTypeID().getNum());
     if(selectedGoal) return "model:"+goalID+":"+(*selectedGoal)["helper_role"].String()+":"+(*selectedGoal)["job_ref"].String();
     const auto alias=persisted["object_ids"].Struct().find(std::to_string(town->id.getNum()));
     if(alias!=persisted["object_ids"].Struct().end())
@@ -1862,9 +1918,19 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
 }
 void NativeCampaign::recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstance * town,const CGHeroInstance * candidate,const std::string & goalID)
 {
-    if(goalID.empty() || !town || !candidate) return;
+    if(!town || !candidate) return;
     const auto * hired=town->getVisitingHero();
     if(!hired || hired->getOwner()!=ai.playerID || hired->getHeroTypeID()!=candidate->getHeroTypeID()) return;
+    // Recruiting can assign a new map object ID to the same offered instance.
+    // The successful exact-candidate command already passed the old-ID gate.
+    const auto & returnMarkers=static_cast<const JsonNode &>(persisted)["own_returned_heroes"];
+    if(returnMarkers[std::to_string(candidate->getHeroTypeID().getNum())].isStruct())
+    {
+        ai.cc->saveLocalState(consumedOwnHeroReturnUpdate(candidate->getHeroTypeID().getNum()));
+        persisted["own_returned_heroes"].Struct().erase(std::to_string(candidate->getHeroTypeID().getNum()));
+        persist(ai);
+    }
+    if(goalID.empty()) return;
     const auto & pending=static_cast<const JsonNode &>(persisted)["pending_native_task"];
     if(pending["action"]["goal_id"].String()!=goalID || pending["action"]["kind"].String()!="hire_hero"
         || pending["before"]["day"].Integer()!=ai.cc->getCalendar().getCurrentDay()) return;
@@ -1992,6 +2058,8 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
         return false;
     };
     if(urgent(task,0)) return 100000.0f+std::max(0.0f,nativeScore);
+    if(const auto * hire=dynamic_cast<const NK2AI::Goals::RecruitHero *>(task.get());hire && task->strategicGoalID.empty()
+        && heroHireReason(ai,hire->town,hire->getCandidate()).starts_with("recover_own:")) return 99000.0f;
     if(!task->strategicGoalID.empty())
         for(size_t order=0; order<campaign.plan()["goals"].Vector().size(); ++order)
         {

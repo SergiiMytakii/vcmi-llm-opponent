@@ -99,7 +99,7 @@ class NativeCampaign
                        const JsonNode & goal, const NK2AI::Nullkiller & ai,
                        const std::map<std::string,std::string> * prospectiveSources = nullptr);
 public:
-    explicit NativeCampaign(const JsonNode & saved);
+    explicit NativeCampaign(const JsonNode & saved,const JsonNode & returnNamespaces = JsonNode());
     bool reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle = false);
     bool reviewIdleArmy(NK2AI::Nullkiller & ai);
     void cancelExchange() { exchangeCancelled = true; }

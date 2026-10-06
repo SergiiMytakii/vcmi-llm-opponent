@@ -5,6 +5,8 @@
 #include "Forecasts.h"
 #include "NativePersistence.h"
 #include "ResourceLedger.h"
+#include "ReturnedHeroRecovery.h"
+#include "../engine/ExternalAI/LocalState.h"
 #include <iostream>
 #include <stdexcept>
 #include <iterator>
@@ -20,6 +22,76 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--returned-hero-newgame")
+        {
+            const auto untouched=nullkiller3::restoreOwnHeroReturns(nullkiller3::restoreNativeNamespace(JsonNode()),JsonNode());
+            require(untouched.isNull(),"empty receipts manufactured saved namespace for a fresh game");
+            const auto event=json(R"({"own_hero_type_id":42,"engine_object_id":73,"day":4,"won":false,"draw":false,"own_hero_return":"escape"})");
+            const auto callback=nullkiller3::ownHeroReturnUpdate(event);
+            const auto firstReturn=nullkiller3::restoreOwnHeroReturns(nullkiller3::restoreNativeNamespace(JsonNode()),callback["_namespaces"]);
+            require(nullkiller3::isOwnReturnedHero(firstReturn["own_returned_heroes"],42,73),"return before first worker lost");
+            require(firstReturn["request_arbiter"].isNull() && firstReturn["request_sequence"].isNull(),"fresh receipt changed default request budget");
+            const auto invalid=nullkiller3::restoreNativeNamespace(json("1"));
+            const auto retained=nullkiller3::restoreOwnHeroReturns(invalid,callback["_namespaces"]);
+            require(retained["request_arbiter"]==invalid["request_arbiter"] && retained["request_arbiter"].String()=="invalid_saved_namespace",
+                "receipt reset invalid consumed budget");
+            std::cout << "returned hero newgame passed\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--returned-hero-save")
+        {
+            auto settings=json(R"({"currentSelection":7,"_namespaces":{"Nullkiller3":{"object_ids":{},"native_campaign":{"revision":9,"reserves":[{"resources":[0,0,0,0,0,0,3000]}]},"memory":{"kept":true}},"ExternalAI":{"other":true}}})");
+            const auto oldCampaign=settings["_namespaces"]["Nullkiller3"],oldOther=settings["_namespaces"]["ExternalAI"];
+            const auto event=json(R"({"own_hero_type_id":42,"engine_object_id":73,"day":4,"won":false,"draw":false,"own_hero_return":"escape"})");
+            auto enemyRetreat=event;enemyRetreat["won"].Bool()=true;
+            require(nullkiller3::ownHeroReturnUpdate(enemyRetreat).isNull(),"enemy retreat published own return");
+            auto notReturned=event;notReturned["own_hero_return"].String()="none";
+            require(nullkiller3::ownHeroReturnUpdate(notReturned).isNull(),"non-return battle published return");
+            require(externalai::applyLocalState(settings,nullkiller3::ownHeroReturnUpdate(event)),"callback return update rejected");
+            require(settings["_namespaces"][nullkiller3::ownHeroReturnNamespace(42)].Struct().size()==6,"receipt contains mutable planner/resource fields");
+            require(settings["_namespaces"]["Nullkiller3"]==oldCampaign && settings["_namespaces"]["ExternalAI"]==oldOther,
+                "callback replaced unrelated planner state");
+            externalai::applyLocalState(settings,json(R"({"currentSelection":8})"));
+            const auto reload=json(settings.toCompactString());
+            auto restored=nullkiller3::restoreOwnHeroReturns(reload["_namespaces"]["Nullkiller3"],reload["_namespaces"]);
+            require(nullkiller3::isOwnReturnedHero(restored["own_returned_heroes"],42,73),"enemy-turn return lost before worker/save/reload");
+            require(restored["native_campaign"]==oldCampaign["native_campaign"] && restored["memory"]==oldCampaign["memory"],"receipt merge erased planner state");
+            auto normal=event;normal["own_hero_return"].String()="normal";
+            externalai::applyLocalState(settings,nullkiller3::ownHeroReturnUpdate(normal));
+            restored=nullkiller3::restoreOwnHeroReturns(restored,settings["_namespaces"]);
+            require(!nullkiller3::isOwnReturnedHero(restored["own_returned_heroes"],42,73),"death receipt failed to clear return");
+            externalai::applyLocalState(settings,nullkiller3::ownHeroReturnUpdate(event));
+            restored=nullkiller3::restoreOwnHeroReturns(oldCampaign,settings["_namespaces"]);
+            externalai::applyLocalState(settings,nullkiller3::consumedOwnHeroReturnUpdate(42));
+            restored=nullkiller3::restoreOwnHeroReturns(restored,json(settings.toCompactString())["_namespaces"]);
+            require(!nullkiller3::isOwnReturnedHero(restored["own_returned_heroes"],42,73),"successful hire tombstone replayed return");
+            std::cout << "returned hero save passed\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--returned-hero")
+        {
+            JsonNode markers;
+            auto result=json(R"({"own_hero_type_id":42,"engine_object_id":73,"day":4,"won":false,"draw":false,"own_hero_return":"escape"})");
+            nullkiller3::recordOwnHeroReturn(markers,result);
+            require(nullkiller3::isOwnReturnedHero(markers,42,73),"own retreated hero not recoverable");
+            require(!nullkiller3::isOwnReturnedHero(markers,42,74),"different offered instance treated as own");
+            require(!nullkiller3::isOwnReturnedHero(markers,43,73),"random candidate treated as own");
+            auto saved=json(markers.toCompactString());
+            require(nullkiller3::restoreReturnedHeroes(saved)==markers,"return lost after save/reload");
+            result["won"].Bool()=true;result["own_hero_type_id"].Integer()=43;
+            nullkiller3::recordOwnHeroReturn(markers,result);
+            require(!nullkiller3::isOwnReturnedHero(markers,43,73),"enemy retreat marked own winner");
+            result["won"].Bool()=false;result["own_hero_type_id"].Integer()=42;result["own_hero_return"].String()="normal";
+            nullkiller3::recordOwnHeroReturn(markers,result);
+            require(!nullkiller3::isOwnReturnedHero(markers,42,73),"confirmed death retained recovery");
+            result["own_hero_return"].String()="surrender";
+            nullkiller3::recordOwnHeroReturn(markers,result);
+            require(nullkiller3::isOwnReturnedHero(markers,42,73),"surrender not recoverable");
+            markers["42"]["engine_object_id"].Integer()=-1;
+            require(nullkiller3::restoreReturnedHeroes(markers).Struct().empty(),"malformed marker restored");
+            const auto funds=json("[0,0,0,0,0,0,5000]"),locks=json("[0,0,0,0,0,0,1000]");
+            require(!nullkiller3::recoveryFundsAvailable(funds,locks,json("[0,0,0,0,0,0,2000]"),2500),"recovery spent protected funds");
+            require(nullkiller3::recoveryFundsAvailable(funds,locks,json("[0,0,0,0,0,0,1000]"),2500),"funded recovery blocked");
+            std::cout << "returned hero recovery passed\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--goal-risk")
         {
             auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":10000}],"towns":[],"objects":[{"ref":"enemy","kind":"hero","owner":1,"visible":true}],"enemy_players":[1]})");

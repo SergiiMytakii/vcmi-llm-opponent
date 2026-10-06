@@ -32,7 +32,7 @@
     {
       "id": "recovery",
       "title": "Recovery",
-      "applicability": "Preserving a viable army after losses; commander, mana recovery, delivery and next operation.",
+      "applicability": "Own retreat/surrender and urgent tavern recovery; commander loss, mana, delivery and next operation.",
       "file": "rules/recovery.md",
       "enabled": true
     },

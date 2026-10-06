@@ -14,7 +14,7 @@ diff --git a/AI/Nullkiller2/AIGateway.cpp b/AI/Nullkiller2/AIGateway.cpp
 index 02b0d31bf..7a5bd6373 100644
 --- a/AI/Nullkiller2/AIGateway.cpp
 +++ b/AI/Nullkiller2/AIGateway.cpp
-@@ -35,21 +35,23 @@
+@@ -35,21 +35,24 @@
  #include "../../lib/networkPacks/StackLocation.h"
  #include "../../lib/battle/BattleStateInfoForRetreat.h"
  #include "../../lib/battle/BattleInfo.h"
@@ -23,6 +23,7 @@ index 02b0d31bf..7a5bd6373 100644
  
  #include "AIGateway.h"
 +#include "../Nullkiller3/NativeCampaign.h"
++#include "../Nullkiller3/ReturnedHeroRecovery.h"
  #include "Goals/Goals.h"
  
  namespace NK2AI
@@ -335,7 +336,7 @@ index 02b0d31bf..7a5bd6373 100644
 +		nullkiller->strategicCampaign->battleOpponent(opponent ? opponent->id.getNum() : -1);
 +	}
  	CAdventureAI::battleStart(battleID, army1, army2, tile, hero1, hero2, side, replayAllowed);
-@@ -1028,6 +1154,35 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
+@@ -1028,6 +1154,46 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
  	assert(status.getBattle() == ONGOING_BATTLE);
  	status.setBattle(ENDING_BATTLE);
  	bool won = br->winner == cc->getBattle(battleID)->battleGetMySide();
@@ -351,6 +352,13 @@ index 02b0d31bf..7a5bd6373 100644
 +			observed["engine_object_id"].Integer()=ownArmy->id.getNum();
 +			observed["day"].Integer()=cc->getCalendar().getCurrentDay();
 +			observed["army_value_before"].Integer()=ownArmy->estimateCombatValue();
++			if(const auto * ownHero=battle->battleGetFightingHero(ownSide);ownHero && ownHero->getOwner()==playerID)
++			{
++				observed["engine_object_id"].Integer()=ownHero->id.getNum();
++				observed["own_hero_type_id"].Integer()=ownHero->getHeroTypeID().getNum();
++				observed["own_hero_return"].String()=!won && br->winner!=BattleSide::NONE
++					? (br->result==EBattleResult::ESCAPE ? "escape" : br->result==EBattleResult::SURRENDER ? "surrender" : "normal") : "none";
++			}
 +			observed["won"].Bool()=won;
 +			observed["draw"].Bool()=br->winner==BattleSide::NONE;
 +			int64_t loss=0;
@@ -365,6 +373,10 @@ index 02b0d31bf..7a5bd6373 100644
 +				loss+=int64_t(LIBRARY->creh->getCombatValue().getAIValue(creature.toCreature()))*count;
 +			}
 +			observed["army_loss_value"].Integer()=loss;
++			// Publish immutable own facts before the worker drains its queue. On an
++			// enemy turn a regular save can occur before our next planning pass.
++			const auto returnUpdate=nullkiller3::ownHeroReturnUpdate(observed);
++			if(!returnUpdate.isNull()) cc->saveLocalState(returnUpdate);
 +			nullkiller->strategicCampaign->battleResult(std::move(observed));
 +		}
 +	}
@@ -1114,16 +1126,20 @@ index c2adab572..bae74e8c0 100644
  	{
  		useObjectGraph = settings->isObjectGraphAllowed();
  		openMap = settings->isOpenMap() || useObjectGraph;
-@@ -123,6 +134,14 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
+@@ -123,6 +134,18 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
  		openMap = false;
  	}
  
 +	if(strategicMode)
 +	{
-+		JsonNode saved;
++		JsonNode saved,returnNamespaces;
 +		if(const auto * player = cc->getPlayerState(playerID); player && player->playerLocalSettings)
-+			saved = (*player->playerLocalSettings)["_namespaces"]["Nullkiller3"];
-+		strategicCampaign = std::make_unique<nullkiller3::NativeCampaign>(saved);
++		{
++			const auto & namespaces=(*player->playerLocalSettings)["_namespaces"];
++			saved = namespaces["Nullkiller3"];
++			returnNamespaces = namespaces;
++		}
++		strategicCampaign = std::make_unique<nullkiller3::NativeCampaign>(saved,returnNamespaces);
 +	}
 +
  	baseGraph.reset();
@@ -1859,7 +1875,7 @@ index d93ba3ed6..34afa021f 100644
  #include "../../../lib/constants/StringConstants.h"
  
  
-@@ -57,14 +59,25 @@ void RecruitHero::accept(AIGateway * aiGw)
+@@ -57,14 +59,28 @@ void RecruitHero::accept(AIGateway * aiGw)
  	if(!heroToHire)
  		throw cannotFulfillGoalException("No hero to hire!");
  
@@ -1880,6 +1896,9 @@ index d93ba3ed6..34afa021f 100644
  		throw cannotFulfillGoalException("Town " + t->nodeName() + " is occupied. Cannot recruit hero!");
  
 +	aiGw->checkStrategicTurn();
++	if(aiGw->nullkiller->strategicCampaign
++		&& aiGw->nullkiller->strategicCampaign->heroHireReason(*aiGw->nullkiller,t,heroToHire,strategicGoalID).empty())
++		throw cannotFulfillGoalException("NK3 hero hiring no longer legal or funded");
  	aiGw->cc->recruitHero(t, heroToHire);
  	aiGw->waitTillFree(); // Hiring in a town may trigger level-up queries from reward buildings.
 +	if(aiGw->nullkiller->strategicCampaign)
