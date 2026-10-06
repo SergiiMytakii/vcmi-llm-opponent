@@ -164,10 +164,11 @@ inline JsonNode operationOwnFacts(const JsonNode & goal,const JsonNode & own,con
     };
     for(const auto & target:own["forecasts"]["routes"].Vector()) if(target["target_ref"]==destination) route(target["own_arrivals"]);
     for(const auto & target:own["frontier_options"].Vector()) if(target["ref"]==destination) route(target["own_arrivals"]);
+    for(const auto & target:own["scouting_options"].Vector()) if(target["ref"]==destination) route(target["own_arrivals"]);
     if(result["route_cost"].isNull())
     {
         JsonNode from,to;
-        for(const auto * list:{"heroes","towns","visible_objects","frontier_options"})
+        for(const auto * list:{"heroes","towns","visible_objects","frontier_options","scouting_options"})
             for(const auto & object:own[list].Vector())
             {
                 if(object["ref"]==traveler) from=object["position"];

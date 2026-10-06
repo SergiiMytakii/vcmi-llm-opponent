@@ -31,6 +31,12 @@ namespace nullkiller3
 {
 namespace
 {
+size_t unseenInArea(const CCallback & callback,const int3 & position,int radius,PlayerColor player)
+{
+    FowTilesType hidden;
+    callback.getTilesInRange(hidden,position,radius,ETileVisibility::HIDDEN,player);
+    return hidden.size();
+}
 JsonNode resourceValues(const TResources & values)
 {
     JsonNode result;
@@ -504,6 +510,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["movement"].Integer() = hero->movementPointsRemaining();
         item["mana"].Integer() = hero->mana;
         item["movement_per_day"].Integer() = hero->movementPointsLimit();
+        item["sight_radius"].Integer() = hero->getSightRadius();
         world["heroes"].Vector().push_back(item);
     }
     world["towns"].Vector();
@@ -615,6 +622,19 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     for(const auto & [ref, position] : persisted["frontier_positions"].Struct())
         if(std::find(world["frontiers"].Vector().begin(), world["frontiers"].Vector().end(), JsonNode(ref)) == world["frontiers"].Vector().end())
             world["observed_frontiers"].Vector().emplace_back(ref);
+    world["observed_scout_areas"].Vector();
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+    {
+        if(goal["kind"].String()!="scout_area") continue;
+        const auto & pos=static_cast<const JsonNode &>(persisted)["frontier_positions"][goal["target_ref"].String()];
+        if(!pos.isVector() || pos.Vector().size()!=3) continue;
+        const int3 center(pos[0].Integer(),pos[1].Integer(),pos[2].Integer());
+        if(ai.cc->isVisible(center) && !unseenInArea(*ai.cc,center,goal["complete_when"]["value"].Integer(),ai.playerID))
+        {
+            JsonNode observed;observed["target_ref"]=goal["target_ref"];observed["sight_radius"]=goal["complete_when"]["value"];
+            world["observed_scout_areas"].Vector().push_back(observed);
+        }
+    }
     JsonNode actions;
     actions.Vector();
     std::set<std::string> retainedTargets;
@@ -725,7 +745,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     world["enemy_approaches"]=observedEnemyApproaches(ai);
     forecasts["threats"]=forecastThreats(world);
 
-    auto arrivals = [&](const JsonNode & pos, bool frontier) {
+    auto arrivals = [&](const JsonNode & pos, bool frontier, bool area=false) {
         JsonNode result;result.Vector();
         const int3 position(pos[0].Integer(),pos[1].Integer(),pos[2].Integer());
         const auto paths=ai.pathfinder->getPathInfo(position,false);
@@ -735,6 +755,9 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
             {
                 if(path.targetHero!=hero || !path.heroArmy || path.getFirstBlockedAction()) continue;
                 if(frontier && path.exchangeCount>1) continue;
+                if(area && std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & step) {
+                    return step.layer!=EPathfindingLayer::LAND || !ai.cc->isVisible(step.coord);
+                })) continue;
                 bool single=true;
                 for(const auto & step:path.nodes) single &= step.targetHero==hero;
                 if(!single) continue;
@@ -752,6 +775,33 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     };
     for(auto & frontier:world["frontier_options"].Vector())
         frontier["own_arrivals"]=arrivals(frontier["position"],true);
+    world["scouting_options"].Vector();
+    const auto size=ai.cc->getMapSize();
+    for(int z=0;z<size.z;++z) for(int y=0;y<size.y;++y) for(int x=0;x<size.x;++x)
+    {
+        const int3 center(x,y,z);
+        if(!ai.cc->isVisible(center)) continue;
+        const auto * terrain=ai.cc->getTile(center,false);
+        if(!terrain || !terrain->isLand() || terrain->blocked()) continue;
+        JsonNode option;option["position"]=coordinate(center);
+        auto routes=arrivals(option["position"],true,true);
+        option["own_arrivals"].Vector();
+        for(auto route:routes.Vector())
+        {
+            const auto * hero=dynamic_cast<const CGHeroInstance *>(resolve(ai,route["hero_ref"]));
+            if(!hero || hero->getSightRadius()<1 || hero->getSightRadius()>64) continue;
+            const auto unseen=unseenInArea(*ai.cc,center,hero->getSightRadius(),ai.playerID);
+            if(!unseen) continue;
+            route["sight_radius"].Integer()=hero->getSightRadius();
+            route["expected_new_tiles"].Integer()=unseen;
+            option["own_arrivals"].Vector().push_back(route);
+        }
+        if(option["own_arrivals"].Vector().empty()) continue;
+        const auto ref="tile:"+option["position"].toCompactString();
+        option["ref"].String()=ref;
+        persisted["frontier_positions"][ref]=option["position"];
+        world["scouting_options"].Vector().push_back(option);
+    }
     forecasts["routes"].Vector();
     for(const auto & object:world["visible_objects"].Vector())
     {
@@ -778,7 +828,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     world["goal_feedback"].Vector();
     for(const auto & goal:campaign.plan()["goals"].Vector())
     {
-        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="explore_passage") continue;
+        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="scout_area" && goal["kind"].String()!="explore_passage") continue;
         auto feedback=campaign.routeFeedback(goal,world);
         feedback["status"]=world["goal_statuses"][goal["id"].String()];
         world["goal_feedback"].Vector().push_back(feedback);
@@ -1126,7 +1176,15 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
                 }
             }
             int3 position(-1);
-            if(kind == "scout_frontier")
+            if(kind == "scout_area" && actor && actor->getSightRadius()<goal["complete_when"]["value"].Integer())
+            {
+                persisted["goal_blockers"][goal["id"].String()]["revision"]=campaign.plan()["revision"];
+                persisted["goal_blockers"][goal["id"].String()]["reason"].String()="insufficient_sight_radius";
+                campaign.blocked(goal["id"].String(),"insufficient_sight_radius");
+                world["goal_statuses"]=campaign.statuses();
+                continue;
+            }
+            if(kind == "scout_frontier" || kind == "scout_area")
             {
                 const auto & pos = persisted["frontier_positions"][goal["target_ref"].String()];
                 if(pos.isVector() && pos.Vector().size() == 3) position = int3(pos[0].Integer(), pos[1].Integer(), pos[2].Integer());
@@ -1142,7 +1200,11 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
                 auto paths = ai.pathfinder->getPathInfo(position, false);
                 std::erase_if(paths, [&](const AIPath & path) {
                     if(path.targetHero!=actor) return true;
-                    if(kind!="explore_passage") return false;
+                    if(kind=="scout_area" && (path.getFirstBlockedAction()
+                        || std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node) {
+                            return node.layer!=EPathfindingLayer::LAND || !ai.cc->isVisible(node.coord);
+                        }))) return true;
+                    if(kind!="explore_passage" && kind!="scout_area") return false;
                     return path.exchangeCount>1 || std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node){return node.targetHero!=actor;});
                 });
                 generated = CaptureObjectsBehavior::getVisitGoals(paths, &ai, target, true);
@@ -1667,7 +1729,7 @@ std::string NativeCampaign::role(const CGHeroInstance * hero) const
             }
     for(const auto & goal : campaign.plan()["goals"].Vector())
         if(obligations.count(goal["id"].String()) && goal["actor_ref"].isString() && goal["actor_ref"].String() == ref)
-            return goal["kind"].String() == "scout_frontier" || goal["kind"].String() == "preserve_force" || goal["kind"].String() == "explore_passage" ? "scout" : "main";
+            return goal["kind"].String() == "scout_frontier" || goal["kind"].String() == "scout_area" || goal["kind"].String() == "preserve_force" || goal["kind"].String() == "explore_passage" ? "scout" : "main";
     if(!obligations.empty()) return "scout";
     return "";
 }

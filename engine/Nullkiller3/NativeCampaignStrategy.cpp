@@ -310,7 +310,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     request["signals"] = trace["signals"];
     request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
     request["budget"]["tokens"].Integer() = arbiter.remainingBudget().tokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());

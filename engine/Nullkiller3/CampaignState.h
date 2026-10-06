@@ -104,6 +104,12 @@ class CampaignState
         }
         if(kind == "reserve_at_least") return contains(world["confirmed_resource_pickups"], goal["target_ref"])
             && world["resources"][6].Integer() >= predicate["value"].Integer();
+        if(kind == "area_observed")
+        {
+            for(const auto & area:world["observed_scout_areas"].Vector())
+                if(area.isStruct() && area["target_ref"]==goal["target_ref"] && area["sight_radius"]==predicate["value"]) return true;
+            return false;
+        }
         if(kind == "frontier_observed") return contains(world["observed_frontiers"], goal["target_ref"]);
         if(kind == "passage_explored")
         {
@@ -170,6 +176,10 @@ public:
             if(!sourceWorld[list].isNull() && !sourceWorld[list].isVector()) return;
             for(const auto & ref:sourceWorld[list].Vector()) if(!label(ref)) return;
         }
+        if(!sourceWorld["observed_scout_areas"].isNull() && !sourceWorld["observed_scout_areas"].isVector()) return;
+        for(const auto & area:sourceWorld["observed_scout_areas"].Vector())
+            if(!fields(area,{"target_ref","sight_radius"}) || !label(area["target_ref"]) || !integer(area["sight_radius"],1,64)) return;
+        if(!sourceWorld["scouting_options"].isNull() && !sourceWorld["scouting_options"].isVector()) return;
         if(!sourceWorld["confirmed_deliveries"].isNull() && !sourceWorld["confirmed_deliveries"].isVector()) return;
         if(!saved["delivery_completions"].isNull() && !saved["delivery_completions"].isStruct()) return;
         if(!sourceWorld["confirmed_passage_explorations"].isNull() && !sourceWorld["confirmed_passage_explorations"].isVector()) return;
@@ -302,6 +312,20 @@ public:
             {
                 if(hero.isNull() || !contains(world["frontiers"], goal["target_ref"])) return reject("unknown_frontier");
             }
+            else if(kind == "scout_area")
+            {
+                const auto & area=find(world,"scouting_options",goal["target_ref"]);
+                if(hero.isNull() || area.isNull() || !area["position"].isVector()
+                    || area["position"].Vector().size()!=3 || !area["own_arrivals"].isVector()) return reject("unknown_scout_area");
+                for(const auto & axis:area["position"].Vector()) if(!integer(axis,0,100000)) return reject("invalid_scout_area_position");
+                bool offered=false;
+                for(const auto & route:area["own_arrivals"].Vector())
+                    offered |= route["hero_ref"]==goal["actor_ref"] && integer(route["sight_radius"],1,64)
+                        && route["sight_radius"]==hero["sight_radius"]
+                        && route["sight_radius"]==goal["complete_when"]["value"]
+                        && integer(route["expected_new_tiles"],1,1000000000);
+                if(!offered) return reject("unsupported_scout_area_radius");
+            }
             else if(kind == "explore_passage")
             {
                 if(hero.isNull() || object.isNull() || object["kind"].String()!="subterranean_gate"
@@ -324,6 +348,7 @@ public:
                 || (kind == "secure_resource" && object["kind"].String() == "resource" && completion == "reserve_at_least")
                 || (kind == "reinforce_hero" && completion == "army_at_least" && predicate["value"].Integer() >= goal["min_army_value"].Integer())
                 || (kind == "preserve_force" && completion == "force_preserved_until" && predicate["value"].Integer() >= day && predicate["value"].Integer() <= goal["deadline_day"].Integer())
+                || (kind == "scout_area" && completion == "area_observed" && integer(predicate["value"],1,64))
                 || (kind == "scout_frontier" && completion == "frontier_observed" && predicate["value"].Integer() == 0)
                 || (kind == "explore_passage" && completion == "passage_explored" && predicate["value"].Integer() == 0)
                 || (kind == "defend_area" && completion == "held_until" && predicate["value"].Integer() >= day && predicate["value"].Integer() <= goal["deadline_day"].Integer());
@@ -422,12 +447,12 @@ public:
         feedback["target_ref"]=goal["target_ref"];feedback["deadline_day"]=goal["deadline_day"];
         feedback["supported"].Bool()=false;feedback["assigned_routes"].Vector();feedback["safe_options"].Vector();
         const auto & kind=goal["kind"].String();
-        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier" && kind!="explore_passage")
+        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier" && kind!="scout_area" && kind!="explore_passage")
         { feedback["supported"].Bool()=true;return feedback; }
-        const auto & entries=kind=="scout_frontier" ? world["frontier_options"] : world["forecasts"]["routes"];
+        const auto & entries=kind=="scout_area" ? world["scouting_options"] : kind=="scout_frontier" ? world["frontier_options"] : world["forecasts"]["routes"];
         for(const auto & entry:entries.Vector())
         {
-            const auto & target=kind=="scout_frontier" ? entry["ref"] : entry["target_ref"];
+            const auto & target=(kind=="scout_frontier" || kind=="scout_area") ? entry["ref"] : entry["target_ref"];
             if(target!=goal["target_ref"]) continue;
             for(const auto & route:entry["own_arrivals"].Vector())
             {
@@ -438,6 +463,7 @@ public:
                     || !integer(route["army_value"],0,1000000000000LL)
                     || !integer(route["army_loss_estimate"],0,1000000000000LL))
                 { if(route["hero_ref"]==goal["actor_ref"]) {issue("incomplete_route_forecast");feedback["assigned_routes"].Vector().push_back(option);} continue; }
+                if(kind=="scout_area" && route["sight_radius"].Integer()<goal["complete_when"]["value"].Integer()) issue("insufficient_sight_radius");
                 const auto army=route["army_value"].Integer(),loss=route["army_loss_estimate"].Integer();
                 const auto floor=reservedForce(route["hero_ref"].String(),world);
                 option["retained_force_floor"].Integer()=floor;

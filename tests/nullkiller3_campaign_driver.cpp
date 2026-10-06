@@ -6,6 +6,7 @@
 #include "ResourceLedger.h"
 #include <iostream>
 #include <stdexcept>
+#include <iterator>
 JsonNode json(const std::string & value)
 {
     JsonParsingSettings parser;
@@ -14,10 +15,56 @@ JsonNode json(const std::string & value)
     return JsonNode(value.data(), value.size(), parser, "NK3 campaign proof");
 }
 void require(bool value, const char * message) { if(!value) throw std::runtime_error(message); }
-int main()
+int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--scout-area")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            auto world=input["world"],plan=input["plan"];
+            const auto goal=plan["goals"][0];
+            const auto & id=goal["id"].String();
+            std::string reason;
+            for(bool changeRadius:{false,true})
+            {
+                nullkiller3::CampaignState state;
+                require(state.accept(plan,world,reason),reason.c_str());
+                auto next=plan;next["revision"].Integer()++;
+                auto stale=world;
+                // A goal label by itself is never evidence of an observed area.
+                stale["observed_scout_areas"].Vector().push_back(goal["id"]);
+                JsonNode priorArea;priorArea["target_ref"]=goal["target_ref"];priorArea["sight_radius"]=goal["complete_when"]["value"];
+                stale["observed_scout_areas"].Vector().push_back(priorArea);
+                if(changeRadius)
+                {
+                    const auto radius=goal["complete_when"]["value"].Integer()+1;
+                    next["goals"][0]["complete_when"]["value"].Integer()=radius;
+                    for(auto & hero:stale["heroes"].Vector()) if(hero["ref"]==goal["actor_ref"]) hero["sight_radius"].Integer()=radius;
+                    for(auto & area:stale["scouting_options"].Vector()) for(auto & route:area["own_arrivals"].Vector())
+                        if(route["hero_ref"]==goal["actor_ref"]) route["sight_radius"].Integer()=radius;
+                }
+                else
+                {
+                    bool found=false;
+                    for(const auto & area:stale["scouting_options"].Vector())
+                        if(area["ref"]!=goal["target_ref"]) for(const auto & route:area["own_arrivals"].Vector())
+                            if(route["hero_ref"]==goal["actor_ref"] && route["sight_radius"]==goal["complete_when"]["value"])
+                            {next["goals"][0]["target_ref"]=area["ref"];found=true;break;}
+                    require(found,"fixture has no different own observation area");
+                }
+                require(state.accept(next,stale,reason),reason.c_str());
+                require(state.statuses()[id]["state"].String()!="completed","reused goal ID completed a different target or radius");
+            }
+            nullkiller3::CampaignState state;
+            require(state.accept(plan,world,reason),reason.c_str());
+            JsonNode observed;observed["target_ref"]=goal["target_ref"];observed["sight_radius"]=goal["complete_when"]["value"];
+            world["observed_scout_areas"].Vector().push_back(observed);
+            state.review(world);
+            require(state.statuses()[id]["state"].String()=="completed","matching area facts did not complete scouting");
+            std::cout<<"Scouting completion target/radius identity proof passed\n";
+            return 0;
+        }
         auto namespaceState=json(R"({"object_ids":{"0":0,"17":1},"native_campaign":{"version":3},"request_arbiter":{"tokens":0},"experience_id":"retained"})");
         nullkiller3::ResourceLedger finances;
         finances.begin(json("[0,0,0,0,0,0,1000]"));

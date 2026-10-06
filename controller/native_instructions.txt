@@ -160,6 +160,12 @@ capabilities and factual completion predicates.
 - reinforce_hero: recipient as actor; owned donor hero/town as target.
 - preserve_force: owned safe town; maintain specified floor through its day.
 - scout_frontier: supplied frontier ref, never hidden land.
+- scout_area: supplied scouting_options ref, a currently known land viewpoint.
+  Choose an offered own arrival for the actor and use area_observed with value
+  equal to that arrival's sight_radius. Native completion requires all tiles in
+  that radius to be revealed. expected_new_tiles counts fog, not known useful
+  objects, passability, or an onward route. When frontier/capture routes are
+  blocked, compare these safe information gains before choosing another wait.
 - secure_resource: for a mine, complete_when is target_owned with value equal to
   observation.player. For a resource pile, use reserve_at_least: native code
   requires a confirmed pickup of that target and gold at least value. Use value=0
