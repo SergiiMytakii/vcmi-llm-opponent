@@ -1,24 +1,37 @@
 # Town after capture
 
 ## When useful
-After capture, when considering departure or return, or when the threat/return route changes while the main is elsewhere.
+After capture or a completed hold; when considering departure/return or changed threats.
 
 ## Facts and unknowns
-Check forecasts.town_choices when supplied, funds, recruitment stock, creature compatibility/free slots, remaining forces, town value, other owned towns, walls, hero modifiers, return routes and accepted losses. Compare threats individually; a joint upper sum is a conservative scenario, not a combined attack receipt. A weak visible enemy does not prove it can be caught.
+Use town_choices, actual funds/stock/slots, retained forces, town income/production,
+other towns, victory conditions, walls, hero modifiers and return routes. Count
+stationary troops separately from the main or a conditional return. Assess threats
+individually: a joint upper sum is a conservative scenario, not a joint attack.
+Unknown ETA gives neither safety nor an order to hold forever.
 
-## Alternatives to compare
-Compare departure with all troops, buying a separate garrison, detaching part of the army, intercepting a visible enemy and holding. Neither permanent holding nor automatic departure is universal advice.
+## Alternatives and tradeoffs
+Compare departure, separate recruitment, detachment, interception and holding.
+State stationary defense after departure, remaining main force, costs, next
+supported operation and risk. Protect a valuable or last base when feasible;
+accept its loss risk for a concrete supported gain when that tradeoff is better.
+Neither choice follows from army size alone. Gold cannot buy absent creatures,
+a late return is not timely defense, and critical_towns does not issue a command.
 
-## Benefits, costs and risks
-State defense AFTER departure, main force AFTER preparation, quoted cost, next supported operation and its tradeoff. A weak raider may justify a small garrison or interception; an established dangerous approach may justify holding. Protecting the last town and maintaining the next strike force must be compared together.
+## Exit from repeated holding
+When a hold expires, compare interception, bypass/capture, reinforcement and an
+offered helper. Renew defense with an observable reason to wait, expected benefit
+and next operation/reassessment. A new deadline alone is no benefit. Weekly growth
+can justify buying stock and requoting departure; future routes remain unknown.
+Use hiring_options for a scout, collector, courier or defender under a concrete
+known job. Assign routes after confirmed hiring. A hired defender using a small
+garrison need not stop a strong enemy. Keep judging whether waiting improves the
+chances of defeating the opponent.
 
-## Protect or accept the risk
-Compare the town's supplied income, built recruitment chain, actual stock, last-town/victory importance and operational role with the concrete gain of continuing. Count the stationary garrison separately from a main army that could return only by abandoning its current goal. Assess threats individually before a joint conservative scenario; unknown arrival does not establish safety. Purchase completion is not a defense guarantee, and gold cannot buy absent creatures.
-
-Protection may mean a supported return, another defender, affordable separate recruitment, feasible detachment with a revised main floor, or supported interception. A late return is not timely defense. If alternatives cannot protect in time, say so; weigh recapture costs and loss of income/recruitment against the named next gain. Explicitly accepting the risk of losing a secondary town can be better than abandoning a winning operation. Defending an important or last town can be better than cheap reconnaissance or a minor mine. Neither conclusion follows from army size alone; select from current facts and executable goals. A critical_towns entry does not itself send a defender.
-
-## When to reconsider
-Reconsider on observed movement, changed force/stock/funds, blocked extraction, receipts, a lost route or target ownership. Unknown ETA is risk, not an order to reserve the whole main indefinitely.
-
-## Executor limits
-Only use prepare_garrison or intercept_hero if the current contract, participants and native forecasts establish the supported path. Otherwise label the option unavailable and state what evidence is missing. Garrison preparation needs separate stationary troops and retained main force; a next attack depends on confirmed preparation and freshly validated routes. Never invent a pursuit, guarantee a kill or treat recipient-aliased reinforcement as separate garrison purchase.
+## Executor limits and reconsideration
+Use prepare_garrison/intercept_hero only with supported participants and quotes.
+Preparation preserves the main floor and separate stationary troops; a following
+attack needs confirmed preparation and fresh routes. Do not invent pursuit or a
+kill, double-count transfers, or treat recipient-aliased force as a new garrison.
+Reconsider on movement, changed troops/stock/funds, extraction failure, receipts,
+lost routes or changed ownership. Label unsupported options and missing evidence.

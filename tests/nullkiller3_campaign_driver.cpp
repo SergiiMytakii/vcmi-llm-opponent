@@ -1,6 +1,7 @@
 #include "Global.h"
 #include "CampaignState.h"
 #include "StrategicDecision.h"
+#include "StrategicCandidates.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
 #include "ResourceLedger.h"
@@ -19,6 +20,86 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--defense-exit")
+        {
+            auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":5000,"position":[1,1,0]}],"towns":[{"ref":"home","buildings":[],"position":[1,1,0]}],"objects":[]})");
+            auto plan=json(R"({"version":3,"revision":1,"approach":"defense","horizon_days":3,"goals":[{"id":"hold","kind":"defend_area","actor_ref":"main","target_ref":"home","deadline_day":7,"priority":50,"building_id":-1,"min_army_value":5000,"depends_on":[],"required_capabilities":[],"complete_when":{"kind":"held_until","value":7}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+            auto request=json(R"({"request_id":"fresh","identity":{"generation":"fresh"},"evidence_refs":["observation:day"],"campaign":{"approach":"defense"},"signals":[{"question":"campaign_exhausted"}]})");
+            auto reply=json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"Wait for growth then reconsider offense","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"main","role":"defender"}],"alternatives":[{"approach":"defense","benefit":"Growth","cost":"Time","uncertainty":"Enemy"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guard"}],"reconsider_when":[{"goal_id":"hold","kind":"deadline_missed"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");reply["plan"]=plan;
+            nullkiller3::CampaignState current,candidate;std::string reason;
+            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),"repeat hold accepted without concrete exit");
+            reply["defense_exit"]=JsonNode();
+            require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),"repeat hold accepted null exit");
+            reply["defense_exit"]=json(R"({"waiting_for":"Known next growth day","expected_gain":"Available troops after growth","next_step":"Reconsider a supported offensive route"})");
+            require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
+            auto longExit=reply;longExit["defense_exit"]["next_step"].String()=std::string(641,'x');
+            require(!nullkiller3::validateStrategicDecision(longExit,request,world,current,candidate,reason),"oversized exit accepted");
+            auto malformed=reply;malformed["defense_exit"]["extra"].String()="unexpected";
+            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason),"open exit shape accepted");
+            malformed=reply;malformed["defense_exit"]["next_step"].String()="";
+            require(!nullkiller3::validateStrategicDecision(malformed,request,world,current,candidate,reason),"empty exit step accepted");
+            auto ordinary=request;ordinary["signals"].Vector().clear();
+            require(!nullkiller3::validateStrategicDecision(reply,ordinary,world,current,candidate,reason),"unrequested exit shape accepted");
+            reply.Struct().erase("defense_exit");
+            require(nullkiller3::validateStrategicDecision(reply,ordinary,world,current,candidate,reason),"legacy ordinary hold response no longer accepted");
+            std::cout << "NK3 repeat defense requires explicit gain and exit, legacy normal response proof passed\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--helper-hiring")
+        {
+            auto world=json(R"({"day":1,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":["land"],"heroes":[{"ref":"main","army_value":5000,"hero_type_id":10}],"towns":[{"ref":"home","buildings":[],"hiring_options":[{"ref":"tavern:42","hero_type_id":42,"can_recruit":true,"cost":[0,0,0,0,0,0,2500]}]}],"objects":[{"ref":"gold","kind":"resource","visible":true,"owner":-1}],"frontiers":["edge"]})");
+            auto plan=json(R"({"version":3,"revision":1,"approach":"economy","horizon_days":5,"goals":[{"id":"helper","kind":"hire_helper","actor_ref":null,"target_ref":"home","deadline_day":5,"priority":50,"building_id":-1,"min_army_value":0,"depends_on":[],"required_capabilities":[],"complete_when":{"kind":"helper_hired","value":0},"candidate_ref":"tavern:42","helper_role":"collector","job_ref":"gold"}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+            nullkiller3::CampaignState campaign;std::string reason;
+            require(campaign.accept(plan,world,reason),reason.c_str());
+            require(nullkiller3::requiredCandidateRefs(world,plan).count("gold"),"helper job screened out of strategic model copy");
+            auto changed=plan;changed["goals"][0]["candidate_ref"].String()="tavern:99";
+            require(!nullkiller3::CampaignState().accept(changed,world,reason),"unoffered candidate accepted");
+            changed=plan;changed["goals"][0]["job_ref"].String()="hidden";
+            require(!nullkiller3::CampaignState().accept(changed,world,reason),"unknown helper job accepted");
+            changed=plan;changed["goals"][0]["helper_role"].String()="reinforcement";
+            require(!nullkiller3::CampaignState().accept(changed,world,reason),"role incompatible with helper job accepted");
+            auto poor=world;poor["resources"][6].Integer()=1000;
+            require(!nullkiller3::CampaignState().accept(plan,poor,reason),"unfunded helper accepted");
+            auto reserved=plan;reserved["reserves"].Vector().push_back(json(R"({"goal_id":"helper","resources":[0,0,0,0,0,0,2500],"force_value":0})"));
+            require(nullkiller3::CampaignState().accept(reserved,world,reason),"hire own reserve not usable");
+            auto unavailable=world;unavailable["towns"][0]["hiring_options"][0]["can_recruit"].Bool()=false;
+            require(!nullkiller3::CampaignState().accept(plan,unavailable,reason),"currently unavailable hire accepted");
+            changed=plan;changed["goals"].Vector().push_back(changed["goals"][0]);changed["goals"][1]["id"].String()="duplicate";
+            require(!nullkiller3::CampaignState().accept(changed,world,reason),"same candidate pledged twice");
+            world["heroes"].Vector().push_back(json(R"({"ref":"new","army_value":500,"hero_type_id":42})"));
+            campaign.review(world);require(campaign.statuses()["helper"]["state"].String()!="completed","preexisting matching hero completed hire");
+            JsonNode receipt;receipt["goal"]=plan["goals"][0];receipt["day"].Integer()=1;receipt["hero_ref"].String()="new";receipt["hero_type_id"].Integer()=99;
+            world["confirmed_helper_hires"].Vector().push_back(receipt);campaign.review(world);
+            require(campaign.statuses()["helper"]["state"].String()!="completed","wrong candidate receipt completed hire");
+            receipt["hero_type_id"].Integer()=42;receipt["goal"]["job_ref"].String()="other";world["confirmed_helper_hires"].Vector().push_back(receipt);campaign.review(world);
+            require(campaign.statuses()["helper"]["state"].String()!="completed","different job receipt completed hire");
+            receipt["goal"]=plan["goals"][0];receipt["hero_ref"].String()="missing";world["confirmed_helper_hires"].Vector().push_back(receipt);campaign.review(world);
+            require(campaign.statuses()["helper"]["state"].String()!="completed","unowned hired hero completed hire");
+            receipt["hero_ref"].String()="new";world["confirmed_helper_hires"].Vector().push_back(receipt);campaign.review(world);
+            require(campaign.statuses()["helper"]["state"].String()=="completed","exact observed own hire did not complete");
+            const auto hiredSignals=nullkiller3::helperHiredSignals(campaign,world,true);
+            require(hiredSignals.size()==1 && hiredSignals[0].question=="helper_hired:helper","actual helper hire did not request model planning");
+            nullkiller3::RequestArbiter hireArbiter;hireArbiter.beginTurn(1,{280000,120000,40000});
+            const auto hireRequest=hireArbiter.consider(hiredSignals);require(hireRequest.request,"post-hire planning was suppressed");
+            hireArbiter.dispatched(hireRequest);hireArbiter.finished(100,100);
+            require(!hireArbiter.consider(hiredSignals).request,"same receipt repeatedly requested model planning");
+            require(!nullkiller3::RequestArbiter(hireArbiter.save()).consider(hiredSignals).request,"saved hire signal replayed review");
+            nullkiller3::CampaignState restored(campaign.save());
+            require(restored.restoreReason().empty() && restored.statuses()["helper"]["state"].String()=="completed","helper hire replayed after save/load");
+            auto forged=campaign.save();forged.Struct().erase("helper_hire_completions");
+            require(nullkiller3::CampaignState(forged).plan().isNull(),"saved helper completion without hire receipt accepted");
+            auto lostWorld=world;lostWorld["heroes"].Vector().pop_back();restored.review(lostWorld);
+            require(restored.statuses()["helper"]["state"].String()=="completed","lost hired hero resurrected old hire");
+            require(nullkiller3::helperHiredSignals(restored,lostWorld,true).empty(),"lost helper requested planning as owned hero");
+            auto wrongSaved=campaign.save();wrongSaved["helper_hire_completions"]["helper"]["hero_type_id"].Integer()=99;
+            require(nullkiller3::CampaignState(wrongSaved).plan().isNull(),"mismatched saved candidate receipt accepted");
+            auto revised=plan;revised["revision"].Integer()=2;world["towns"][0]["hiring_options"].Vector().clear();
+            require(restored.accept(revised,world,reason) && restored.statuses()["helper"]["state"].String()=="completed","completed hire replayed when candidate left tavern");
+            auto saved=json(R"({"object_ids":{}})");saved["helper_hire_receipts"]["helper"]=receipt;
+            require(nullkiller3::restoreNativeNamespace(saved)["helper_hire_receipts"]["helper"]==receipt,"native hiring receipt lost on restore");
+            saved["helper_hire_receipts"]["helper"]["day"].Integer()=0;
+            require(nullkiller3::restoreNativeNamespace(saved)["helper_hire_receipts"].isNull(),"malformed native hire receipt accepted");
+            std::cout << "NK3 exact candidate, useful job, funding, receipt and no-replay proof passed\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--interception")
         {
             const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));

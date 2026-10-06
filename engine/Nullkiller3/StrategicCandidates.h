@@ -30,7 +30,7 @@ inline std::set<std::string> requiredCandidateRefs(const JsonNode & world,const 
     std::set<std::string> result;
     for(const auto & goal:plan["goals"].Vector())
     {
-        for(const auto * key:{"actor_ref","target_ref"}) if(goal[key].isString()) result.insert(goal[key].String());
+        for(const auto * key:{"actor_ref","target_ref","job_ref"}) if(goal[key].isString()) result.insert(goal[key].String());
     }
     for(const auto * key:{"towns","heroes"}) for(const auto & item:world[key].Vector()) result.insert(item["ref"].String());
     for(const auto & ref:plan["policy"]["critical_towns"].Vector()) result.insert(ref.String());

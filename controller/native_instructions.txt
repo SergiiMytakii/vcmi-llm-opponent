@@ -257,3 +257,29 @@ cost/loss quote covers the whole known route. Seeing two gates
 alone is not proof that they connect. Unknown exits still require exploration and do
 not receive invented onward forecasts. Ordinary force/reserve/risk constraints
 and accepted preservation commitments still apply.
+
+
+# Helper hiring and leaving repeated defense
+Use hire_helper only for a candidate in an owned town's hiring_options with
+can_recruit=true. Select candidate_ref, helper_role and a concrete known job_ref:
+scout for a frontier/viewpoint/site/gate, collector for a mine/resource/chest,
+reinforcement for an owned recipient hero, or defender for an owned town.
+The actor is null; min_army_value=0, building_id=-1 and completion is helper_hired
+with value0. Price and starting troops are current quotes, not a post-hire route.
+Compare hiring against using existing helpers and preserve funded commitments.
+Hiring alone does not make a defender strong enough or complete its job. After
+confirmed_helper_hires supplies the actual hero_ref, assign executable goals from
+fresh routes. Do not give a not-yet-hired hero a fabricated alias or promise a path.
+
+When the schema supplies defense_exit, an old defense campaign has exhausted.
+Compare interception, bypass/capture, reinforcement and an offered helper before
+renewing hold. If the chosen plan still holds, populate waiting_for, expected_gain
+and next_step: a concrete observable change, its expected strategic benefit and
+the next operation/reassessment when that change occurs. Use supplied facts; mark
+unknown post-recruitment routes as requiring a new quote. A fresh imminent threat
+can justify holding without a near-term offensive opportunity, but state what
+must change to make departure useful. A new deadline alone is not a new benefit.
+If choosing a plan without holding, defense_exit may be null. Keep the strategic
+choice yours: troop superiority alone does not require a costly assault or prove
+safe departure. A stationary defender, a return possibility and the main's field
+army are different forces and must not be counted twice.

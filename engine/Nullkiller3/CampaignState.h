@@ -96,6 +96,13 @@ class CampaignState
         return receipt.isStruct() && receipt["goal"]==goal && receipt["won"].isBool() && receipt["won"].Bool()
             && integer(receipt["day"],1,goal["deadline_day"].Integer());
     }
+    static bool helperHireProved(const JsonNode & goal,const JsonNode & receipt)
+    {
+        return fields(receipt,{"goal","day","hero_ref","hero_type_id"}) && receipt["goal"]==goal
+            && integer(receipt["day"],1,goal["deadline_day"].Integer()) && label(receipt["hero_ref"])
+            && integer(receipt["hero_type_id"],0,1000000)
+            && goal["candidate_ref"].String()=="tavern:"+std::to_string(receipt["hero_type_id"].Integer());
+    }
     bool finished(const JsonNode & goal, const JsonNode & world) const
     {
         const auto & predicate = goal["complete_when"];
@@ -103,6 +110,16 @@ class CampaignState
         const auto & town = find(world, "towns", goal["target_ref"]);
         const auto & target = find(world, "objects", goal["target_ref"]);
         const auto & kind = predicate["kind"].String();
+        if(kind == "helper_hired")
+        {
+            for(const auto & receipt:world["confirmed_helper_hires"].Vector())
+                if(helperHireProved(goal,receipt))
+                {
+                    const auto & hired=find(world,"heroes",receipt["hero_ref"]);
+                    if(!hired.isNull() && hired["hero_type_id"]==receipt["hero_type_id"]) return true;
+                }
+            return false;
+        }
         if(kind == "building_present") return !town.isNull() && contains(town["buildings"], predicate["value"]);
         if(kind == "target_owned") return !town.isNull() || (!target.isNull() && target["visible"].Bool() && target["owner"] == world["player"]);
         if(kind == "army_at_least")
@@ -163,6 +180,23 @@ class CampaignState
     }
 
 public:
+    // Hiring names a current useful job, never a route for an unowned hero.
+    static bool helperJobSupported(const JsonNode & goal,const JsonNode & world)
+    {
+        if(!label(goal["job_ref"])) return false;
+        const auto & role=goal["helper_role"].String();
+        const auto & object=find(world,"objects",goal["job_ref"]);
+        if(role=="reinforcement") return !find(world,"heroes",goal["job_ref"]).isNull();
+        if(role=="defender") return !find(world,"towns",goal["job_ref"]).isNull();
+        if(role=="collector") return !object.isNull()
+            && (object["kind"].String()=="mine" || object["kind"].String()=="resource" || object["kind"].String()=="treasure_chest")
+            && !(object["kind"].String()=="mine" && object["owner"]==world["player"]);
+        if(role=="scout") return contains(world["frontiers"],goal["job_ref"])
+            || !find(world,"scouting_options",goal["job_ref"]).isNull()
+            || (!object.isNull() && object["visible"].Bool() && (object["kind"].String()=="scholar"
+                || object["kind"].String()=="obelisk" || object["kind"].String()=="treasure_chest" || object["kind"].String()=="subterranean_gate"));
+        return false;
+    }
     bool holdsCommitment(const std::string & id) const
     {
         const auto & status=state["statuses"][id];
@@ -211,6 +245,8 @@ public:
         if(!saved["passage_completions"].isNull() && !saved["passage_completions"].isStruct()) return;
         if(!sourceWorld["confirmed_site_visits"].isNull() && !sourceWorld["confirmed_site_visits"].isVector()) return;
         if(!saved["site_completions"].isNull() && !saved["site_completions"].isStruct()) return;
+        if(!saved["helper_hire_completions"].isNull() && !saved["helper_hire_completions"].isStruct()) return;
+        if(!sourceWorld["confirmed_helper_hires"].isNull() && !sourceWorld["confirmed_helper_hires"].isVector()) return;
         for(const auto * list : {"heroes", "towns", "objects"})
         {
             if(!sourceWorld[list].isVector()) return;
@@ -254,7 +290,7 @@ public:
             if(!status.isStruct() || !label(status["state"]) || !states.count(status["state"].String())
                 || !label(status["reason"])) return;
             if(status["state"].String() == "completed"
-                && !integer(status["completed_day"], (goal["kind"].String()=="explore_passage" || goal["kind"].String()=="visit_site" || goal["kind"].String()=="intercept_hero") ? 1 : saved["accepted_day"].Integer(), 2147483647)) return;
+                && !integer(status["completed_day"], (goal["kind"].String()=="explore_passage" || goal["kind"].String()=="visit_site" || goal["kind"].String()=="intercept_hero" || goal["kind"].String()=="hire_helper") ? 1 : saved["accepted_day"].Integer(), 2147483647)) return;
             if(status["state"].String() == "completed" && goal["kind"].String()=="reinforce_hero"
                 && !validated.deliveryProved(goal,saved["delivery_completions"][goal["id"].String()])) return;
             if(status["state"].String()=="completed" && goal["kind"].String()=="intercept_hero")
@@ -262,6 +298,11 @@ public:
                 const auto & receipt=saved["interception_completions"][goal["id"].String()];
                 if(!interceptionProved(goal,receipt)
                     || !integer(status["completed_day"],receipt["day"].Integer(),goal["deadline_day"].Integer())) return;
+            }
+            if(status["state"].String()=="completed" && goal["kind"].String()=="hire_helper")
+            {
+                const auto & receipt=saved["helper_hire_completions"][goal["id"].String()];
+                if(!helperHireProved(goal,receipt) || !integer(status["completed_day"],receipt["day"].Integer(),goal["deadline_day"].Integer())) return;
             }
             if(status["state"].String()=="completed" && goal["kind"].String()=="visit_site")
             {
@@ -310,10 +351,13 @@ public:
         const auto & goals = proposal["goals"];
         if(!goals.isVector() || goals.Vector().empty() || goals.Vector().size() > 12) return reject("invalid_goal_count");
         std::map<std::string, const JsonNode *> byID;
+        std::set<std::string> hiredCandidates;
         const int64_t day = world["day"].Integer();
         for(const auto & goal : goals.Vector())
         {
-            if(!(goal["kind"].String()=="prepare_garrison"
+            if(!(goal["kind"].String()=="hire_helper"
+                ? fields(goal,{"id","kind","actor_ref","target_ref","deadline_day","priority","building_id","min_army_value","depends_on","required_capabilities","complete_when","candidate_ref","helper_role","job_ref"})
+                : goal["kind"].String()=="prepare_garrison"
                 ? fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when", "garrison_mode"})
                 : fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when"}))
                 || !label(goal["kind"]) || !label(goal["id"]) || !byID.emplace(goal["id"].String(), &goal).second
@@ -325,7 +369,28 @@ public:
             const auto & town = find(world, "towns", goal["target_ref"]);
             const auto & object = find(world, "objects", goal["target_ref"]);
             const auto & kind = goal["kind"].String();
-            if(kind == "develop_town")
+            if(kind == "hire_helper")
+            {
+                if(!goal["actor_ref"].isNull() || goal["building_id"].Integer()!=-1 || goal["min_army_value"].Integer()!=0
+                    || !label(goal["candidate_ref"]) || !label(goal["job_ref"])
+                    || (goal["helper_role"].String()!="scout" && goal["helper_role"].String()!="collector"
+                        && goal["helper_role"].String()!="reinforcement" && goal["helper_role"].String()!="defender")
+                    || !hiredCandidates.insert(goal["candidate_ref"].String()).second)
+                    return reject("invalid_helper_hire");
+                bool confirmed=helperHireProved(goal,state["helper_hire_completions"][goal["id"].String()]);
+                for(const auto & receipt:world["confirmed_helper_hires"].Vector()) confirmed |= helperHireProved(goal,receipt);
+                if(!confirmed)
+                {
+                    if(town.isNull() || !helperJobSupported(goal,world)) return reject("unsupported_helper_job");
+                    const auto & option=find(town,"hiring_options",goal["candidate_ref"]);
+                    if(option.isNull() || !integer(option["hero_type_id"],0,1000000)
+                        || option["ref"].String()!="tavern:"+std::to_string(option["hero_type_id"].Integer())
+                        || !option["can_recruit"].isBool() || !option["can_recruit"].Bool() || !resources(option["cost"]))
+                        return reject("helper_candidate_unavailable");
+                    for(int i=0;i<7;++i) if(option["cost"][i].Integer()>world["resources"][i].Integer()) return reject("helper_hire_unfunded");
+                }
+            }
+            else if(kind == "develop_town")
             {
                 if(town.isNull() || !goal["actor_ref"].isNull() || goal["building_id"].Integer() < 0) return reject("invalid_town_development");
                 bool supported = false;
@@ -410,7 +475,8 @@ public:
             const auto & predicate = goal["complete_when"];
             if(!fields(predicate, {"kind", "value"}) || !label(predicate["kind"]) || !integer(predicate["value"], 0, 1000000000)) return reject("invalid_completion_predicate");
             const auto & completion = predicate["kind"].String();
-            const bool valid = (kind == "intercept_hero" && completion == "enemy_engaged" && predicate["value"].Integer()==0)
+            const bool valid = (kind == "hire_helper" && completion == "helper_hired" && predicate["value"].Integer()==0)
+                || (kind == "intercept_hero" && completion == "enemy_engaged" && predicate["value"].Integer()==0)
                 || (kind == "prepare_garrison" && completion == "garrison_at_least" && predicate["value"].Integer()>0)
                 || (kind == "develop_town" && completion == "building_present" && predicate["value"] == goal["building_id"])
                 || ((kind == "capture_target" || (kind == "secure_resource" && object["kind"].String() == "mine")) && completion == "target_owned" && predicate["value"] == world["player"])
@@ -481,6 +547,16 @@ public:
         }
         for(int i = 0; i < 7; ++i)
             if(totals[i] > world["resources"][i].Integer()) return reject("resource_commitments_exceed_available_funds");
+        for(const auto & goal:goals.Vector()) if(goal["kind"].String()=="hire_helper")
+        {
+            const auto & cost=find(find(world,"towns",goal["target_ref"]),"hiring_options",goal["candidate_ref"])["cost"];
+            for(int i=0;i<7;++i)
+            {
+                int64_t own=0;
+                for(const auto & reserve:reserves.Vector()) if(reserve["goal_id"]==goal["id"]) own=reserve["resources"][i].Integer();
+                if(!cost.isNull() && cost[i].Integer()>world["resources"][i].Integer()-totals[i]+own) return reject("helper_hire_unfunded");
+            }
+        }
         const auto & policy = proposal["policy"];
         if(!fields(policy, {"max_loss_ratio", "allow_route_repair", "allow_helper_replacement", "critical_towns"})
             || !policy["max_loss_ratio"].isNumber() || !std::isfinite(policy["max_loss_ratio"].Float()) || policy["max_loss_ratio"].Float() < 0 || policy["max_loss_ratio"].Float() > 0.5
@@ -509,6 +585,9 @@ public:
         for(const auto & goal:goals.Vector())
             if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="intercept_hero")
                 accepted["interception_completions"][goal["id"].String()]=state["interception_completions"][goal["id"].String()];
+        for(const auto & goal:goals.Vector())
+            if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="hire_helper")
+                accepted["helper_hire_completions"][goal["id"].String()]=state["helper_hire_completions"][goal["id"].String()];
         state = accepted;
         review(world);
         reason.clear();
@@ -672,6 +751,9 @@ public:
                 if(goal["kind"].String()=="explore_passage")
                     for(const auto & receipt:world["confirmed_passage_explorations"].Vector()) if(passageProved(goal,receipt))
                         state["passage_completions"][id]=receipt;
+                if(goal["kind"].String()=="hire_helper")
+                    for(const auto & receipt:world["confirmed_helper_hires"].Vector()) if(helperHireProved(goal,receipt))
+                        state["helper_hire_completions"][id]=receipt;
                 if(goal["kind"].String()=="visit_site")
                     for(const auto & receipt:world["confirmed_site_visits"].Vector()) if(siteProved(goal,receipt))
                         state["site_completions"][id]=receipt;
@@ -687,7 +769,7 @@ public:
             { status["state"].String() = "blocked"; status["reason"].String() = "executor_no_longer_owned"; }
             else if(world["day"].Integer() > goal["deadline_day"].Integer())
             { status["state"].String() = "blocked"; status["reason"].String() = "deadline_missed"; }
-            else if((goal["kind"].String()=="develop_town" || goal["kind"].String()=="prepare_garrison" || goal["kind"].String()=="defend_area")
+            else if((goal["kind"].String()=="develop_town" || goal["kind"].String()=="prepare_garrison" || goal["kind"].String()=="defend_area" || goal["kind"].String()=="hire_helper")
                 && find(world,"towns",goal["target_ref"]).isNull())
             { status["state"].String()="blocked";status["reason"].String()="target_no_longer_owned"; }
             else if(goal["kind"].String() == "preserve_force")

@@ -25,6 +25,7 @@
 #include "../../lib/CPlayerState.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/entities/building/CBuilding.h"
+#include "../../lib/entities/hero/CHero.h"
 #include "../../lib/battle/CombatValue.h"
 #include "../../lib/mapping/CMap.h"
 #include "../ExternalAI/TransportJSON.h"
@@ -728,6 +729,13 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
             ==campaign.plan()["goals"].Vector().end();
     });
     for(const auto & [id,receipt]:siteReceipts) world["confirmed_site_visits"].Vector().push_back(receipt);
+    world["confirmed_helper_hires"].Vector();
+    auto & hireReceipts=persisted["helper_hire_receipts"].Struct();
+    std::erase_if(hireReceipts,[&](const auto & item) {
+        return std::find(campaign.plan()["goals"].Vector().begin(),campaign.plan()["goals"].Vector().end(),item.second["goal"])
+            ==campaign.plan()["goals"].Vector().end();
+    });
+    for(const auto & [id,receipt]:hireReceipts) world["confirmed_helper_hires"].Vector().push_back(receipt);
     world["confirmed_deliveries"].Vector();
     auto & receipts=persisted["delivery_receipts"].Struct();
     std::erase_if(receipts,[&](const auto & item) {
@@ -757,6 +765,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["position"] = coordinate(hero->visitablePos());
         item["in_boat"].Bool() = hero->inBoat();
         item["army_value"].Integer() = hero->estimateCombatValue();
+        item["hero_type_id"].Integer() = hero->getHeroTypeID().getNum();
         item["army_units"]=armyUnits(hero);
         int64_t lastCreatureValue=0;
         if(hero->needsLastStack())
@@ -790,6 +799,45 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         if(const auto * visitor=town->getVisitingHero();visitor && visitor->getOwner()==ai.playerID)
             item["visiting_hero_ref"].String()=reference(visitor);
         item["daily_income"] = resourceValues(town->dailyIncome());
+        item["hiring_options"].Vector();
+        TResources hireCost;hireCost[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
+        const auto * visitor=town->getVisitingHero();
+        const bool slotAvailable=helperHireSlotAvailable(ai,town);
+        const bool explicitCanRecruit=town->hasBuilt(BuildingID::TAVERN) && !ai.heroManager->heroCapReached()
+            && ai.cc->getResourceAmount(EGameResID::GOLD)>=GameConstants::HERO_GOLD_COST;
+        const bool nativeCanRecruit=ai.heroManager->canRecruitHero(town);
+        const bool hireFunds=ai.getFreeResources().canAfford(hireCost);
+        for(const auto * candidate:ai.cc->getAvailableHeroes(town))
+        {
+            if(!candidate) continue;
+            JsonNode option;
+            option["hero_type_id"].Integer()=candidate->getHeroTypeID().getNum();
+            option["ref"].String()="tavern:"+std::to_string(candidate->getHeroTypeID().getNum());
+            option["name"].String()=candidate->getHeroType()->getNameTranslated();
+            option["army_value"].Integer()=candidate->estimateCombatValue();
+            option["army_units"]=armyUnits(candidate);
+            option["strength"]["army_ai_value"]=option["army_value"];
+            option["strength"]["hero_multiplier"].Float()=candidate->getHeroStrength();
+            option["strength"]["hero_combat_value"].Integer()=candidate->estimateHeroCombatValue();
+            option["cost"]=resourceValues(hireCost);
+            option["native_can_recruit"].Bool()=nativeCanRecruit;
+            option["visiting_slot_available"].Bool()=slotAvailable;
+            option["funds_available"].Bool()=hireFunds;
+            option["can_recruit"].Bool()=explicitCanRecruit && slotAvailable && hireFunds;
+            option["availability"].String()=!explicitCanRecruit ? "native_hiring_gate" : !slotAvailable ? "town_visiting_slot_occupied"
+                : !hireFunds ? "funds_reserved" : visitor ? "allowed_with_safe_garrison_merge" : "allowed_now";
+            if(visitor && slotAvailable)
+            {
+                auto & preparation=option["slot_preparation"];
+                preparation["kind"].String()="merge_visiting_hero_into_garrison";
+                preparation["hero_ref"].String()=reference(visitor);
+                preparation["visiting_army_value"].Integer()=visitor->estimateCombatValue();
+                preparation["stationary_army_value"].Integer()=town->estimateCombatValue();
+                preparation["merged_army_value"].Integer()=visitor->estimateCombatValue()+town->estimateCombatValue();
+                preparation["effect"].String()="Town troops join this visiting hero in the garrison; the helper keeps only its own starting army.";
+            }
+            item["hiring_options"].Vector().push_back(option);
+        }
         item["recruitment_options"].Vector();
         for(size_t level=0;level<town->creatures.size();++level)
         {
@@ -909,6 +957,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         const auto & status = campaign.statuses()[goal["id"].String()]["state"].String();
         if(status == "completed" || status == "cancelled") continue;
         retainedTargets.insert(goal["target_ref"].String());
+        if(goal["kind"].String()=="hire_helper") retainedTargets.insert(goal["job_ref"].String());
         if(goal["actor_ref"].isString()) retainedTargets.insert(goal["actor_ref"].String());
         if(goal["kind"].String() == "reinforce_hero") retainedTargets.insert(campaign.deliverySource(goal,helperSources()));
     }
@@ -1306,6 +1355,22 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
         if(kind=="defend_area" && unchangedHoldingAttempt(persisted["memory"],goal["id"].String(),campaign.plan()["revision"].Integer(),executionSnapshot(ai))) continue;
         const auto * target = resolve(ai, goal["target_ref"]);
         const auto * actor = dynamic_cast<const CGHeroInstance *>(resolve(ai, goal["actor_ref"]));
+        if(kind=="hire_helper")
+        {
+            const auto * town=dynamic_cast<const CGTownInstance *>(target);
+            const CGHeroInstance * selected=nullptr;
+            if(town && town->getOwner()==ai.playerID)
+                for(const auto * candidate:ai.cc->getAvailableHeroes(town))
+                    if(candidate && goal["candidate_ref"].String()=="tavern:"+std::to_string(candidate->getHeroTypeID().getNum())) selected=candidate;
+            if(selected && !heroHireReason(ai,town,selected,goal["id"].String()).empty())
+                rememberTasks(output,{sptr(RecruitHero(town,selected))},goal,ai);
+            else
+            {
+                campaign.blocked(goal["id"].String(),"helper_hire_not_currently_available");
+                world["goal_statuses"]=campaign.statuses();
+            }
+            continue;
+        }
         if(kind=="prepare_garrison" && actor)
         {
             const auto before=output.size();
@@ -1590,13 +1655,60 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
     }
     return output;
 }
-std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const CGTownInstance * town, const CGHeroInstance * candidate) const
+bool NativeCampaign::helperHireSlotAvailable(const NK2AI::Nullkiller & ai,const CGTownInstance * town) const
+{
+    if(!town || town->getOwner()!=ai.playerID) return false;
+    const auto * visitor=town->getVisitingHero();
+    if(!visitor) return true;
+    // This is the server's direct visiting -> garrison operation: all town
+    // stacks merge into the same owned hero without loss or movement.
+    if(visitor->getOwner()!=ai.playerID || town->getGarrisonHero() || !visitor->canBeMergedWith(*town)) return false;
+    const auto & aliases=persisted["object_ids"].Struct();
+    const auto heroAlias=aliases.find(std::to_string(visitor->id.getNum()));
+    const auto townAlias=aliases.find(std::to_string(town->id.getNum()));
+    if(heroAlias==aliases.end() || townAlias==aliases.end()) return false;
+    const auto heroRef=externalai::objectReference(heroAlias->second),townRef=externalai::objectReference(townAlias->second);
+    const auto obligations=campaign.participantGoals(heroRef,helperSources(),world);
+    for(const auto & goal:campaign.plan()["goals"].Vector()) if(obligations.count(goal["id"].String()))
+        if((goal["kind"].String()!="defend_area" && goal["kind"].String()!="preserve_force")
+            || goal["actor_ref"].String()!=heroRef || goal["target_ref"].String()!=townRef) return false;
+    return true;
+}
+std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const CGTownInstance * town, const CGHeroInstance * candidate,const std::string & goalID) const
 {
     if(!town || !candidate || town->getOwner()!=ai.playerID) return {};
+    const JsonNode * selectedGoal=nullptr;
+    bool namedGoal=goalID.empty();
+    for(const auto & goal:campaign.plan()["goals"].Vector()) if(goal["id"].String()==goalID)
+    {
+        namedGoal=true;
+        if(goal["kind"].String()=="hire_helper") selectedGoal=&goal;
+    }
+    if(!namedGoal) return {};
     TResources price;price[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
-    if(!ai.getFreeResources().canAfford(price)) return {};
+    if(!selectedGoal)
+    { if(!ai.getFreeResources().canAfford(price)) return {}; }
+    else
+    {
+        const auto protectedFunds=campaign.reservedResources(goalID);
+        const auto funds=ai.cc->getResourceAmount(),locks=ai.getLockedResources();
+        for(int i=0;i<7;++i) if(funds[i]-locks[i]-protectedFunds[i].Integer()<price[i]) return {};
+        if(campaign.statuses()[goalID]["state"].String()!="ready" || !campaign.holdsCommitment(goalID)
+            || world["day"].Integer()>(*selectedGoal)["deadline_day"].Integer()
+            || (*selectedGoal)["candidate_ref"].String()!="tavern:"+std::to_string(candidate->getHeroTypeID().getNum())
+            || !CampaignState::helperJobSupported(*selectedGoal,world)) return {};
+        if(resolve(ai,(*selectedGoal)["target_ref"])!=town || !town->hasBuilt(BuildingID::TAVERN)
+            || ai.heroManager->heroCapReached() || !helperHireSlotAvailable(ai,town)) return {};
+        const auto available=ai.cc->getAvailableHeroes(town);
+        if(std::find(available.begin(),available.end(),candidate)==available.end()) return {};
+        const auto * job=resolve(ai,(*selectedGoal)["job_ref"]);
+        const auto & helperRole=(*selectedGoal)["helper_role"].String();
+        if((helperRole=="reinforcement" || helperRole=="defender") && (!job || job->getOwner()!=ai.playerID)) return {};
+        if(helperRole=="collector" && (!job || !ai.cc->isVisible(job->visitablePos())
+            || (job->ID==Obj::MINE && job->getOwner()==ai.playerID))) return {};
+    }
     const auto heroes=ai.cc->getHeroesInfo();
-    if(heroes.empty()) return "main:no_owned_hero";
+    if(!selectedGoal && heroes.empty()) return "main:no_owned_hero";
     // Compare the accepted shared spending calendar before and after hiring.
     // A discretionary purchase must not make funded construction/delivery fail.
     auto before=world;
@@ -1609,6 +1721,7 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
             if(funded["status"].String()=="conditional")
                 for(const auto & remaining:reduced[category].Vector())
                     if(remaining["goal_id"]==funded["goal_id"] && remaining["status"].String()!="conditional") return {};
+    if(selectedGoal) return "model:"+goalID+":"+(*selectedGoal)["helper_role"].String()+":"+(*selectedGoal)["job_ref"].String();
     const auto alias=persisted["object_ids"].Struct().find(std::to_string(town->id.getNum()));
     if(alias!=persisted["object_ids"].Struct().end())
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
@@ -1658,6 +1771,31 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
         }
     if(jobs>5*(collectors+1)) return "collector:"+std::to_string(firstTarget)+":jobs="+std::to_string(jobs);
     return {};
+}
+void NativeCampaign::recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstance * town,const CGHeroInstance * candidate,const std::string & goalID)
+{
+    if(goalID.empty() || !town || !candidate) return;
+    const auto * hired=town->getVisitingHero();
+    if(!hired || hired->getOwner()!=ai.playerID || hired->getHeroTypeID()!=candidate->getHeroTypeID()) return;
+    const auto & pending=static_cast<const JsonNode &>(persisted)["pending_native_task"];
+    if(pending["action"]["goal_id"].String()!=goalID || pending["action"]["kind"].String()!="hire_hero"
+        || pending["before"]["day"].Integer()!=ai.cc->getCalendar().getCurrentDay()) return;
+    const auto hiredRef=reference(hired);
+    for(const auto & before:pending["before"]["heroes"].Vector()) if(before["ref"].String()==hiredRef) return;
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+        if(goal["id"].String()==goalID && goal["kind"].String()=="hire_helper" && campaign.holdsCommitment(goalID)
+            && resolve(ai,goal["target_ref"])==town && goal["candidate_ref"].String()=="tavern:"+std::to_string(hired->getHeroTypeID().getNum()))
+        {
+            JsonNode receipt;receipt["goal"]=goal;receipt["day"].Integer()=ai.cc->getCalendar().getCurrentDay();
+            receipt["hero_ref"].String()=hiredRef;receipt["hero_type_id"].Integer()=hired->getHeroTypeID().getNum();
+            persisted["helper_hire_receipts"][goalID]=receipt;
+            JsonNode assignment;assignment["hero_ref"].String()=hiredRef;assignment["role"]=goal["helper_role"];
+            auto & assignments=persisted["strategy_metadata"]["assignments"].Vector();
+            std::erase_if(assignments,[&](const auto & old) { return old["hero_ref"]==assignment["hero_ref"]; });
+            assignments.push_back(assignment);
+            persist(ai);
+            return;
+        }
 }
 float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
 {
@@ -1723,11 +1861,11 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
         if(depth>16) return false;
         if(const auto * hire=dynamic_cast<const NK2AI::Goals::RecruitHero *>(item.get()))
         {
-            const auto * candidate=hire->getHero();
+            const auto * candidate=hire->getCandidate();
             if(!candidate && hire->town)
                 for(const auto * available:ai.cc->getAvailableHeroes(hire->town))
                     if(!candidate || available->estimateHeroCombatValue()>candidate->estimateHeroCombatValue()) candidate=available;
-            return !heroHireReason(ai,hire->town,candidate).empty();
+            return !heroHireReason(ai,hire->town,candidate,task->strategicGoalID).empty();
         }
         if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
             for(const auto & child:composition->decompose(nullptr)) if(!hiringAllowed(child,depth+1)) return false;
@@ -1911,6 +2049,7 @@ JsonNode NativeCampaign::executionSnapshot(NK2AI::Nullkiller & ai)
     {
         JsonNode item;item["ref"].String()=reference(hero);item["position"]=coordinate(hero->visitablePos());
         item["movement"].Integer()=hero->movementPointsRemaining();item["mana"].Integer()=hero->mana;
+        item["hero_type_id"].Integer()=hero->getHeroTypeID().getNum();
         item["army_value"].Integer()=hero->estimateCombatValue();item["in_boat"].Bool()=hero->inBoat();snapshot["heroes"].Vector().push_back(item);
     }
     for(const auto * town:ai.cc->getTownsInfo())

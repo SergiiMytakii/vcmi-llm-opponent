@@ -1859,13 +1859,13 @@ index d93ba3ed6..34afa021f 100644
  #include "../../../lib/constants/StringConstants.h"
  
  
-@@ -57,14 +59,23 @@ void RecruitHero::accept(AIGateway * aiGw)
+@@ -57,14 +59,25 @@ void RecruitHero::accept(AIGateway * aiGw)
  	if(!heroToHire)
  		throw cannotFulfillGoalException("No hero to hire!");
  
 +	if(aiGw->nullkiller->strategicCampaign)
 +	{
-+		const auto reason=aiGw->nullkiller->strategicCampaign->heroHireReason(*aiGw->nullkiller,t,heroToHire);
++		const auto reason=aiGw->nullkiller->strategicCampaign->heroHireReason(*aiGw->nullkiller,t,heroToHire,strategicGoalID);
 +		if(reason.empty()) throw cannotFulfillGoalException("NK3 hero hiring lacks a funded concrete job");
 +		logAi->info("NK3_HERO_HIRE town=%d hero=%d cost=%d purpose=%s",t->id.getNum(),heroToHire->id.getNum(),GameConstants::HERO_GOLD_COST,reason);
 +	}
@@ -1882,7 +1882,24 @@ index d93ba3ed6..34afa021f 100644
 +	aiGw->checkStrategicTurn();
  	aiGw->cc->recruitHero(t, heroToHire);
  	aiGw->waitTillFree(); // Hiring in a town may trigger level-up queries from reward buildings.
++	if(aiGw->nullkiller->strategicCampaign)
++		aiGw->nullkiller->strategicCampaign->recordHelperHire(*aiGw->nullkiller,t,heroToHire,strategicGoalID);
  
+diff --git a/AI/Nullkiller2/Goals/RecruitHero.h b/AI/Nullkiller2/Goals/RecruitHero.h
+--- a/AI/Nullkiller2/Goals/RecruitHero.h
++++ b/AI/Nullkiller2/Goals/RecruitHero.h
+@@ -44,7 +44,10 @@ namespace Goals
+ 		}
+ 
+ 		std::string toString() const override;
+-		const CGHeroInstance* getHero() const override { return heroToBuy; }
++		const CGHeroInstance * getCandidate() const { return heroToBuy; }
++		// A selected tavern hero is not an owned executor for NK3 admission.
++		const CGHeroInstance * getHero() const override
++		{ return strategicGoalID.empty() ? heroToBuy : nullptr; }
+ 		void accept(AIGateway * aiGw) override;
+ 	};
+ }
 diff --git a/AI/Nullkiller2/Helpers/ExplorationHelper.cpp b/AI/Nullkiller2/Helpers/ExplorationHelper.cpp
 index 1a7e7de5c..5641f5d2f 100644
 --- a/AI/Nullkiller2/Helpers/ExplorationHelper.cpp

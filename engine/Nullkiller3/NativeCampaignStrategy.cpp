@@ -145,6 +145,8 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         const auto idle=idleArmySignals(campaign,world,actionable);
         result.insert(result.end(),idle.begin(),idle.end());
     }
+    const auto hired=helperHiredSignals(campaign,world,actionable);
+    result.insert(result.end(),hired.begin(),hired.end());
     const auto transfers=operationTransferSignals(campaign,world,persisted["memory"],actionable);
     result.insert(result.end(),transfers.begin(),transfers.end());
     auto losses=battleLossSignals(campaign.plan(),persisted["memory"],actionable);

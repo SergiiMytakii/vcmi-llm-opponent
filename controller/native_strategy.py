@@ -7,7 +7,7 @@ try:
 except ImportError:
     from strategy import _object, _validate_shape, campaign_evidence
 
-KINDS = ('develop_town', 'secure_resource', 'prepare_garrison', 'reinforce_hero', 'capture_target', 'intercept_hero',
+KINDS = ('hire_helper', 'develop_town', 'secure_resource', 'prepare_garrison', 'reinforce_hero', 'capture_target', 'intercept_hero',
          'defend_area', 'scout_frontier', 'scout_area', 'visit_site', 'preserve_force', 'explore_passage')
 APPROACHES = ('economy', 'expansion', 'offense', 'defense', 'scouting')
 ROLES = ('main', 'defender', 'scout', 'collector', 'reinforcement')
@@ -74,6 +74,11 @@ def completed_interceptions(request):
                     for receipt in world.get('confirmed_interceptions',[]))]
 
 
+def needs_defense_exit(request):
+    return ((request.get('campaign') or {}).get('approach')=='defense'
+            and any(s.get('question')=='campaign_exhausted' for s in request.get('signals',[])))
+
+
 def reply_schema(request):
     world = request['observation']
     day = world['day']
@@ -85,7 +90,7 @@ def reply_schema(request):
     owned_town = {'type':'string','enum':town_refs} if town_refs else {'type':'string','pattern':'^$'}
     target = {'type': 'string', 'enum': sorted(references(request))}
     label = {'type': 'string', 'minLength': 1, 'maxLength': 30}
-    predicate = _object({'kind': {'type': 'string', 'enum': ['building_present', 'target_owned', 'reserve_at_least',
+    predicate = _object({'kind': {'type': 'string', 'enum': ['helper_hired', 'building_present', 'target_owned', 'reserve_at_least',
                        'army_at_least', 'enemy_engaged', 'garrison_at_least', 'frontier_observed', 'area_observed', 'site_visited', 'held_until', 'force_preserved_until', 'passage_explored']},
                          'value': integer(0, 1000000000)})
     goal = _object({'id': label, 'kind': {'type': 'string', 'enum': list(KINDS)}, 'actor_ref': hero,
@@ -102,6 +107,7 @@ def reply_schema(request):
     own_refs = [*heroes,*town_refs]
     objects = world['objects']
     targets = {
+        'hire_helper':[t['ref'] for t in world['towns'] if any(c.get('can_recruit') is True for c in t.get('hiring_options',[]))],
         'develop_town':town_refs,
         'secure_resource':[o['ref'] for o in objects if o.get('kind') in ('mine','resource') and (o.get('kind')!='mine' or o.get('owner')!=world['player'] or o.get('visible') is not True)],
         'reinforce_hero':own_refs,
@@ -115,21 +121,28 @@ def reply_schema(request):
             +[g['target_ref'] for g in (request.get('campaign') or {}).get('goals',[]) if g['kind']=='visit_site' and world.get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'],
         'explore_passage':[o['ref'] for o in objects if o.get('kind')=='subterranean_gate' and o.get('visible') is True]}
     supported_buildings = sorted({b['id'] for t in world['towns'] for b in t.get('building_options',[]) if b.get('supported') is True})
-    completions = {'develop_town':['building_present'],'secure_resource':['target_owned','reserve_at_least'],
+    completions = {'hire_helper':['helper_hired'],'develop_town':['building_present'],'secure_resource':['target_owned','reserve_at_least'],
                    'reinforce_hero':['army_at_least'],
                            'prepare_garrison':['garrison_at_least'],'intercept_hero':['enemy_engaged'],'capture_target':['target_owned'],
                    'defend_area':['held_until'],'scout_frontier':['frontier_observed'],'scout_area':['area_observed'],'visit_site':['site_visited'],'preserve_force':['force_preserved_until'],'explore_passage':['passage_explored']}
     for kind in KINDS:
-        if not targets[kind] or (kind!='develop_town' and not heroes) or (kind=='develop_town' and not supported_buildings):continue
+        if not targets[kind] or (kind not in ('develop_town','hire_helper') and not heroes) or (kind=='develop_town' and not supported_buildings):continue
         variant = copy.deepcopy(goal)
         props = variant['properties']
         props['kind'] = {'type':'string','enum':[kind]}
         props['target_ref'] = refs_schema(targets[kind])
-        props['actor_ref'] = {'type':'null'} if kind=='develop_town' else refs_schema(heroes)
+        props['actor_ref'] = {'type':'null'} if kind in ('develop_town','hire_helper') else refs_schema(heroes)
         props['building_id'] = {**integer(-1,100000),'enum':supported_buildings if kind=='develop_town' else [-1]}
         predicate_props = props['complete_when']['properties']
         predicate_props['kind'] = {'type':'string','enum':completions[kind]}
-        if kind in ('scout_frontier','explore_passage','visit_site','intercept_hero'):predicate_props['value'] = {**integer(0,0),'enum':[0]}
+        if kind=='hire_helper':
+            props['candidate_ref']=refs_schema([c['ref'] for t in world['towns'] for c in t.get('hiring_options',[]) if c.get('can_recruit') is True])
+            props['helper_role']={'type':'string','enum':['scout','collector','reinforcement','defender']}
+            props['job_ref']=refs_schema(references(request))
+            props['min_army_value']=integer(0,0)
+            variant['required'].extend(['candidate_ref','helper_role','job_ref'])
+            predicate_props['value']=integer(0,0)
+        elif kind in ('scout_frontier','explore_passage','visit_site','intercept_hero'):predicate_props['value'] = {**integer(0,0),'enum':[0]}
         elif kind=='prepare_garrison':
             predicate_props['value']=integer(1,1000000000)
             props['garrison_mode']={'type':'string','enum':['recruit','detach','recruit_then_detach']}
@@ -163,6 +176,9 @@ def reply_schema(request):
                   'reconsider_when':array(_object({'goal_id':label,'kind':{'type':'string','enum':
                                               ['executor_lost','deadline_missed','route_not_established']}}),1),
                   'plan':{'anyOf':[{'type':'null'},plan]}}
+    if needs_defense_exit(request):
+        properties['defense_exit']={'anyOf':[{'type':'null'},_object({
+            'waiting_for':text,'expected_gain':text,'next_step':text})]}
     return _object(properties)
 
 
@@ -198,6 +214,9 @@ def validate_reply(request, reply, wire=False):
     if reply['decision'] == 'retain':
         if reply['plan'] is not None or not plan: raise ValueError('retain requires a current campaign')
     elif not plan: raise ValueError('revise requires a complete campaign')
+    if needs_defense_exit(request) and any(g['kind'] in ('defend_area','preserve_force') for g in plan['goals']):
+        if reply.get('defense_exit') is None:
+            raise ValueError('repeated_hold_requires_wait_gain_and_next_step')
     goals = {g['id']:g for g in plan['goals']}
     if len(goals) != len(plan['goals']): raise ValueError('duplicate strategic goal')
     def visit(name, stack):
@@ -205,6 +224,38 @@ def validate_reply(request, reply, wire=False):
         for dep in goals[name]['depends_on']: visit(dep, stack|{name})
     for name in goals: visit(name,set())
     by_ref = {o['ref']:o for o in request['observation']['objects']}
+    hiring_costs=[0]*7
+    hired_candidates=set()
+    for g in goals.values():
+        kind, predicate = g['kind'], g['complete_when']
+        if kind=='hire_helper':
+            if reply['decision']=='retain' and any(
+                    receipt.get('goal')==g and g['candidate_ref']=='tavern:'+str(receipt.get('hero_type_id'))
+                    and type(receipt.get('day')) is int
+                    and 1<=receipt['day']<=g['deadline_day']
+                    and (request['observation'].get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'
+                         or any(h['ref']==receipt.get('hero_ref') and h.get('hero_type_id')==receipt.get('hero_type_id')
+                                for h in request['observation']['heroes']))
+                    for receipt in request['observation'].get('confirmed_helper_hires',[])):
+                continue
+            town=next((t for t in request['observation']['towns'] if t['ref']==g['target_ref']),{})
+            candidate=next((c for c in town.get('hiring_options',[]) if c['ref']==g['candidate_ref'] and c.get('can_recruit') is True),None)
+            if not candidate or g['candidate_ref'] in hired_candidates:
+                raise ValueError('helper_candidate_not_available')
+            hired_candidates.add(g['candidate_ref'])
+            hiring_costs=[a+b for a,b in zip(hiring_costs,candidate['cost'])]
+            own_towns={t['ref'] for t in request['observation']['towns']}
+            own_heroes={h['ref'] for h in request['observation']['heroes']}
+            target=by_ref.get(g['job_ref'],{})
+            known_scout=set(request['observation'].get('frontiers',[])) | {o['ref'] for o in request['observation'].get('scouting_options',[])}
+            role=g['helper_role']
+            valid=(role=='defender' and g['job_ref'] in own_towns
+                   or role=='reinforcement' and g['job_ref'] in own_heroes
+                   or role=='scout' and (g['job_ref'] in known_scout or target.get('kind') in ('subterranean_gate','scholar','obelisk','treasure_chest'))
+                   or role=='collector' and target.get('kind') in ('mine','resource','treasure_chest'))
+            if not valid:raise ValueError('helper_role_job_mismatch')
+    if any(cost>available for cost,available in zip(hiring_costs,request['observation']['resources'])):
+        raise ValueError('helper_hiring_exceeds_available_funds')
     for g in goals.values():
         kind, predicate = g['kind'], g['complete_when']
         if reply['decision']=='revise' and predicate['kind']=='target_owned' and by_ref.get(g['target_ref'],{}).get('visible') is True and by_ref.get(g['target_ref'],{}).get('owner')==request['observation']['player']:

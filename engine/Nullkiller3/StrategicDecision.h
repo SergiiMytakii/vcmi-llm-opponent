@@ -41,10 +41,26 @@ inline std::vector<StrategicSignal> offensiveCheckpointSignals(const JsonNode & 
             return {{"checkpoint:offense",now.toCompactString(),true,true,actionable,false}};
     return {};
 }
+inline std::vector<StrategicSignal> helperHiredSignals(const CampaignState & campaign,const JsonNode & world,bool actionable)
+{
+    std::vector<StrategicSignal> result;
+    for(const auto & receipt:world["confirmed_helper_hires"].Vector())
+        for(const auto & goal:campaign.plan()["goals"].Vector())
+            if(goal["kind"].String()=="hire_helper" && receipt["goal"]==goal
+                && campaign.statuses()[goal["id"].String()]["state"].String()=="completed"
+                && receipt["hero_type_id"].getType()==JsonNode::JsonType::DATA_INTEGER
+                && goal["candidate_ref"].String()=="tavern:"+std::to_string(receipt["hero_type_id"].Integer()))
+                for(const auto & hero:world["heroes"].Vector())
+                    if(hero["ref"]==receipt["hero_ref"] && hero["hero_type_id"]==receipt["hero_type_id"])
+                        result.push_back({"helper_hired:"+goal["id"].String(),receipt.toCompactString(),true,true,actionable,false});
+    return result;
+}
 inline JsonNode operationIdentity(const JsonNode & goal)
 {
     JsonNode result;
     for(const auto * field:{"kind","actor_ref","target_ref","min_army_value","required_capabilities","complete_when"}) result[field]=goal[field];
+    if(goal["kind"].String()=="hire_helper")
+        for(const auto * field:{"candidate_ref","helper_role","job_ref"}) result[field]=goal[field];
     return result;
 }
 // Native admission owns this refusal. A geometric route alone cannot clear it;
@@ -353,7 +369,21 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     auto number = [](const JsonNode & value, int64_t low, int64_t high) {
         return value.getType() == JsonNode::JsonType::DATA_INTEGER && value.Integer() >= low && value.Integer() <= high;
     };
-    if(!shape(reply, {"protocol", "request_id", "identity", "decision", "reason", "evidence_refs", "victory_method",
+    if(!reply.isStruct()) return reject("invalid_or_stale_strategic_identity");
+    bool exhaustedDefense=false;
+    if(request["campaign"]["approach"].String()=="defense")
+        for(const auto & signal:request["signals"].Vector()) exhaustedDefense |= signal["question"].String()=="campaign_exhausted";
+    auto replyShape=reply;
+    if(exhaustedDefense)
+    {
+        if(!replyShape.Struct().count("defense_exit")) return reject("missing_defense_exit");
+        replyShape.Struct().erase("defense_exit");
+        const auto & exit=reply["defense_exit"];
+        if(!exit.isNull() && (!shape(exit,{"waiting_for","expected_gain","next_step"})
+            || !text(exit["waiting_for"],640) || !text(exit["expected_gain"],640) || !text(exit["next_step"],640)))
+            return reject("invalid_defense_exit");
+    }
+    if(!shape(replyShape, {"protocol", "request_id", "identity", "decision", "reason", "evidence_refs", "victory_method",
         "assignments", "alternatives", "reconsider_when", "plan", "usage"})
         || !number(reply["protocol"], 2, 2) || reply["request_id"] != request["request_id"]
         || reply["identity"] != request["identity"] || !text(reply["decision"]) || !text(reply["reason"],640)
@@ -379,6 +409,9 @@ inline bool validateStrategicDecision(const JsonNode & reply, const JsonNode & r
     else if(reply["decision"].String() != "retain" || !reply["plan"].isNull() || current.plan().isNull())
         return reject("invalid_strategic_retention");
     trial.review(freshWorld);
+    if(exhaustedDefense && reply["defense_exit"].isNull())
+        for(const auto & goal:trial.plan()["goals"].Vector())
+            if(goal["kind"].String()=="defend_area" || goal["kind"].String()=="preserve_force") return reject("missing_defense_exit");
     std::map<std::string, const JsonNode *> goals;
     for(const auto & goal : trial.plan()["goals"].Vector()) goals[goal["id"].String()] = &goal;
     const auto & assignments = reply["assignments"];
