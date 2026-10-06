@@ -18,6 +18,29 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
            reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan,
            usage=dict(input_tokens=0,output_tokens=0,known=True))
 mode=os.environ.get('NK3_PROBE_MODE','valid')
+if mode in ('small_hero_delivery','disjoint_hero_delivery'):
+    own=r['observation'];actor=max(own['heroes'],key=lambda h:h['army_value'])
+    existing=next((g for g in (r.get('campaign') or {}).get('goals',[]) if g['id']=='small-delivery'),None)
+    if existing:
+        goal.update(existing)
+    else:
+        if mode=='disjoint_hero_delivery':
+            source_ref=min((h for h in own['heroes'] if h['ref']!=actor['ref']),key=lambda h:h['army_value'])['ref']
+            amount=1 # Deliberately impossible intent must not create an empty exchange.
+        else:
+            sources=[s for s in own['offensive_preparation']['reinforcement_sources'] if s['kind']=='hero'
+                     and 0<s['unpledged_army_value']<actor['army_value']*.05 and s.get('meeting_routes')]
+            source=min(sources,key=lambda s:s['unpledged_army_value'])
+            source_ref=source['source_ref'];amount=source['unpledged_army_value']
+        goal.update(id='small-delivery',kind='reinforce_hero',actor_ref=actor['ref'],target_ref=source_ref,
+            building_id=-1,deadline_day=own['day']+2,min_army_value=actor['army_value'],
+            required_capabilities=['land','transfer'],
+            complete_when=dict(kind='army_at_least',value=actor['army_value']+amount))
+    reply['assignments']=[dict(hero_ref=goal['actor_ref'],role='main'),
+                          dict(hero_ref=goal['target_ref'],role='reinforcement')]
+    reply['reconsider_when']=[dict(goal_id=goal['id'],kind='deadline_missed')]
+    reply['reason']='Deliver the explicitly requested small compatible reinforcement'
+    if existing:reply.update(decision='retain',plan=None,assignments=own['strategy_assignments'])
 if mode=='known_passage_scout':
     own=r['observation'];actor=max(own['heroes'],key=lambda h:h['army_value'])
     existing=next((g for g in (r.get('campaign') or {}).get('goals',[]) if g['id']=='known-passage-scout'),None)

@@ -22,6 +22,9 @@ CLI = ROOT / 'scripts/playtest.py'
 @unittest.skipUnless(sys.platform == 'darwin' and os.environ.get('VCMI_NK3_CAMPAIGN_CONFIG'),
                      'requires a separate NK3 build and private native fixture')
 class NativeRepairTest(unittest.TestCase):
+    def test_adjacent_small_replacement_delivers_after_the_named_courier_is_lost(self):
+        self.run_helper_loss(False,adjacent=True)
+
     def test_lost_courier_is_replaced_without_changing_the_recipient_or_replaying_a_handoff(self):
         self.run_helper_loss(False)
 
@@ -37,7 +40,7 @@ class NativeRepairTest(unittest.TestCase):
     def test_lost_courier_without_unpledged_replacement_force_receives_a_strategic_review(self):
         self.run_helper_loss(False,review=True,unrepairable=True)
 
-    def run_helper_loss(self, restoring,defense=False,review=False,unrepairable=False):
+    def run_helper_loss(self, restoring,defense=False,review=False,unrepairable=False,adjacent=False):
         config = json.loads(Path(os.environ['VCMI_NK3_CAMPAIGN_CONFIG']).read_text())
         output = Path(tempfile.mkdtemp(prefix='nk3-helper-loss-', dir=ROOT / '.build/playtests'))
         print('\nNK3 helper-loss evidence:', output, flush=True)
@@ -53,6 +56,13 @@ class NativeRepairTest(unittest.TestCase):
         helper = copy.deepcopy(original)
         helper.update(x=18,y=22)
         helper['options'].update(type='adela',army=[dict(type='core:pikeman',amount=100)])
+        if adjacent:
+            original['options']['army']=[dict(type='core:'+kind,amount=count) for kind,count in
+                (('warUnicorn',18),('grandElf',68),('dendroidSoldier',27),('silverPegasus',35),
+                 ('centaurCaptain',85),('centaur',96),('battleDwarf',77))]
+            helper.update(x=5,y=12)
+            helper['options']['army']=[dict(type='core:'+kind,amount=count) for kind,count in
+                (('pegasus',5),('silverPegasus',2),('gremlin',16))]
         objects['hero_900']=courier
         objects['hero_999']=helper
         if restoring:
@@ -81,6 +91,11 @@ class NativeRepairTest(unittest.TestCase):
                          goal('deliver','reinforce_hero','object:0','object:1',-1,12000,['guild2'],dict(kind='army_at_least',value=12000))],
                   reserves=[],policy=dict(max_loss_ratio=.2,allow_route_repair=True,
                                            allow_helper_replacement=True,critical_towns=['object:3']))
+        if adjacent:
+            seed['goals'][-1].update(min_army_value=132436,complete_when=dict(kind='army_at_least',value=133496))
+            # Replacement is permitted, but a speculative frontier step must
+            # not mask rejection of the already known direct handoff route.
+            seed['policy']['allow_route_repair']=False
         if restoring:
             seed['goals'].append(goal('backup','preserve_force','object:2','object:4',-1,1000,[],dict(kind='force_preserved_until',value=6)))
             seed['goals'][-1]['required_capabilities']=['land']

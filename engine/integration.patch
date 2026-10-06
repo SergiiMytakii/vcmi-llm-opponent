@@ -804,10 +804,17 @@ index 211621bfb..b9c1677dd 100644
  						// Please check for visible tile and not the visible object due to possible partial visibility
  						// checking the object itself might incorrectly abort the exploration of the fog behind it
 diff --git a/AI/Nullkiller2/Behaviors/GatherArmyBehavior.cpp b/AI/Nullkiller2/Behaviors/GatherArmyBehavior.cpp
-index 5c15d5d42..3e3b00708 100644
 --- a/AI/Nullkiller2/Behaviors/GatherArmyBehavior.cpp
 +++ b/AI/Nullkiller2/Behaviors/GatherArmyBehavior.cpp
-@@ -32,6 +32,7 @@ std::string GatherArmyBehavior::toString() const
+@@ -11,6 +11,7 @@
+ #include "../AIGateway.h"
+ #include "../AIUtility.h"
+ #include "../Engine/Nullkiller.h"
++#include "../../Nullkiller3/NativeCampaign.h"
+ #include "../Goals/Composition.h"
+ #include "../Goals/ExchangeSwapTownHeroes.h"
+ #include "../Goals/ExecuteHeroChain.h"
+@@ -32,6 +33,7 @@
  
  Goals::TGoalVec GatherArmyBehavior::decompose(const Nullkiller * aiNk) const
  {
@@ -815,7 +822,7 @@ index 5c15d5d42..3e3b00708 100644
  	Goals::TGoalVec tasks;
  	auto heroes = aiNk->cc->getHeroesInfo();
  	if(heroes.empty())
-@@ -74,6 +75,17 @@ Goals::TGoalVec GatherArmyBehavior::deliverArmyToHero(const Nullkiller * aiNk, c
+@@ -74,6 +76,17 @@
  
  	for(const AIPath & path : paths)
  	{
@@ -833,28 +840,55 @@ index 5c15d5d42..3e3b00708 100644
  #if NK2AI_TRACE_LEVEL >= 2
  		logAi->trace(
  			"GatherArmyBehavior::deliverArmyToHero Path found %s, %s, %lld", path.toString(), path.targetHero->getNameTextID(), path.heroArmy->estimateCombatValue()
+@@ -101,11 +114,21 @@
+ 
+ 		HeroExchange heroExchange(receiverHero, path);
+ 		// TODO: Mircea: Artifacts (inventory things) aren't considered in this calculation, though they are properly changed in an army exchange, to revisit
+-		const uint64_t additionalArmyStrength = heroExchange.getReinforcementArmyStrength(aiNk);
++		uint64_t additionalArmyStrength = heroExchange.getReinforcementArmyStrength(aiNk);
++		const bool explicitDelivery = strategicReceiver && strategicSource;
++		if(explicitDelivery && aiNk->strategicCampaign)
++		{
++			const auto * sourceHero = dynamic_cast<const CGHeroInstance *>(strategicSource);
++			if(sourceHero && path.targetHero == sourceHero
++				&& std::all_of(path.nodes.begin(), path.nodes.end(), [&](const auto & node) { return node.targetHero == sourceHero; }))
++				additionalArmyStrength = aiNk->strategicCampaign->directDeliveryValue(receiverHero, sourceHero, strategicSources.empty() ? nullptr : &strategicSources);
++		}
+ 		const float additionalArmyRatio = static_cast<float>(additionalArmyStrength) / receiverHero->estimateCombatValue();
+ 
+-		// avoid transferring very small amount of army
+-		if((additionalArmyRatio < 0.1f && additionalArmyStrength < 20000) || additionalArmyStrength < 500)
++		// An explicit campaign delivery chooses its own useful size. Keep the
++		// ordinary autonomous heuristic, and never schedule an empty exchange.
++		if(additionalArmyStrength == 0 || (!explicitDelivery
++			&& ((additionalArmyRatio < 0.1f && additionalArmyStrength < 20000) || additionalArmyStrength < 500)))
+ 		{
+ #if NK2AI_TRACE_LEVEL >= 2
+ 			logAi->trace("GatherArmyBehavior::deliverArmyToHero Army value is too small.");
 diff --git a/AI/Nullkiller2/Behaviors/GatherArmyBehavior.h b/AI/Nullkiller2/Behaviors/GatherArmyBehavior.h
-index a2c47856f..ddebbbe4b 100644
 --- a/AI/Nullkiller2/Behaviors/GatherArmyBehavior.h
 +++ b/AI/Nullkiller2/Behaviors/GatherArmyBehavior.h
-@@ -19,12 +19,17 @@ namespace Goals
+@@ -19,10 +19,20 @@
  {
  	class GatherArmyBehavior : public CGoal<GatherArmyBehavior>
  	{
 +		const CGHeroInstance * strategicReceiver = nullptr;
 +		const CGObjectInstance * strategicSource = nullptr;
++		std::map<std::string,std::string> strategicSources;
  	public:
  		GatherArmyBehavior()
  			:CGoal(Goals::GATHER_ARMY)
  		{
++		}
++
++		GatherArmyBehavior(const CGHeroInstance * receiver, const CGObjectInstance * source,
++			const std::map<std::string,std::string> * prospectiveSources = nullptr) : GatherArmyBehavior()
++		{
++			strategicReceiver = receiver; strategicSource = source;
++			if(prospectiveSources) strategicSources = *prospectiveSources;
  		}
  
-+		GatherArmyBehavior(const CGHeroInstance * receiver, const CGObjectInstance * source) : GatherArmyBehavior()
-+		{ strategicReceiver = receiver; strategicSource = source; }
-+
  		TGoalVec decompose(const Nullkiller * aiNk) const override;
- 		std::string toString() const override;
- 
 diff --git a/AI/Nullkiller2/Behaviors/StartupBehavior.cpp b/AI/Nullkiller2/Behaviors/StartupBehavior.cpp
 index 006618ab4..7e25356e6 100644
 --- a/AI/Nullkiller2/Behaviors/StartupBehavior.cpp

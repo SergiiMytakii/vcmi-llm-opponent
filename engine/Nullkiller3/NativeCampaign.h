@@ -83,7 +83,8 @@ class NativeCampaign
     std::map<std::string,std::string> helperSources() const;
     bool repairDeliverySources(NK2AI::Nullkiller & ai);
     bool locallyRepairedCourierLoss(NK2AI::Nullkiller & ai,const std::string & actor);
-    NK2AI::Goals::TGoalVec deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * recipient,const CGObjectInstance * source,bool collectFromTown = false) const;
+    NK2AI::Goals::TGoalVec deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * recipient,const CGObjectInstance * source,
+        bool collectFromTown = false,const std::map<std::string,std::string> * prospectiveSources = nullptr) const;
     NK2AI::Goals::TGoalVec repairRoute(NK2AI::Nullkiller & ai, const CGHeroInstance * hero, const CGObjectInstance * destination) const;
     void rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals::TGoalVec generated,
                        const JsonNode & goal, const NK2AI::Nullkiller & ai,
@@ -119,6 +120,8 @@ public:
     TResources plannedBoatResources(const CGHeroInstance * hero, const TResources & currentFunds, const TResources & nativeLocks) const;
     bool emergencySpending() const;
     uint64_t forceReserve(const CArmedInstance * army) const;
+    uint64_t directDeliveryValue(const CGHeroInstance * receiver, const CGHeroInstance * source,
+        const std::map<std::string,std::string> * prospectiveSources = nullptr) const;
     const CGHeroInstance * deliveryReceiver(const CGHeroInstance * first, const CGHeroInstance * second) const;
     bool beginDelivery(const CGHeroInstance * receiver, const CArmedInstance * source);
     void endDelivery();

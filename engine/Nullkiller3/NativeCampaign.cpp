@@ -160,7 +160,7 @@ bool NativeCampaign::repairDeliverySources(NK2AI::Nullkiller & ai)
             auto prospectiveSources=sources;
             prospectiveSources[goal["id"].String()]=reference(helper);
             NK2AI::Goals::TGoalVec admitted;
-            rememberTasks(admitted,deliveryTasks(ai,actor,helper),goal,ai,&prospectiveSources);
+            rememberTasks(admitted,deliveryTasks(ai,actor,helper,false,&prospectiveSources),goal,ai,&prospectiveSources);
             if(admitted.empty()) continue;
             if(helper==original) { target=helper;break; } // Retain a feasible replacement without churn.
             if(surplus>bestSurplus) { target=helper;bestSurplus=surplus; }
@@ -178,12 +178,13 @@ bool NativeCampaign::repairDeliverySources(NK2AI::Nullkiller & ai)
     }
     return changed;
 }
-NK2AI::Goals::TGoalVec NativeCampaign::deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * actor,const CGObjectInstance * target,bool collectFromTown) const
+NK2AI::Goals::TGoalVec NativeCampaign::deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * actor,const CGObjectInstance * target,
+    bool collectFromTown,const std::map<std::string,std::string> * prospectiveSources) const
 {
     using namespace NK2AI;
     if(!actor || !target) return {};
     Goals::TGoalVec generated;
-    if(!collectFromTown) generated=Goals::GatherArmyBehavior(actor,target).decompose(&ai);
+    if(!collectFromTown) generated=Goals::GatherArmyBehavior(actor,target,prospectiveSources).decompose(&ai);
     if(collectFromTown) if(const auto * town=dynamic_cast<const CGTownInstance *>(target))
     {
         auto paths=ai.pathfinder->getPathInfo(town->visitablePos(),false);
@@ -1421,6 +1422,34 @@ uint64_t NativeCampaign::forceReserve(const CArmedInstance * army) const
     std::string spending;
     { std::lock_guard lock(executionMutex); spending=deliveryGoal.empty() ? spendingGoal : deliveryGoal; }
     return campaign.exchangeForce(ref,world,helperSources(),spending);
+}
+uint64_t NativeCampaign::directDeliveryValue(const CGHeroInstance * receiver, const CGHeroInstance * source,
+    const std::map<std::string,std::string> * prospectiveSources) const
+{
+    if(!receiver || !source || receiver==source || receiver->getOwner().getNum()!=world["player"].Integer()
+        || source->getOwner()!=receiver->getOwner()) return 0;
+    auto ref=[&](const CGHeroInstance * hero) {
+        const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
+        const auto found=aliases.find(std::to_string(hero->id.getNum()));
+        return found==aliases.end() ? std::string() : externalai::objectReference(found->second);
+    };
+    const auto recipient=ref(receiver), donor=ref(source);
+    const auto * sourceUnits=ownArmyUnits(donor,world), *recipientUnits=ownArmyUnits(recipient,world);
+    // A fresh direct-source quote must describe these actual armies. Do not
+    // apply it to a virtual multi-hero chain or stale post-command snapshot.
+    if(!sourceUnits || !recipientUnits || *sourceUnits!=armyUnits(source) || *recipientUnits!=armyUnits(receiver)) return 0;
+    const auto replacements=prospectiveSources ? *prospectiveSources : helperSources();
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+    {
+        const auto & id=goal["id"].String();
+        if(goal["kind"].String()!="reinforce_hero" || goal["actor_ref"].String()!=recipient
+            || !campaign.holdsCommitment(id) || world["day"].Integer()>goal["deadline_day"].Integer()
+            || CampaignState::armyPool(campaign.deliverySource(goal,replacements),world)!=donor) continue;
+        const auto power=source->estimateCombatValue();
+        const auto floor=wholeCreatureSourceFloor(donor,power,campaign.exchangeForce(donor,world,replacements,id),world,recipientUnits);
+        return power>floor ? power-floor : 0;
+    }
+    return 0;
 }
 const CGHeroInstance * NativeCampaign::deliveryReceiver(const CGHeroInstance * first, const CGHeroInstance * second) const
 {
