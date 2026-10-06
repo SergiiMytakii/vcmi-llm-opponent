@@ -2818,3 +2818,36 @@ index 515d5b65f..d492815a6 100644
  	bool isContactAllowed(PlayerColor left, PlayerColor right) const;
  	bool isPlayerMakingTurn(PlayerColor which) const;
  
+diff --git a/AI/Nullkiller2/Goals/ExploreNeighbourTile.cpp b/AI/Nullkiller2/Goals/ExploreNeighbourTile.cpp
+index c3c491862..401ca0b19 100644
+--- a/AI/Nullkiller2/Goals/ExploreNeighbourTile.cpp
++++ b/AI/Nullkiller2/Goals/ExploreNeighbourTile.cpp
+@@ -84,6 +84,7 @@ std::optional<NeighbourExplorationTarget> getNeighbourExplorationTarget(
+ 
+ 	NeighbourExplorationCandidate candidate;
+ 	candidate.sameDay = pathInfo->turns == 0;
++	candidate.requireDiscovery = aiNk->isStrategicMode();
+ 	candidate.accessible = pathInfo->accessible == EPathAccessibility::ACCESSIBLE;
+ 	candidate.safe = danger == 0;
+ 	candidate.tilesDiscovered = helper.howManyTilesWillBeDiscovered(tile);
+@@ -112,7 +113,7 @@ NeighbourExplorationEvaluation evaluateNeighbourExplorationCandidate(
+ 	if(!candidate.sameDay
+ 		|| !candidate.accessible
+ 		|| !candidate.safe
+-		|| (candidate.tilesDiscovered <= 0 && candidate.strategicProgress <= 0.0f))
++		|| (candidate.tilesDiscovered <= 0 && (candidate.requireDiscovery || candidate.strategicProgress <= 0.0f)))
+ 	{
+ 		return result;
+ 	}
+diff --git a/AI/Nullkiller2/Goals/ExploreNeighbourTile.h b/AI/Nullkiller2/Goals/ExploreNeighbourTile.h
+index 102105f4c..0c002cfe8 100644
+--- a/AI/Nullkiller2/Goals/ExploreNeighbourTile.h
++++ b/AI/Nullkiller2/Goals/ExploreNeighbourTile.h
+@@ -21,6 +21,7 @@ class Nullkiller;
+ struct NeighbourExplorationCandidate
+ {
+ 	bool sameDay = false;
++	bool requireDiscovery = false;
+ 	bool accessible = false;
+ 	bool safe = false;
+ 	int tilesDiscovered = 0;

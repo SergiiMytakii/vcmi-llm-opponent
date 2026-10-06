@@ -95,6 +95,7 @@ class NativeCampaign
     NK2AI::Goals::TGoalVec deliveryTasks(NK2AI::Nullkiller & ai,const CGHeroInstance * recipient,const CGObjectInstance * source,
         bool collectFromTown = false,const std::map<std::string,std::string> * prospectiveSources = nullptr) const;
     NK2AI::Goals::TGoalVec repairRoute(NK2AI::Nullkiller & ai, const CGHeroInstance * hero, const CGObjectInstance * destination) const;
+    bool repairOwnHeroObstruction(NK2AI::Nullkiller & ai);
     void rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals::TGoalVec generated,
                        const JsonNode & goal, const NK2AI::Nullkiller & ai,
                        const std::map<std::string,std::string> * prospectiveSources = nullptr);

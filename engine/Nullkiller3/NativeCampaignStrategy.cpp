@@ -264,6 +264,7 @@ bool NativeCampaign::reviewIdleArmy(NK2AI::Nullkiller & ai)
     world["main_army_idle"]=mainArmyIdle(campaign,world);
     logAi->info("NK3_IDLE %s",world["main_army_idle"].toCompactString());
     if(!idleArmyNeedsReview(world["main_army_idle"])) return false;
+    if(repairOwnHeroObstruction(ai)) return true;
     return reviewStrategy(ai,true);
 }
 bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)

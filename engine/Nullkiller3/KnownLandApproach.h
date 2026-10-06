@@ -15,6 +15,33 @@ struct KnownLandTile
     std::vector<size_t> neighbors;
     std::vector<std::string> neutralGuards;
 };
+// Occupancy is a current physical constraint, not a predicted arrival.
+// Neutral encounters stay closed: yielding never authorizes a battle.
+inline bool knownLandConnection(const std::vector<KnownLandTile> & tiles,size_t source,size_t target,
+    const std::set<size_t> & occupied)
+{
+    if(source>=tiles.size() || target>=tiles.size() || occupied.count(source) || occupied.count(target)) return false;
+    std::set<size_t> visited{source};std::deque<size_t> pending{source};
+    while(!pending.empty())
+    {
+        const auto at=pending.front();pending.pop_front();
+        if(at==target) return true;
+        for(const auto next:tiles[at].neighbors)
+            if(next<tiles.size() && !occupied.count(next) && tiles[next].neutralGuards.empty() && visited.insert(next).second)
+                pending.push_back(next);
+    }
+    return false;
+}
+inline bool yieldOpensKnownConnection(const std::vector<KnownLandTile> & tiles,size_t source,size_t target,
+    std::set<size_t> occupied,size_t blocker,size_t destination)
+{
+    if(blocker==source || destination==source || destination>=tiles.size() || !occupied.count(blocker)
+        || occupied.count(destination) || !tiles[destination].neutralGuards.empty()
+        || knownLandConnection(tiles,source,target,occupied)) return false;
+    occupied.erase(blocker);occupied.insert(destination);
+    return knownLandConnection(tiles,source,target,occupied);
+}
+
 // The final attack/interaction may use native blockingVisit(IGNORE_GUARDS).
 // A neutral zone on the target asset alone does not shield that hero/town.
 // Visible land connectivity is an overapproximation: no private enemy movement,

@@ -1201,6 +1201,25 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
                 if(std::find(result.Vector().begin(),result.Vector().end(),arrival)==result.Vector().end()) result.Vector().push_back(arrival);
             }
         }
+        if(std::getenv("VCMI_NK3_ROUTE_DIAGNOSTICS"))
+            for(const auto * hero:ai.cc->getHeroesInfo())
+            {
+                JsonNode trace;trace["day"]=world["day"];trace["target_position"]=pos;
+                trace["hero_ref"].String()=reference(hero);trace["native_paths"].Integer()=0;
+                trace["blocked_action_paths"].Integer()=0;trace["mixed_actor_paths"].Integer()=0;
+                for(const auto & path:paths) if(path.targetHero==hero)
+                {
+                    ++trace["native_paths"].Integer();
+                    if(path.getFirstBlockedAction()) ++trace["blocked_action_paths"].Integer();
+                    if(std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node){return node.targetHero!=hero;}))
+                        ++trace["mixed_actor_paths"].Integer();
+                }
+                const bool admitted=std::any_of(result.Vector().begin(),result.Vector().end(),[&](const auto & item){return item["hero_ref"].String()==reference(hero);});
+                if(admitted) continue;
+                CGPath ordinary;trace["ordinary_path_established"].Bool()=ai.getPathsInfo(hero)->getPath(ordinary,position,EPathfindingLayer::LAND);
+                trace["state"].String()=trace["native_paths"].Integer()==0 ? "native_route_not_established" : "native_routes_filtered";
+                logAi->info("NK3_ROUTE_DIAGNOSTICS %s",trace.toCompactString());
+            }
         arrivalQuotes.emplace(key,result);
         return result;
     };
@@ -1308,6 +1327,79 @@ bool NativeCampaign::accept(const JsonNode & proposal, std::string & reason)
     acceptedRevision=campaign.plan()["revision"].Integer();
     return true;
 }
+// Yield only idle, uncommitted own heroes. This is a physical route repair,
+// never an army exchange, strategic destination, battle or forecasted command.
+bool NativeCampaign::repairOwnHeroObstruction(NK2AI::Nullkiller & ai)
+{
+    if(!campaign.plan()["policy"]["allow_route_repair"].Bool() || stopping) return false;
+    const auto * main=dynamic_cast<const CGHeroInstance *>(resolve(ai,world["main_army_idle"]["hero_ref"]));
+    if(!main || main->movementPointsRemaining()<=100 || main->isGarrisoned()) return false;
+    const auto graph=visibleLandGraph(ai,world,[&](const auto * object){return reference(object);});
+    const auto source=graph.index.find(main->visitablePos());
+    if(source==graph.index.end()) return false;
+    std::set<size_t> occupied;
+    for(const auto * hero:ai.cc->getHeroesInfo()) if(hero!=main && !hero->isGarrisoned())
+        if(const auto cell=graph.index.find(hero->visitablePos());cell!=graph.index.end()) occupied.insert(cell->second);
+    std::vector<const CGObjectInstance *> targets;
+    for(const auto * town:ai.cc->getTownsInfo()) targets.push_back(town);
+    for(const auto & object:world["visible_objects"].Vector())
+    {
+        const auto kind=object["kind"].String();
+        if((kind=="mine" && object["owner"]!=world["player"]) || kind=="resource"
+            || ((kind=="treasure_chest" || kind=="obelisk" || kind=="scholar") && !object["visited"].Bool()))
+            if(const auto * target=resolve(ai,object["ref"])) targets.push_back(target);
+    }
+    std::optional<NK2AI::AIPath> best;const CGHeroInstance * yielding=nullptr;const CGObjectInstance * opened=nullptr;
+    for(const auto * helper:ai.cc->getHeroesInfo())
+    {
+        if(helper==main || helper->isGarrisoned() || ai.isHeroLocked(helper) || helper->movementPointsRemaining()<=100
+            || !campaign.participantGoals(reference(helper),helperSources(),world).empty()) continue;
+        bool requiredDefender=false;
+        for(const auto * town:ai.cc->getTownsInfo()) requiredDefender |= ai.findRequiredTownDefender(town)==helper;
+        if(requiredDefender) continue;
+        const auto from=graph.index.find(helper->visitablePos());if(from==graph.index.end()) continue;
+        for(const auto * target:targets)
+        {
+            const auto to=graph.index.find(target->visitablePos());if(to==graph.index.end()) continue;
+            CGPath ordinary;
+            if(ai.getPathsInfo(main)->getPath(ordinary,target->visitablePos(),EPathfindingLayer::LAND)
+                || knownLandConnection(graph.land,source->second,to->second,occupied)) continue;
+            auto vacated=occupied;vacated.erase(from->second);
+            if(!knownLandConnection(graph.land,source->second,to->second,vacated)) continue;
+            for(const auto & [position,id]:graph.index)
+            {
+                const auto origin=helper->visitablePos();
+                if(position.z!=origin.z || std::max(std::abs(position.x-origin.x),std::abs(position.y-origin.y))>3
+                    || !ai.cc->getVisitableObjs(position).empty()
+                    || !yieldOpensKnownConnection(graph.land,source->second,to->second,occupied,from->second,id)) continue;
+                for(const auto & path:ai.pathfinder->getPathInfo(position,false))
+                {
+                    if(path.targetHero!=helper || path.turn()!=0 || path.exchangeCount>1 || path.getFirstBlockedAction()
+                        || path.getTotalArmyLoss()!=0 || path.getTotalDanger()!=0
+                        || ai.dangerHitMap->enemyCanKillOurHeroesAlongThePath(path)) continue;
+                    if(std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node) {
+                        return node.targetHero!=helper || node.specialAction || node.layer!=EPathfindingLayer::LAND;
+                    })) continue;
+                    if(!best || path.movementCost()<best->movementCost()) {best=path;yielding=helper;opened=target;}
+                }
+            }
+        }
+    }
+    if(!best) return false;
+    const auto before=yielding->visitablePos();
+    ai.executeTask(std::make_shared<NK2AI::Goals::ExecuteHeroChain>(*best));
+    const bool moved=yielding->visitablePos()!=before;
+    JsonNode trace;trace["kind"].String()="own_hero_yield";trace["day"]=world["day"];
+    trace["main_ref"].String()=reference(main);trace["helper_ref"].String()=reference(yielding);
+    trace["target_ref"].String()=reference(opened);trace["from"]=coordinate(before);
+    trace["to"]=coordinate(yielding->visitablePos());trace["movement_observed"].Bool()=moved;
+    logAi->info("NK3_ROUTE_REPAIR %s",trace.toCompactString());
+    // Quotes are rebuilt from acknowledged positions. The geometric connection
+    // above never enters the model as a ready route before this movement.
+    if(moved) {ai.invalidatePathfinderData();ai.updateState();}
+    return moved;
+}
+
 NK2AI::Goals::TGoalVec NativeCampaign::repairRoute(NK2AI::Nullkiller & ai, const CGHeroInstance * hero, const CGObjectInstance * destination) const
 {
     using namespace NK2AI;
