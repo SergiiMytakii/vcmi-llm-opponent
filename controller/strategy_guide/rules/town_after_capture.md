@@ -13,7 +13,7 @@ Compare departure, garrison preparation, supported interception and holding. Bef
 Holding preserves assets but delays the operation. Before renewing compare interception, bypass/capture, reinforcement and an offered helper. State what waiting changes, when to check, its benefit and next operation/reassessment. A new deadline or lost helper alone adds no benefit. Without expected improvement compare protection with an available operation and acceptable town-loss risk. Weekly growth may support buying stock/requoting departure; future routes remain unknown. Hire for a concrete uncovered job, compare existing helpers and assign fresh routes only after confirmed hiring. A small hired defender need not stop a strong enemy.
 
 ## When to reconsider
-Review fresh threats/movement, weaker troops, changed stock/funds, extraction failure, receipts, lost routes, delayed return or ownership change. campaign_exhausted with the main in town requires the next supported operation/funded defense before departure. Keeping a completed hold provides no active goal.
+Reassess after threats, stock, force, routes or ownership change. When the operation changes, recheck its force allocation and remaining base protection. campaign_exhausted in town requires a new supported operation or funded defense; a completed hold is no active goal.
 
 ## Executor limits
 Use prepare_garrison/intercept_hero only with supported participants/quotes. Preparation separates stationary troops from the retained main floor; dependent attacks need confirmation and fresh routes. Do not invent pursuit/kills, double-count transfers or treat recipient-aliased force as a new garrison. The always-present contract owns goal fields, modes, completion and defense_exit requirements.
