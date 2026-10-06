@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from .reports import report
+from .reports import report, native_records
 from .runs import COLORS, DATA, ROOT, now, snapshot, verify, write_json
 
 
@@ -88,6 +88,8 @@ def run_game(run):
     before = [snapshot(path) for path in protected]
     write_json(run / "protected-before.json", before)
     child = None
+    from .learning import LearningRuntime
+    learning=LearningRuntime(run,manifest)
     result = {"started_at": now(), "reason": "setup_failed", "returncode": None}
     try:
         sandbox = run / "profile.sb"
@@ -95,6 +97,17 @@ def run_game(run):
             f"(deny file-write* (subpath {json.dumps(str(path))}))\n" for path in protected), encoding="utf-8")
         env = os.environ.copy()
         env.pop('DYLD_INSERT_LIBRARIES', None)
+        env.pop('VCMI_NK3_MODE', None)
+        for name in ('VCMI_TURN_REVIEW_INTERVAL_DAYS', 'VCMI_TURN_REVIEW_DIRECTORY', 'VCMI_TURN_REVIEW_RUN_ID'):
+            env.pop(name, None)
+        interval = manifest.get('review_interval_days', 0)
+        if interval:
+            (run / 'turn-review').mkdir()
+            env.update(VCMI_TURN_REVIEW_INTERVAL_DAYS=str(interval),
+                       VCMI_TURN_REVIEW_DIRECTORY=str(run / 'turn-review'),
+                       VCMI_TURN_REVIEW_RUN_ID=manifest['run_id'])
+        if "nk3_mode" in manifest:
+            env['VCMI_NK3_MODE'] = manifest['nk3_mode']
         profile = run / 'profile' / DATA
         env.update(VCMI_PROFILE_DIR=str(profile),
                    VCMI_PLAYTEST_RUN=str(run), VCMI_EXTERNAL_AI_EXECUTABLE=sys.executable,
@@ -117,6 +130,8 @@ def run_game(run):
         # before --version or game startup can touch its default profile.
         if help_result.returncode != 0 or b'VCMI_PROFILE_DIR' not in help_result.stdout:
             raise ValueError('engine lacks native profile isolation; rebuild before launching')
+        if interval and b'VCMI_TURN_REVIEW_INTERVAL_DAYS' not in help_result.stdout:
+            raise ValueError('engine lacks native turn-review mode; rebuild before launching')
         version = subprocess.run(prefix + ['--version'], env=env, capture_output=True, timeout=10)
         (run / 'preflight.stdout.log').write_bytes(help_result.stdout + version.stdout)
         (run / 'preflight.stderr.log').write_bytes(help_result.stderr + version.stderr)
@@ -143,6 +158,10 @@ def run_game(run):
             for color in COLORS:
                 if color in manifest["players"]:
                     args += ["--ai", manifest["players"][color]]
+        try:learning.start(env)
+        except (OSError,ValueError,subprocess.SubprocessError) as error:
+            result['analysis_error']=str(error)
+            env.pop('VCMI_NK3_LEARNING_JOURNAL',None)
         command = prefix + args
         write_json(run / "command.json", command)
         manifest["status"] = "running"
@@ -153,13 +172,26 @@ def run_game(run):
             result.update(pid=child.pid, reason="deadline")
             write_json(run / "launch.json", result)
             deadline = time.monotonic() + manifest["max_seconds"]
+            previous_tick = time.monotonic()
             log_offset, partial, assignments = 0, b"", {}
-            while time.monotonic() < deadline:
+            while True:
+                current_tick = time.monotonic()
+                paused = False
+                if interval:
+                    from .turn_review import sync_review
+                    review = sync_review(run)
+                    paused = bool(review and review['status'] in ('paused', 'save_failed'))
+                    if paused:
+                        # The gameplay time limit excludes time spent analysing a checkpoint.
+                        deadline += current_tick - previous_tick
+                previous_tick = current_tick
                 if (run / "STOP").exists():
                     result["reason"] = "requested_stop"
                     break
                 if child.poll() is not None:
                     result["reason"] = "process_exit"
+                    break
+                if not paused and current_tick >= deadline:
                     break
                 logfile = logs / "VCMI_Client_log.txt"
                 if logfile.is_file():
@@ -191,8 +223,10 @@ def run_game(run):
         after = [snapshot(path) for path in protected]
         result.update(finished_at=now(), elapsed_seconds=round(time.monotonic() - started, 3),
                       protected_files_unchanged=before == after)
-        write_json(run / "launch.json", result)
         manifest["status"] = "finished"
         write_json(run / "manifest.json", manifest)
+        try:learning.finish(natural=bool(result.get('cleanup_complete') and result['reason']=='process_exit'))
+        except (OSError,RuntimeError,subprocess.SubprocessError) as error:result['analysis_cleanup_error']=str(error)
+        write_json(run / 'launch.json', result)
         report(run)
     return result

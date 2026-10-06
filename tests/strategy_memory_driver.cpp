@@ -394,6 +394,12 @@ int main()
 		externalai::observeMemory(memory, many, actions, json("[]"));
 		externalai::observeMemory(same, many, actions, json("[]"));
 		require(memory == same, "same visible history produced different memory");
+		JsonNode nativeMemory;
+		auto noNativeActions=json("[]");
+		externalai::observeMemory(nativeMemory,observation,noNativeActions,json("[]"));
+		externalai::observeMemory(nativeMemory,many,noNativeActions,json("[]"),{"object:42"});
+		require(nativeMemory["known_objects"][0]["ref"].String()=="object:42","native campaign target evicted by 160 newer sightings");
+		require(nativeMemory["known_objects"].Vector().size()==128,"retained target bypassed memory bound");
 		JsonNode exploration;
 		auto exploreActions = json(R"([{"id":"move-1","kind":"explore","target":[1,2,0]}])");
 		externalai::observeMemory(exploration, json(R"({"day":1})"), exploreActions, json("[[1,2,0]]"));

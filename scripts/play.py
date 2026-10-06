@@ -45,7 +45,7 @@ def preflight(engine, profile, codex):
         env.pop(key, None)
     env.update(VCMI_PROFILE_DIR=str(profile), VCMI_EXTERNAL_AI_EXECUTABLE=sys.executable,
                VCMI_EXTERNAL_AI_SCRIPT=str(ROOT / 'controller/main.py'), VCMI_CODEX_EXECUTABLE=str(codex),
-               VCMI_EXPERIENCE_MODE='learn')
+               VCMI_EXPERIENCE_MODE='learn', VCMI_NK3_MODE='model')
     # Help exits before VCMI initializes directories; an installed/older game
     # must be rejected here, without ever opening its normal profile.
     result = subprocess.run([str(engine), '--help'], cwd=engine.parent, env=env,
@@ -99,20 +99,32 @@ def play(args):
         else:
             print('New game: select External AI - Land Duel, red human / blue AI. Blue uses ExternalAI.', flush=True)
         print('Profile:', profile, flush=True)
+        from playtesting.learning import LearningRuntime
+        learning=LearningRuntime(profile/'logs',{'experience':{'mode':'learn',
+            'database':env.get('VCMI_EXPERIENCE_DB',str(ROOT/'.build/experience.sqlite3'))}})
+        try:learning.start(env)
+        except (OSError,ValueError,subprocess.SubprocessError):
+            print('Experience analysis unavailable; game continues from current facts.',file=sys.stderr)
         with (profile / 'logs/launcher.log').open('ab') as log:
             if os.name == 'nt':
                 from windows_process import run
-                return run(command, cwd=engine.parent, env=env, log=log,
-                           cleanup_path=profile / 'logs/cleanup.json')
-            child = subprocess.Popen(command, cwd=engine.parent, env=env, stdout=log,
-                                     stderr=subprocess.STDOUT, start_new_session=True)
+                code=None
+                try:
+                    code=run(command,cwd=engine.parent,env=env,log=log,cleanup_path=profile/'logs/cleanup.json')
+                    return code
+                finally:learning.finish(natural=code==0)
+            child = None
             try:
+                child = subprocess.Popen(command, cwd=engine.parent, env=env, stdout=log,
+                                         stderr=subprocess.STDOUT, start_new_session=True)
                 return child.wait()
             except KeyboardInterrupt:
                 return 130
             finally:
                 from playtesting.launcher import terminate_group
-                terminate_group(child, profile / 'logs/cleanup.json')
+                try:
+                    if child:terminate_group(child, profile / 'logs/cleanup.json')
+                finally:learning.finish(natural=bool(child and child.returncode==0))
 
 
 def initialize(data, profile):

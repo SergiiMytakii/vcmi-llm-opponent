@@ -25,7 +25,7 @@ schema = json.loads(pathlib.Path(args[args.index('--output-schema') + 1]).read_t
 request = json.loads(sys.stdin.read())
 assert 'OPENAI_API_KEY' not in os.environ and 'CODEX_API_KEY' not in os.environ
 assert '--ignore-user-config' in args and '--ignore-rules' in args
-assert args[args.index('-m') + 1] == 'gpt-5.6-terra'
+assert args[args.index('-m') + 1] == 'gpt-6.1-sol'
 assert 'forced_login_method="chatgpt"' in args
 assert 'model_reasoning_effort="low"' in args
 assert schema['properties']['action_id']['enum'] == ['end', 'build-0']
@@ -73,7 +73,7 @@ with patch.object(time, 'monotonic', side_effect=lambda: 60.001 if Path({str(dec
         reply, info = self.run_controller()
         self.assertEqual(reply['action_id'], 'build-0')
         self.assertEqual(info['provider'], 'codex')
-        self.assertEqual(info['model'], 'gpt-5.6-terra')
+        self.assertEqual(info['model'], 'gpt-6.1-sol')
         self.assertEqual(info['reasoning_effort'], 'low')
         self.assertEqual(info['usage']['input_tokens'], 12)
 

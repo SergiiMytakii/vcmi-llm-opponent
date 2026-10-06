@@ -620,7 +620,7 @@ inline void acceptCampaign(JsonNode & memory, const JsonNode & update, int day)
 }
 
 inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonNode & actions,
-	const JsonNode & visiblePositions)
+	const JsonNode & visiblePositions, const std::set<std::string> & retainedTargets = {})
 {
 	if(memory.isNull())
 	{
@@ -711,7 +711,7 @@ inline void observeMemory(JsonNode & memory, const JsonNode & observation, JsonN
 	for(const auto & [ref, item] : facts) ordered.push_back(item);
 	const auto & plan = static_cast<const JsonNode &>(memory)["plan"];
 	const auto target = plan["target_ref"].isString() ? plan["target_ref"].String() : std::string{};
-    std::set<std::string> campaignTargets;
+    std::set<std::string> campaignTargets = retainedTargets;
     const auto & campaign = static_cast<const JsonNode &>(memory)["campaign"];
     for(const auto * key : {"assignments", "milestones"})
         for(const auto & item : campaign[key].Vector())

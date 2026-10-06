@@ -168,6 +168,12 @@ def _validate_shape(value, schema):
     elif kind == 'integer':
         if type(value) is not int or not schema['minimum'] <= value <= schema['maximum']:
             raise ValueError('campaign integer exceeds bounds')
+    elif kind == 'boolean':
+        if type(value) is not bool: raise ValueError('campaign value must be boolean')
+    elif kind == 'number':
+        import math
+        if type(value) not in (int, float) or not math.isfinite(value) or not schema['minimum'] <= value <= schema['maximum']:
+            raise ValueError('campaign number exceeds bounds')
 
 
 def validate_campaign(request, update, strategy=None):

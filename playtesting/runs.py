@@ -1,5 +1,7 @@
 """Run preparation and provenance. Game data never goes into source control."""
 from datetime import datetime, timezone
+import ctypes
+import errno
 import hashlib
 import json
 import math
@@ -7,12 +9,29 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import sys
 import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
 COLORS = ("red", "blue", "tan", "green", "orange", "purple", "teal", "pink")
 DATA = Path("Library/Application Support/vcmi")
+
+
+def copy_snapshot_file(source, destination):
+    """Independent files, using APFS copy-on-write where the filesystem allows it."""
+    if sys.platform == "darwin":
+        clone = getattr(ctypes.CDLL(None, use_errno=True), "clonefile", None)
+        if clone is not None:
+            clone.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int)
+            clone.restype = ctypes.c_int
+            if clone(os.fsencode(source), os.fsencode(destination), 0) == 0:
+                shutil.copystat(source, destination)
+                return str(destination)
+            error = ctypes.get_errno()
+            if error not in (errno.EXDEV, errno.ENOTSUP, errno.EINVAL, errno.ENOSYS):
+                raise OSError(error, os.strerror(error), str(destination))
+    return shutil.copy2(source, destination)
 
 
 def now():
@@ -87,12 +106,27 @@ def prepare(config_path, out):
         raise ValueError("players must map VCMI colors to AI names")
     if config.get("purpose") not in ("integration", "training", "evaluation") or not config.get("case_id"):
         raise ValueError("case_id and purpose (integration/training/evaluation) are required")
+    if "Nullkiller3" in players.values():
+        config.setdefault("nk3_mode", "model")
+        if config["nk3_mode"] not in ("native", "model"):
+            raise ValueError("nk3_mode must be native or model")
+    elif "nk3_mode" in config:
+        raise ValueError("nk3_mode requires a Nullkiller3 player")
     finite_positive(config["max_seconds"], "max_seconds")
+    interval = config.setdefault('review_interval_days', 0)
+    if type(interval) is not int or not 0 <= interval <= 365:
+        raise ValueError('review_interval_days must be an integer from 0 (off) to 365')
     experience_mode = config.get('experience_mode', 'learn')
     if experience_mode not in ('off', 'read_only', 'learn'):
         raise ValueError('experience_mode must be off, read_only or learn')
-    config.setdefault("decision_timeout_seconds", 65)
-    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 65)
+    for name,default,maximum in (('analysis_max_calls',12,100),('analysis_max_tokens',200000,1000000),
+                               ('analysis_idle_turns',2,30),('analysis_mine_turns',2,30),('analysis_scouting_turns',3,30)):
+        value=config.setdefault(name,default)
+        if type(value) is not int or not 1<=value<=maximum:raise ValueError(f'{name} must be an integer from 1 to {maximum}')
+    for name,default,maximum in (('analysis_timeout_seconds',60,120),('analysis_interval_seconds',5,60)):
+        finite_positive(config.setdefault(name,default),name,maximum)
+    config.setdefault("decision_timeout_seconds", 130)
+    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 130)
     controller = config["controller"]
     if not isinstance(controller, list) or not controller or any(not isinstance(a, str) for a in controller):
         raise ValueError("controller must be an argv array, without a shell")
@@ -107,21 +141,47 @@ def prepare(config_path, out):
     sources = {str(absolute(p, base)): digest(absolute(p, base))
                for p in config.get("controller_sources", [])}
     sources.update({a: digest(a) for a in controller if Path(a).is_absolute() and Path(a).is_file()})
+    if str(ROOT/'controller/main.py') in controller:
+        for source in (ROOT/'controller').iterdir():
+            if source.suffix in ('.py','.txt','.json'):sources[str(source)]=digest(source)
     engine_sources = {str(absolute(p, base)): digest(absolute(p, base))
                       for p in config.get("engine_sources", [])}
     refs = {name: absolute(value, base) for name, value in config.get("references", {}).items()}
     if any(name not in ("prompt", "knowledge") or not path.is_file() for name, path in refs.items()):
         raise ValueError("references supports existing prompt and knowledge files")
+    from controller.strategy_guide import StrategyGuide, DEFAULT_ROOT
+    from controller.game_rules import GameRules, DEFAULT_ROOT as RULES_ROOT
+    reference_bundles = {}
+    for kind,loader,default_root in (('strategy_guide',StrategyGuide,DEFAULT_ROOT),('game_rules',GameRules,RULES_ROOT)):
+        settings = config.get(kind, {'mode':'on'})
+        if (not isinstance(settings,dict) or not set(settings) <= {'mode','path'}
+                or settings.get('mode') not in ('on','off')
+                or ('path' in settings and not isinstance(settings['path'],str))):
+            raise ValueError(f'{kind} requires mode on/off and an optional path')
+        bundle = loader(absolute(settings.get('path',str(default_root)),base)) if settings['mode']=='on' else None
+        reference_bundles[kind] = (settings['mode'],bundle)
+    for name in ('strategy_guide.py','strategy_guide_server.py','game_rules.py'):
+        sources[str(ROOT/'controller'/name)] = digest(ROOT/'controller'/name)
     out = Path(out).resolve()
     if out == profile or out.is_relative_to(profile) or profile.is_relative_to(out):
         raise ValueError("run and template must be separate directory trees")
     out.mkdir(parents=True, exist_ok=False, mode=0o700)
     try:
-        shutil.copytree(profile, out / "profile")
+        shutil.copytree(profile, out / "profile", copy_function=copy_snapshot_file)
         (out / "references").mkdir()
         (out / "decisions").mkdir()
         (out / "episodes").mkdir()
         (out / "evidence").mkdir()
+        reference_snapshots = {}
+        for kind,(mode,bundle) in reference_bundles.items():
+            reference_snapshots[kind] = {'mode':mode}
+            if bundle is None:continue
+            directory = kind.replace('_','-')
+            for name,raw in bundle.files.items():
+                dest = out / directory / name
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                dest.write_bytes(raw)
+            reference_snapshots[kind].update(path=directory,files=bundle.hashes,bundle_sha256=bundle.bundle_hash)
         references = {}
         for name, path in refs.items():
             dest = out / "references" / (name + ".md")
@@ -137,6 +197,10 @@ def prepare(config_path, out):
             with sqlite3.connect(library.as_uri()+'?mode=ro',uri=True) as source, sqlite3.connect(snapshot_path) as target:
                 source.backup(target)
             experience['baseline'] = {'path':snapshot_path.name,'sha256':digest(snapshot_path)}
+            if str(ROOT/'controller/main.py') in controller:
+                from .learning import publish_knowledge
+                knowledge=publish_knowledge(snapshot_path)
+                experience['baseline']['knowledge']={'path':knowledge.name,'sha256':digest(knowledge)}
         if experience_mode == 'read_only':
             if experience['baseline'] is None:
                 raise ValueError('read_only experience requires an existing lesson library')
@@ -146,7 +210,7 @@ def prepare(config_path, out):
             "engine": str(engine), "engine_sha256": digest(engine),
             "engine_sources": engine_sources,
             "controller": controller, "controller_sources": sources, "references": references,
-            "experience":experience,
+            "experience":experience, **reference_snapshots,
             "map_sha256": digest(out / "profile" / DATA / resource),
             "save_sha256": digest(out / "profile" / DATA / save_resource) if save_resource else None,
             "profile_sha256": snapshot(out / "profile"),
@@ -171,9 +235,26 @@ def verify(run, check_profile=False):
     for ref in manifest["references"].values():
         if digest(run / ref["path"]) != ref["sha256"]:
             raise ValueError("reference snapshot changed since prepare")
+    from controller.strategy_guide import StrategyGuide
+    from controller.game_rules import GameRules
+    for kind,loader in (('strategy_guide',StrategyGuide),('game_rules',GameRules)):
+        info = manifest.get(kind)
+        if not info or info['mode']!='on':continue
+        root = run / info['path']
+        label = kind.replace('_',' ')
+        if root.is_symlink() or any(p.is_symlink() for p in root.rglob('*')):
+            raise ValueError(f'{label} snapshot symlink changed since prepare')
+        if snapshot(root) != info['files']:
+            raise ValueError(f'{label} snapshot changed since prepare')
+        bundle = loader(root)
+        if bundle.bundle_hash != info['bundle_sha256']:
+            raise ValueError(f'{label} bundle changed since prepare')
     baseline = manifest.get('experience',{}).get('baseline')
     if baseline and digest(run / baseline['path']) != baseline['sha256']:
         raise ValueError('experience baseline changed since prepare')
+    if baseline and baseline.get('knowledge'):
+        knowledge=baseline['knowledge']
+        if digest(run/knowledge['path'])!=knowledge['sha256']:raise ValueError('knowledge baseline changed since prepare')
     if check_profile and snapshot(run / "profile") != manifest["profile_sha256"]:
         raise ValueError("initial profile changed since prepare; prepare a new run")
     return manifest

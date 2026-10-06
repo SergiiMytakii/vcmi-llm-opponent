@@ -7,7 +7,7 @@ import time
 import subprocess
 import sqlite3
 
-from codex import choose, validate_request
+from codex import choose, validate_request, MODEL, REASONING_EFFORT, TIMEOUT, LEGACY_TIMEOUT
 from experience import Experience
 
 
@@ -17,14 +17,14 @@ def main():
         raise ValueError('request too large')
     request = json.loads(raw.decode('utf-8'))
     validate_request(request)
-    request.pop('experience', None)  # Only the controller's library supplies experience.
+    request.pop('experience', None)  # Raw learning context never enters strategy.
     started = time.monotonic()
     experience = None
     experience_error = None
     try:
         experience = Experience.for_request(request)
         if experience:
-            request['experience'] = experience.prepare(request)
+            experience.observe(request)
     except (OSError, ValueError, TypeError, sqlite3.Error) as error:
         experience_error = str(error)
         if experience:
@@ -34,31 +34,40 @@ def main():
         reply, metadata = choose(request)
     except (TimeoutError, subprocess.TimeoutExpired) as error:
         reply = None
-        metadata = {'provider': 'fallback', 'reason': str(error), 'retryable': True,
+        metadata = {'provider': 'fallback', 'reason': str(error), 'retryable': request['protocol'] == 1,
                     'duration_seconds': round(time.monotonic() - started, 3)}
+        metadata.update(getattr(error,'diagnostics',{}))
+        if getattr(error,'usage',None) is not None:metadata['usage']=error.usage
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
-        action = next(a for a in request['actions'] if a['kind'] == 'end_turn')
-        reply = {'protocol': 1, 'request_id': request['request_id'], 'action_id': action['id']}
+        if request['protocol'] == 2:
+            reply = None
+        else:
+            action = next(a for a in request['actions'] if a['kind'] == 'end_turn')
+            reply = {'protocol': 1, 'request_id': request['request_id'], 'action_id': action['id']}
         metadata = {'provider': 'fallback', 'reason': str(error),
                     'duration_seconds': round(time.monotonic() - started, 3)}
+        metadata.update(getattr(error,'diagnostics',{}))
+        if request['protocol'] == 2:
+            metadata['failure_kind'] = 'invalid_reply' if isinstance(error,(ValueError,TypeError)) else 'controller_error'
+            if getattr(error,'usage',None) is not None:metadata['usage'] = error.usage
     if experience:
         try:
-            if reply is not None and 'learning' in reply:
-                metadata['experience'] = experience.accept(request, reply)
-            else:
-                if reply is not None and metadata['provider'] == 'fallback':
-                    experience.record_fallback(request, reply)
-                metadata['experience'] = {'lessons_supplied':len(request['experience']['lessons'])}
+            if reply is not None:
+                if metadata['provider']=='fallback':experience.record_fallback(request,reply)
+                else:experience.record_decision(request,reply)
+            metadata['experience']={'collection_only':True,'episodes_assessed':0,'lessons_updated':0,'lessons_supplied':0}
         except (OSError, ValueError, TypeError, sqlite3.Error) as error:
             experience_error = str(error)
         finally:
             experience.close()
-    if reply is not None:
-        reply.pop('learning', None)
     if experience_error:
         metadata['experience_error'] = experience_error
+    metadata['requested_model'] = MODEL
+    metadata['requested_reasoning_effort'] = REASONING_EFFORT
+    metadata['decision_timeout_seconds'] = (min(TIMEOUT, request['budget']['wait_ms']/1000 - 2)
+                                            if request['protocol'] == 2 else LEGACY_TIMEOUT)
     metadata['request_bytes'] = len(raw)
-    metadata.update(request_id=request['request_id'], action_id=reply['action_id'] if reply else None)
+    metadata.update(request_id=request['request_id'], action_id=reply.get('action_id') if reply else None)
     print(json.dumps(metadata), file=sys.stderr)
     decision_dir = os.environ.get('VCMI_PLAYTEST_DECISION_DIR')
     if decision_dir:
@@ -66,7 +75,12 @@ def main():
     if reply is None:
         # EX_TEMPFAIL reaches the engine through the recorder. No game command
         # or learning episode is fabricated for an unanswered model request.
-        raise SystemExit(75)
+        raise SystemExit(1 if request['protocol']==2 and metadata.get('failure_kind') else 75)
+    if request['protocol'] == 2:
+        usage = metadata.get('usage')
+        known = metadata.get('usage_complete',True) and isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0 for k in ('input_tokens','output_tokens'))
+        reply['usage'] = {k:usage[k] if known else 0 for k in ('input_tokens','output_tokens')}
+        reply['usage']['known'] = known
     sys.stdout.buffer.write((json.dumps(reply, ensure_ascii=False, separators=(',', ':')) + "\n").encode('utf-8'))
     sys.stdout.buffer.flush()
 

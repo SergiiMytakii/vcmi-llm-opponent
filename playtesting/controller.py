@@ -34,6 +34,9 @@ def kill_controller(child, own_group=False):
 
 def validate_reply(request, raw):
     reply = json.loads(raw)
+    if request.get('protocol') == 2:
+        from controller.native_strategy import validate_reply as validate_native
+        return validate_native(request,reply,wire=True)
     fields = {"protocol", "request_id", "action_id"}
     if isinstance(reply, dict) and 'follow_up_action_ids' in reply:
         fields.add('follow_up_action_ids')
@@ -63,7 +66,7 @@ def validate_reply(request, raw):
     return reply
 
 
-def exchange(run, raw, engine_owned=False):
+def exchange(run, raw, engine_owned=False, postgame=False):
     run = Path(run).resolve()
     manifest = load(run)
     directory = run / "decisions" / uuid.uuid4().hex
@@ -74,20 +77,24 @@ def exchange(run, raw, engine_owned=False):
     write_json(directory / "result.json", result)
     (directory / "request.json").write_bytes(raw)
     child = None
-    own_group = os.name != "nt" and not engine_owned
+    own_group = os.name != "nt" and (not engine_owned or postgame)
     output = b""
+    if postgame:result['purpose']='postgame_reflection'
     try:
         verify(run)
         if len(raw) > INPUT_LIMIT:
             raise ValueError("request too large")
         request = json.loads(raw)
-        if (not isinstance(request, dict) or type(request.get("protocol")) is not int or request["protocol"] != 1
+        if isinstance(request,dict) and request.get('protocol') == 2:
+            from controller.native_strategy import validate_request as validate_native
+            validate_native(request)
+        elif (not isinstance(request, dict) or type(request.get("protocol")) is not int or request["protocol"] != 1
                 or not isinstance(request.get("request_id"), str)
                 or not isinstance(request.get("observation"), dict)
                 or not isinstance(request.get("actions"), list) or not request["actions"]):
             raise ValueError("invalid protocol request")
         result.update(request_id=request["request_id"], observation=request["observation"],
-                      action_count=len(request["actions"]))
+                      protocol=request['protocol'], action_count=len(request.get("actions",[])))
         env = os.environ.copy()
         # Keep Codex authentication in its ordinary home; the native shim is for VCMI only.
         for key in ("DYLD_INSERT_LIBRARIES", "VCMI_PLAYTEST_PROFILE", "VCMI_PROBE_PROFILE"):
@@ -97,6 +104,15 @@ def exchange(run, raw, engine_owned=False):
         baseline = experience.get('baseline')
         env['VCMI_EXPERIENCE_MODE'] = experience.get('mode','off') if engine_owned else 'read_only' if baseline else 'off'
         env['VCMI_EXPERIENCE_DB'] = experience.get('database','') if engine_owned else str(run / baseline['path']) if baseline else ''
+        if env['VCMI_EXPERIENCE_MODE']=='read_only':
+            env['VCMI_KNOWLEDGE_FILE']=str(Path(env['VCMI_EXPERIENCE_DB']).with_suffix('.knowledge.json'))
+        else:env.pop('VCMI_KNOWLEDGE_FILE',None)
+        for kind in ('strategy_guide','game_rules'):
+            reference = manifest.get(kind,{'mode':'off'})
+            key = 'VCMI_'+kind.upper()
+            env[key+'_MODE'] = reference['mode']
+            env.pop(key,None)
+            if reference['mode']=='on':env[key] = str(run / reference['path'])
         for name, reference in manifest["references"].items():
             env["VCMI_PLAYTEST_" + name.upper()] = str(run / reference["path"])
         with (directory / "request.json").open("rb") as stdin, \
@@ -116,6 +132,9 @@ def exchange(run, raw, engine_owned=False):
                     result["status"] = ("timeout" if child.returncode == 75 else
                                         "controller_exit" if child.returncode else "received")
                     break
+                if postgame and (run / 'STOP').exists():
+                    result['status']='requested_stop'
+                    break
                 if time.monotonic() >= deadline:
                     result["status"] = "timeout"
                     break
@@ -133,7 +152,10 @@ def exchange(run, raw, engine_owned=False):
             output = (directory / "stdout.bin").read_bytes()
             try:
                 reply = validate_reply(request, output)
-                result.update(status="reply_valid", action_id=reply["action_id"])
+                result.update(status="reply_valid", action_id=reply.get("action_id"))
+                if request['protocol'] == 2:
+                    plan = reply.get('plan') or request.get('campaign')
+                    result.update(strategy_revision=plan['revision'], strategic_decision=reply['decision'], usage=reply['usage'])
             except (ValueError, KeyError, TypeError) as error:
                 result.update(status="invalid_reply", error=str(error))
                 output = b""

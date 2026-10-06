@@ -14,10 +14,10 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / '.build/experience.sqlite3'
 CONDITIONS = ('combat', 'defense', 'economy', 'reinforcement', 'exploration', 'tempo')
-KINDS = {'attack':'combat', 'build':'economy', 'recruit':'reinforcement',
+KINDS = {'attack':'combat', 'battle':'combat', 'build':'economy', 'recruit':'reinforcement',
          'transfer':'reinforcement', 'upgrade':'reinforcement', 'explore':'exploration',
          'visit':'exploration', 'hire_hero':'exploration', 'end_turn':'tempo'}
-CONTEXT_LIMIT = 32768
+CONTEXT_LIMIT = 131072
 
 
 def encoded(value):
@@ -28,16 +28,42 @@ def facts(request):
     """Small factual projection, with completeness explicit before inferring loss."""
     obs = request['observation']
     result = {k:obs[k] for k in ('day','player','resources','resource_order','terminal_result') if k in obs}
+    result['execution_mechanism'] = ('native_campaign_v3' if request.get('protocol')==2
+        or request.get('memory',{}).get('execution_mechanism')=='native_campaign_v3' else 'external_actions_v1')
+    if isinstance(obs.get('rules'),dict):
+        result['rules']={k:obs['rules'][k] for k in ('engine_version','engine_revision','mods') if k in obs['rules']}
     for name in ('heroes', 'towns'):
         if isinstance(obs.get(name), list):
             result[name + '_complete'] = len(obs[name]) <= 32
-            result[name] = [{k:item[k] for k in ('id','position','strength','army','buildings','daily_income') if k in item}
+            result[name] = [{k:item[k] for k in ('id','ref','position','in_boat','strength','army','army_value',
+                            'movement','movement_per_day','mana','role','defense_value','army_holder_ref','visiting_hero_ref','buildings','daily_income') if k in item}
                             for item in obs[name][:32]]
+    if isinstance(obs.get('goal_statuses'),dict):result['goal_statuses']=obs['goal_statuses']
     # Visible threats can explain the information available before a choice.
     if isinstance(obs.get('visible_objects'),list):
         result['visible_objects'] = [{k:item[k] for k in ('id','kind','owner','position','strength','army') if k in item}
                                      for item in obs['visible_objects'][:16]]
     return result
+
+
+def execution_context(observation):
+    """Rule identity and executor provenance, without historical game positions."""
+    rules=observation.get('rules',{})
+    version=rules.get('engine_version') if isinstance(rules,dict) else None
+    revision=rules.get('engine_revision') if isinstance(rules,dict) else None
+    mods=rules.get('mods') if isinstance(rules,dict) else None
+    valid_text=lambda value:isinstance(value,str) and 0<len(value)<=128
+    known=(valid_text(version) and valid_text(revision) and isinstance(mods,list)
+        # Pinned VCMI loads virtual core from builtin gameConfig; its declared
+        # version is empty. The engine revision scopes that builtin component.
+        and all(isinstance(m,dict) and valid_text(m.get('id'))
+                and (valid_text(m.get('version')) or m.get('id')=='core' and m.get('version')=='') for m in mods))
+    canonical=dict(engine_version=version,engine_revision=revision,
+        mods=sorted([(m['id'],m['version']) for m in mods])) if known else None
+    return dict(engine_version=version if valid_text(version) else None,
+        engine_revision=revision if valid_text(revision) else None,rules_known=bool(known),
+        rules_digest=hashlib.sha256(encoded(canonical).encode()).hexdigest() if known else None,
+        execution_mechanism=observation.get('execution_mechanism'))
 
 
 def signals(before, request):
@@ -67,6 +93,9 @@ def signals(before, request):
                         'after':after['resources'],'day':after.get('day')})
     if review.get('status') in ('infeasible','requires_revision','completed'):
         changes.append({'kind':'plan_review','review':review,'day':after.get('day')})
+    for goal,status in after.get('goal_statuses',{}).items():
+        if status!=before.get('goal_statuses',{}).get(goal):
+            changes.append({'kind':'goal_status_changed','goal_id':goal,'status':status,'day':after.get('day')})
     if after.get('terminal_result') in ('win','loss'):
         changes.append({'kind':'game_result','result':after['terminal_result']})
     return changes
@@ -83,7 +112,7 @@ def learning_schema(context):
             'conditions':{'type':'array','minItems':1,'maxItems':4,'items':{'type':'string','enum':list(CONDITIONS)}},
             'evidence_ids':{'type':'array','minItems':1,'maxItems':8,'items':{'type':'string'}},
             'explanation':{'type':'string','minLength':1,'maxLength':480}}}
-    assessments = {'type':'array','minItems':len(context['episodes']),'maxItems':2,'items':assessment} if context['episodes'] else {'type':'array','maxItems':0,'items':{'type':'string'}}
+    assessments = {'type':'array','minItems':len(context['episodes']),'maxItems':len(context['episodes']),'items':assessment} if context['episodes'] else {'type':'array','minItems':0,'maxItems':0,'items':{'type':'string'}}
     return {'type':'object','additionalProperties':False,'required':['expectation','assessments'],
             'properties':{'expectation':{'type':'string','minLength':1,'maxLength':240},'assessments':assessments}}
 
@@ -167,10 +196,21 @@ class Experience:
                     game TEXT, id TEXT, PRIMARY KEY(game,id));
                 CREATE TABLE IF NOT EXISTS retirements (
                     lesson TEXT PRIMARY KEY, episode TEXT, replacement TEXT);
+                CREATE TABLE IF NOT EXISTS evaluations (episode TEXT PRIMARY KEY, payload TEXT);
+                CREATE TABLE IF NOT EXISTS turn_events (
+                    game TEXT, generation TEXT, sequence INTEGER, day INTEGER, phase TEXT, payload TEXT,
+                    PRIMARY KEY(game,generation,sequence));
+                CREATE TABLE IF NOT EXISTS analysis_usage (
+                    id INTEGER PRIMARY KEY, usage TEXT, result TEXT);
                 CREATE INDEX IF NOT EXISTS decisions_game_day ON decisions(game,day);
                 CREATE INDEX IF NOT EXISTS episodes_game_day ON episodes(game,day);
                 PRAGMA user_version=1;
             ''')
+
+            columns={row['name'] for row in self.db.execute('PRAGMA table_info(lessons)')}
+            with self.db:
+                if 'exceptions' not in columns:self.db.execute("ALTER TABLE lessons ADD COLUMN exceptions TEXT DEFAULT '[]'")
+                if 'mechanism' not in columns:self.db.execute("ALTER TABLE lessons ADD COLUMN mechanism TEXT DEFAULT ''")
 
     @classmethod
     def for_request(cls,request):
@@ -183,7 +223,7 @@ class Experience:
     def close(self):
         self.db.close()
 
-    def prepare(self,request):
+    def observe(self,request):
         game = request['memory']['experience_id']
         day = request['observation'].get('day',0)
         if type(day) is not int or day < 0:
@@ -196,7 +236,7 @@ class Experience:
                 def future(row):
                     suffix = row['request'].split(':')[-1]
                     old_attempt = float('inf') if suffix == 'final' else int(suffix) if suffix.isdigit() else None
-                    return row['day'] > day or (row['day'] == day and attempt is not None
+                    return row['day'] > day or (row['day'] == day and ('telemetry:' in row['request'])==('telemetry:' in request['request_id']) and attempt is not None
                            and old_attempt is not None and old_attempt > attempt)
                 pending = self.db.execute('SELECT id,request,day,payload FROM episodes WHERE game=? AND day>=? AND assessed=0',(game,day)).fetchall()
                 for row in pending:
@@ -230,22 +270,45 @@ class Experience:
                             'observation':json.loads(row['payload']),'action':json.loads(row['action']),
                             'expectation':row['expectation']} for row in reversed(trace)],
                             'after':facts(request),'signals':fresh}
-                        while len(episode['trajectory']) > 1 and len(encoded(episode).encode()) > 24000:
+                        while len(episode['trajectory']) > 1 and len(encoded(episode).encode()) > 65536:
                             episode['trajectory'].pop(0)
-                        if len(encoded(episode).encode()) <= 24000:
+                        if len(encoded(episode).encode()) <= 65536:
                             self.db.execute('INSERT OR IGNORE INTO episodes(id,game,request,day,payload) VALUES(?,?,?,?,?)',
                                             (eid,game,request['request_id'],day,encoded(episode)))
                             for signal in fresh:
                                 self.db.execute('INSERT OR IGNORE INTO observed_signals VALUES(?,?)',(game,signal['id']))
-        tags = {'defense','tempo'} | {KINDS[a['kind']] for a in request['actions'] if a['kind'] in KINDS}
+
+    def context(self,request,*,include_episodes=True,lesson_limit=6):
+        game = request['memory']['experience_id']
+        day = request['observation'].get('day',0)
+        tags = {'defense','tempo'} | {KINDS[a['kind']] for a in request.get('actions',[]) if a['kind'] in KINDS}
+        if request.get('protocol') == 2:
+            tags.update(CONDITIONS)  # One strategic response can coordinate all modules.
         if request['observation'].get('terminal_result') in ('win','loss'):
             tags.update(CONDITIONS)
         else:
             for row in self.db.execute('SELECT payload FROM episodes WHERE game=? AND day<=? AND assessed=0 ORDER BY rowid LIMIT 2',(game,day)):
-                for decision in json.loads(row['payload'])['trajectory']:
+                episode=json.loads(row['payload'])
+                for signal in episode['signals']:
+                    kind=signal.get('action',{}).get('kind') if signal.get('kind')=='action_result' else None
+                    if kind in KINDS:tags.add(KINDS[kind])
+                    if signal.get('kind') in ('heroes_no_longer_owned','own_army_value_changed'):tags.add('combat')
+                    if signal.get('kind') in ('towns_no_longer_owned','towns_now_owned'):tags.update(('combat','defense'))
+                    if signal.get('kind')=='resource_balance_changed':tags.add('economy')
+                for decision in episode['trajectory']:
+
                     kind = decision['action'].get('kind')
                     if kind in KINDS:
                         tags.add(KINDS[kind])
+        current=facts(request)
+        rules_source='current_observation' if 'rules' in current else 'unavailable'
+        if request['observation'].get('terminal_result') in ('win','loss') and 'rules' not in current:
+            previous=self.db.execute('SELECT payload FROM decisions WHERE game=? AND request!=? ORDER BY rowid DESC LIMIT 1',
+                                     (game,request['request_id'])).fetchone()
+            if previous and 'rules' in json.loads(previous['payload']):
+                current['rules']=json.loads(previous['payload'])['rules']
+                rules_source='last_own_decision_in_game'
+        current_context=execution_context(current)
         lessons = []
         # Retired predecessors never consume slots needed by usable replacements.
         # Filter relevance before taking six, rather than truncating unrelated rows.
@@ -259,27 +322,53 @@ class Experience:
             supports, contradictions = row['supports'],row['contradictions']
             games = self.db.execute("SELECT COUNT(DISTINCT e.game) FROM assessments a JOIN episodes e ON e.id=a.episode WHERE a.lesson=? AND a.verdict IN ('support','revise')",
                                     (row['id'],)).fetchone()[0]
+            sources={};source_keys=set();matching_games=set()
+            for evidence in self.db.execute('''SELECT e.payload,e.game,a.verdict FROM assessments a
+                    JOIN episodes e ON e.id=a.episode WHERE a.lesson=? ORDER BY e.rowid DESC''',(row['id'],)):
+                trajectory=json.loads(evidence['payload']).get('trajectory',[])
+                source=execution_context(trajectory[-1]['observation'] if trajectory else {})
+                key=encoded(source);source_keys.add(key)
+                supported=evidence['verdict'] in ('support','revise')
+                if (supported and current_context['rules_known'] and source['rules_known']
+                        and current_context['rules_digest']==source['rules_digest']
+                        and current_context['execution_mechanism']==source['execution_mechanism']):
+                    matching_games.add(evidence['game'])
+                if key not in sources and len(sources)<4:sources[key]={**source,'supporting_games':set(),'contradicting_games':set()}
+                if key in sources and evidence['verdict']!='uncertain':
+                    sources[key]['supporting_games' if supported else 'contradicting_games'].add(evidence['game'])
+            provenance=[{**source,'supporting_games':len(source['supporting_games']),
+                         'contradicting_games':len(source['contradicting_games'])} for source in sources.values()]
             lessons.append({'id':row['id'],'rule':row['rule'],'conditions':conditions,
                 'supports':supports,'contradictions':contradictions,'supporting_games':games,
+                'matching_supporting_games':len(matching_games),'evidence_contexts':provenance,
+                'evidence_contexts_complete':len(source_keys)<=4,
                 'status':'retired' if row['retired'] else 'challenged' if contradictions else 'active',
-                'confidence':'supported' if games >= 3 and contradictions == 0 else 'hypothesis'})
-            if len(lessons) == 6:
+                'confidence':'supported' if len(matching_games)>=3 and contradictions==0 else 'hypothesis',
+                'exceptions':json.loads(row['exceptions'] or '[]') if 'exceptions' in row.keys() else [],
+                'mechanism':row['mechanism'] if 'mechanism' in row.keys() else ''})
+            if lesson_limit is not None and len(lessons) == lesson_limit:
                 break
-        context = {'mode':self.mode,'lessons':lessons,'episodes':[]}
-        if self.mode == 'learn':
+        context = {'mode':self.mode,'lessons':lessons,'episodes':[],
+                   'execution_context':{**current_context,'rules_source':rules_source}}
+        if include_episodes and self.mode == 'learn':
             for row in self.db.execute('SELECT payload FROM episodes WHERE game=? AND day<=? AND assessed=0 ORDER BY rowid LIMIT 2',(game,day)):
                 episode = json.loads(row['payload'])
-                if len(encoded({**context,'episodes':[*context['episodes'],episode]}).encode()) <= CONTEXT_LIMIT:
-                    context['episodes'].append(episode)
+                candidate={**context,'episodes':[*context['episodes'],episode]}
+                if len(encoded(candidate).encode()) > CONTEXT_LIMIT:
+                    continue
+                context=candidate
         return context
 
-    def accept(self,request,reply):
-        """One transaction: evidence assessments, lesson updates and chosen intent."""
-        learning = reply['learning']
-        validate_learning(request['experience'],learning)
-        game = request['memory']['experience_id']
+    def assess(self,game,context,learning,*,evaluations=None,lesson_details=None):
+        """Atomically accept reflection; strategic decisions are saved independently."""
+        validate_learning(context,learning)
         saved = 0
+        assessed = 0
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            for episode in context['episodes']:
+                row=self.db.execute('SELECT payload FROM episodes WHERE id=? AND game=?',(episode['id'],game)).fetchone()
+                if not row or json.loads(row['payload'])!=episode:raise ValueError('stale analysis episode')
             for item in learning['assessments']:
                 if self.db.execute('SELECT 1 FROM assessments WHERE episode=?',(item['episode_id'],)).fetchone():
                     continue
@@ -305,14 +394,32 @@ class Experience:
                 self.db.execute('INSERT INTO assessments VALUES(?,?,?,?,?)',(item['episode_id'],lesson_id,
                     item['verdict'],encoded(item['evidence_ids']),item['explanation']))
                 self.db.execute('UPDATE episodes SET assessed=1 WHERE id=?',(item['episode_id'],))
-            action = dict(next(a for a in request['actions'] if a['id'] == reply['action_id']))
+                assessed += 1
+                if evaluations is not None:
+                    evaluation=next(e for e in evaluations if e['episode_id']==item['episode_id'])
+                    self.db.execute('INSERT INTO evaluations VALUES(?,?)',(item['episode_id'],encoded(evaluation)))
+                details=(lesson_details or {}).get(item['episode_id'])
+                if details and lesson_id is not None and item['verdict'] in ('support','revise'):
+                    self.db.execute('UPDATE lessons SET exceptions=?,mechanism=? WHERE id=?',
+                        (encoded(details['exceptions']),details['mechanism'],lesson_id))
+        return {'lessons_updated':saved,'episodes_assessed':assessed}
+
+    def record_decision(self,request,reply):
+        if self.mode != 'learn':return
+        game=request['memory']['experience_id']
+        with self.db:
+            if request.get('protocol') == 2:
+                plan = reply.get('plan') or request.get('campaign') or {}
+                action = {'kind':'strategic_plan','plan':plan,'revision':plan.get('revision'),
+                          'goal_kinds':[g['kind'] for g in plan.get('goals',[])],
+                          'execution':'unconfirmed'}
+            else:
+                action = dict(next(a for a in request['actions'] if a['id'] == reply['action_id']))
             if reply.get('follow_up_action_ids'):
                 offered = {a['id']:a for a in request['actions']}
                 action['planned_follow_ups'] = [offered[i] for i in reply['follow_up_action_ids']]
             self.db.execute('INSERT OR REPLACE INTO decisions VALUES(?,?,?,?,?,?)',(game,request['request_id'],
-                request['observation'].get('day',0),encoded(facts(request)),encoded(action),learning['expectation']))
-        return {'lessons_updated':saved,'episodes_assessed':len(learning['assessments']),
-                'lessons_supplied':len(request['experience']['lessons'])}
+                request['observation'].get('day',0),encoded(facts(request)),encoded(action),reply.get('reason','')))
 
     def record_fallback(self,request,reply):
         if self.mode != 'learn':

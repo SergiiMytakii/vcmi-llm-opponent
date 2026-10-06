@@ -24,6 +24,9 @@ def main():
     p.add_argument("--target-run", required=True)
     p = commands.add_parser("stop", help="Request cleanup of this tester-owned run")
     p.add_argument("--run", required=True)
+    p = commands.add_parser('continue', help='Release exactly one reviewed block of game days')
+    p.add_argument('--run', required=True)
+    p.add_argument('--completed-day', type=int, required=True)
     p = commands.add_parser("report", help="Summarize replies, engine results, and manual episodes")
     p.add_argument("--run", required=True)
     p = commands.add_parser("compare", help="Compare runs and flag different starting conditions")
@@ -64,6 +67,9 @@ def main():
             print(json.dumps(result))
             if result["status"] != "reply_valid":
                 sys.exit(1)
+        elif args.command == 'continue':
+            from .turn_review import continue_review
+            print(json.dumps(continue_review(args.run, args.completed_day)))
         elif args.command == "stop":
             from pathlib import Path
             from .runs import load

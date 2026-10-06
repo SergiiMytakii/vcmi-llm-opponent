@@ -62,6 +62,38 @@ class PlaytestingTest(unittest.TestCase):
         return {"protocol": 1, "request_id": "0:1", "observation": {"player": 0, "day": 1},
                 "actions": [{"id": "end", "kind": "end_turn"}]}
 
+    def test_nullkiller3_records_native_comparison_mode(self):
+        self.settings.update(players={"red":"Nullkiller3", "blue":"Nullkiller2"}, nk3_mode="native")
+        self.assertEqual(self.prepare()["nk3_mode"], "native")
+
+    def test_native_terminal_journal_accepts_only_recipient_own_execution(self):
+        from controller.evaluation import TelemetryCollector
+        self.settings.update(players={'red':'Nullkiller3','blue':'Nullkiller3'},experience_mode='learn')
+        manifest=self.prepare();journal=self.root/'own-turns.jsonl'
+        event=dict(version=1,game='red-game',generation='session',player=0,day=1,
+                   sequence=1,phase='execution',complete=True,observation=dict(player=0,day=1),
+                   own_result=dict(player=0,day=1,sequence=1,outcome='effects_observed',
+                       action=dict(kind='build',before=dict(player=0),after=dict(player=0))))
+        foreign={**event,'sequence':2,'own_result':{**event['own_result'],
+            'action':dict(kind='battle',player=1)}}
+        terminal={**event,'phase':'terminal','sequence':3,
+            'observation':dict(player=0,day=1,terminal_result='loss')}
+        terminal.pop('own_result')
+        journal.write_text(''.join(json.dumps(e)+'\n' for e in (event,foreign,terminal)))
+        collector=TelemetryCollector(manifest['experience']['database'],journal,{0});collector.poll()
+        with sqlite3.connect(manifest['experience']['database']) as db:
+            rows=[json.loads(r[0]) for r in db.execute('SELECT payload FROM turn_events')]
+        self.assertEqual([r['sequence'] for r in rows],[1,3])
+        self.assertEqual(rows[-1]['observation']['terminal_result'],'loss')
+
+    def test_nullkiller3_rejects_ambiguous_comparison_mode(self):
+        self.settings.update(players={"red":"Nullkiller3", "blue":"Nullkiller2"}, nk3_mode="silent")
+        self.config.write_text(json.dumps(self.settings))
+        result = self.cli("prepare", "--config", self.config, "--out", self.run_dir)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nk3_mode", result.stderr)
+        self.assertFalse(self.run_dir.exists())
+
     def test_recorder_and_controller_accept_512_kib_and_reject_one_byte_more(self):
         self.settings['controller'] = [sys.executable, str(ROOT / 'controller/main.py')]
         self.prepare()
@@ -104,6 +136,13 @@ class PlaytestingTest(unittest.TestCase):
         self.prompt.write_text("changed after preparation")
         self.assertEqual((self.run_dir / "references/prompt.md").read_text(),
                          "Choose an offered action.")
+        source = self.data / "Maps/Trial.h3m"
+        copied = self.run_dir / "profile" / DATA_PATH / "Maps/Trial.h3m"
+        self.assertNotEqual(source.stat().st_ino, copied.stat().st_ino)
+        copied.write_bytes(b"run-only modification")
+        self.assertEqual(source.read_bytes(), b"private map fixture")
+        source.write_bytes(b"template-only modification")
+        self.assertEqual(copied.read_bytes(), b"run-only modification")
         result = self.cli("prepare", "--config", self.config, "--out", self.run_dir)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(json.loads((self.run_dir / "manifest.json").read_text())["run_id"],
@@ -246,6 +285,25 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         self.assertEqual(report['campaign_metrics']['confirmed_reinforcements'][0]['amount'],20)
         self.assertEqual(report['model_metrics']['usage']['input_tokens'],100)
         self.assertEqual(report['match_outcome'],'unconfirmed')
+
+    def test_report_counts_confirmed_own_battles_without_inferring_loss_from_task_net_changes(self):
+        self.prepare()
+        logs=self.run_dir/'engine-logs';logs.mkdir()
+        records=[
+            {'day':1,'sequence':1,'outcome':'battle_won','action':{'kind':'battle','source':'own_battle_result',
+                'actor_ref':'object:0','army_loss_value':267}},
+            {'day':1,'sequence':2,'outcome':'reconciled_unknown','action':{'kind':'visit',
+                'before':{'heroes':[{'army_value':1000}]},'after':{'heroes':[{'army_value':20}]}}},
+            {'day':1,'sequence':3,'outcome':'effects_observed','action':{'kind':'transfer',
+                'before':{'heroes':[{'army_value':1000}]},'after':{'heroes':[{'army_value':700}]}}}]
+        (logs/'VCMI_Client_log.txt').write_text(''.join('[2026-10-05 03:00:00.000] INFO [test] ai - NK3_EXECUTION '+json.dumps(r)+'\n' for r in records))
+        result=self.cli('report','--run',self.run_dir)
+        self.assertEqual(result.returncode,0,result.stderr)
+        report=json.loads((self.run_dir/'report.json').read_text())
+        self.assertEqual(report['native_metrics']['battle_outcomes'],{'battle_won':1})
+        self.assertEqual(report['native_metrics']['own_battle_loss_value'],267)
+        self.assertEqual(len(report['native_execution']),3)
+        self.assertEqual(report['match_outcome'],'unconfirmed','a battle victory became a match victory')
 
     def test_report_requires_engine_evidence_and_does_not_call_an_exit_a_victory(self):
         self.prepare()

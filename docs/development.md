@@ -132,3 +132,25 @@ recruitment, movement, per-player AI selection and a restricted scenario. Follow
 [playtesting](testing/llm-opponent-playtest.md) for current isolated runs and
 [land-duel verification](verification-land-duel-2026-10-04.md) for actual full-match evidence.
 Both final modes, save/load, Windows and release packaging still require complete acceptance.
+
+## Nullkiller3 route obstruction diagnostics
+
+`VCMI_NK3_ROUTE_DIAGNOSTICS=1` enables `NK3_ROUTE_DIAGNOSTICS` records for missing
+actor/target quotes: raw native path count, blocked-action and mixed-actor counts,
+and whether the ordinary player pathfinder establishes a route. These are
+diagnostic facts, not a claim that a missing route is impossible.
+
+When `allow_route_repair` is enabled and the main army has ended without useful
+work, native execution can yield an unlocked, uncommitted own helper into a safe
+empty nearby land tile. Required defenders are excluded. The move must be a
+current-turn single-hero native route with no losses, special action or known
+lethal exposure, and must open a previously obstructed known land connection.
+`NK3_ROUTE_REPAIR` records the observed move; quotes rebuild afterward. Strategic
+adjacent exploration requires actual new visibility and cannot substitute an
+object-direction score for discovery. Ordinary Nullkiller2 retains its existing
+neighbor behavior. This repairs physical traffic; LLM still chooses operations.
+
+Run `test_route_obstruction.py` and `test_neighbour_exploration.py` against the
+prepared native build. For save-based proof, set `VCMI_NATIVE_ROUTE_YIELD_CONFIG`
+to a compatible private tester config containing an obstructed save and run
+`test_native_route_yield.py`. Its profile is isolated; the live game is untouched.

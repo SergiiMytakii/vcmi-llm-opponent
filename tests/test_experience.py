@@ -1,238 +1,187 @@
-"""Learning through the real controller subprocess and persistent storage."""
-import copy
+"""Durable lesson rules through separate analysis and published knowledge."""
 import json
 import os
 from pathlib import Path
+import sqlite3
+from contextlib import closing
 import subprocess
 import sys
-import tempfile
 import unittest
 
+import test_learning_flow as flow
+ROOT=flow.ROOT
 from codex_fixture import codex_fixture
+sys.path.insert(0,str(ROOT/'controller'))
+from experience import Experience
+from knowledge import publish,snapshot_for_request,KnowledgeReader
+from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-
-MODEL = '''
-import json, pathlib, sys
-import os
-if sys.argv[1:] == ['--version']:
-    print('codex-cli 0.160.0'); sys.exit(0)
-args = sys.argv
-request = json.loads(sys.stdin.read())
-schema = json.loads(pathlib.Path(args[args.index('--output-schema')+1]).read_text())
-context = request.get('experience', {})
-lessons = context.get('lessons', [])
-episodes = context.get('episodes', [])
-mode = os.environ.get('LEARNING_TEST_MODE','support')
-usable = [l for l in lessons if l['status'] != 'retired']
-answer = {'protocol':1, 'request_id':request['request_id'],
-          'action_id':'defend' if usable else 'attack', 'strategy':None}
-if mode == 'invalid-action':answer['action_id']='not-offered'
-if answer['action_id'] not in [a['id'] for a in request['actions']]: answer['action_id']='end'
-if mode == 'invalid-action':answer['action_id']='not-offered'
-if 'learning' in schema['properties']:
-    assessments=[]
-    for episode in episodes[:2]:
-        assessments.append({'episode_id':episode['id'], 'lesson_id':lessons[0]['id'] if lessons else None,
-            'verdict':mode if mode in ('contradict','uncertain','revise') else 'support', 'rule':'Keep a defensive reserve before committing the only army to an uncertain fight.',
-            'conditions':['combat','defense'], 'evidence_ids':[episode['signals'][0]['id']],
-            'explanation':'The own army disappeared after the attack; the causal interpretation remains tentative.'})
-    answer['learning']={'expectation':'Preserve a force that can defend the town.', 'assessments':assessments}
-    if mode == 'invented' and assessments: assessments[0]['evidence_ids']=['invented-event']
-    if mode == 'skip-reflection':answer['learning']['assessments']=[]
-    if mode == 'revise' and assessments:
-        assessments[0]['rule']='Keep a defensive reserve when a visible enemy threatens the town; otherwise consider a decisive attack.'
-pathlib.Path(args[args.index('-o')+1]).write_text(json.dumps(answer))
-print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_tokens':1}}))
-'''
+REVIEWER=flow.ANALYST.replace('import json,pathlib,sys','import json,pathlib,sys,os').replace(
+ "'lesson_id':None,'verdict':'support'",
+ "'lesson_id':r['lessons'][0]['id'] if r['lessons'] else None,'verdict':os.environ.get('ANALYSIS_MODE','support')")
+REVIEWER=REVIEWER.replace("answer={'evaluations':evaluations,'assessments':assessments}","""
+mode=os.environ.get('ANALYSIS_MODE','support')
+if mode=='revise':
+ for a in assessments:a['rule']='Use confirmed own battle receipts to distinguish casualties from changes in army ownership.'
+if mode=='invented':
+ for a in assessments:a['evidence_ids']=['invented']
+if mode=='skip':assessments=[]
+answer={'evaluations':evaluations,'assessments':assessments}
+""")
 
 
-class ExperienceControllerTest(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='vcmi experience тест ')
-        self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
-        self.env = {**os.environ, **codex_fixture(self.folder, MODEL),
-                    'VCMI_EXPERIENCE_DB':str(self.folder/'experience.sqlite3'),
-                    'VCMI_EXPERIENCE_MODE':'learn'}
+class ExperienceTest(unittest.TestCase):
+    setUp=flow.LearningFlowTest.setUp
+    request=flow.LearningFlowTest.request
+    call=flow.LearningFlowTest.call
 
-    def request(self, game='party-one', day=1, heroes=None):
-        return {'protocol':1, 'request_id':f'0:{day}:0',
-                'observation':{'day':day, 'player':0,
-                    'heroes':heroes if heroes is not None else [{'id':7,'strength':{'army_ai_value':1000}}],
-                    'towns':[{'id':8}], 'resources':[5000]},
-                'memory':{'schema':2,'experience_id':game,'plan':None,'recent_results':[]},
-                'actions':[{'id':'end','kind':'end_turn'},
-                           {'id':'attack','kind':'attack','hero':7},
-                           {'id':'defend','kind':'recruit','town':8}]}
+    def episode(self,game='player-game',rules=None):
+        first=self.request();first['memory']['experience_id']=game
+        after=self.request(day=2,heroes=[]);after['memory']['experience_id']=game
+        if rules:
+            first['observation']['rules']=rules;after['observation']['rules']=rules
+        self.call(first);self.call(after)
 
-    def call(self, request, **env):
-        result = subprocess.run([sys.executable,str(ROOT/'controller/main.py')],
-                                input=json.dumps(request),text=True,capture_output=True,timeout=10,
-                                env={**self.env,**env})
-        self.assertEqual(result.returncode,0,result.stderr)
-        return json.loads(result.stdout),json.loads(result.stderr)
+    def analyze(self,mode='support',check=True):
+        env={**self.env,**codex_fixture(self.folder,REVIEWER),'ANALYSIS_MODE':mode}
+        r=subprocess.run([sys.executable,str(ROOT/'controller/analyze.py'),'--database',str(self.database),'--once'],
+                         capture_output=True,text=True,env=env,timeout=10)
+        if check:self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+        return r
 
-    def test_observed_loss_becomes_a_lesson_used_by_a_new_controller_in_another_game(self):
-        first,info = self.call(self.request())
-        self.assertEqual(first['action_id'],'attack')
-        self.assertEqual(info['provider'],'codex')
-        lost = self.request(day=2,heroes=[])
-        lost['memory']['recent_results']=[{'sequence':1,'day':1,'action':{'id':'attack','kind':'attack','hero':7},'outcome':'unconfirmed'}]
-        self.call(lost)
-        next_game,info = self.call(self.request(game='party-two'))
-        self.assertEqual(next_game['action_id'],'defend')
-        self.assertEqual(info['provider'],'codex')
-        self.assertNotIn('learning',next_game,'engine protocol must remain unchanged')
+    def lessons(self):return json.loads(self.database.with_suffix('.knowledge.json').read_text())['lessons']
 
-    def learn_loss(self):
-        self.call(self.request())
-        return self.call(self.request(day=2,heroes=[]))
+    def test_supported_confidence_needs_three_compatible_games(self):
+        rules={'engine_version':'1.8','engine_revision':'revision-A',
+               'mods':[{'id':'core','version':''},{'id':'vcmi','version':'1.5'}]}
+        for number in range(3):self.episode('game-'+str(number),rules);self.analyze()
+        request=self.request();request['observation']['rules']=rules
+        with patch.dict(os.environ,self.env):matching=snapshot_for_request(request)['lessons'][0]
+        self.assertEqual(matching['matching_supporting_games'],3)
+        self.assertEqual(matching['confidence'],'supported')
+        request['observation']['rules']={**rules,'engine_revision':'different'}
+        with patch.dict(os.environ,self.env):different=snapshot_for_request(request)['lessons'][0]
+        self.assertEqual(different['confidence'],'hypothesis')
+        self.assertEqual(different['matching_supporting_games'],0)
 
-    def test_contradictory_experience_retires_a_lesson_instead_of_repeating_it(self):
-        self.learn_loss()
-        self.call(self.request(game='counterexample'))
-        self.call(self.request(game='counterexample',day=2,heroes=[]),LEARNING_TEST_MODE='contradict')
-        reply,_ = self.call(self.request(game='later-party'))
-        self.assertEqual(reply['action_id'],'attack')
+    def test_contradicted_lesson_is_removed_from_published_advice(self):
+        self.episode('one');self.analyze();self.episode('two');self.analyze('contradict')
+        self.assertEqual(self.lessons(),[])
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT supports,contradictions FROM lessons').fetchone(),(1,1))
 
-    def test_an_overgeneral_lesson_can_be_replaced_by_a_more_precise_rule(self):
-        self.learn_loss()
-        self.call(self.request(game='refinement'))
-        _,info=self.call(self.request(game='refinement',day=2,heroes=[]),LEARNING_TEST_MODE='revise')
-        self.assertEqual(info['provider'],'codex')
-        self.assertEqual(info['experience']['lessons_updated'],1)
-        # Observe the replacement through a fresh real controller call.
-        self.env.update(codex_fixture(self.folder,MODEL.replace("answer = {'protocol':1", "assert any('visible enemy' in l['rule'] and l['status']=='active' for l in lessons)\nassert any('uncertain fight' in l['rule'] and l['status']=='retired' for l in lessons)\nanswer = {'protocol':1")))
-        _,info=self.call(self.request(game='after-refinement'))
-        self.assertEqual(info['provider'],'codex')
+    def test_revision_preserves_predecessor_and_publishes_replacement(self):
+        self.episode('one');self.analyze();old=self.lessons()[0]['id']
+        self.episode('two');self.analyze('revise')
+        self.assertEqual(len(self.lessons()),1)
+        self.assertNotEqual(self.lessons()[0]['id'],old)
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM retirements').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM lessons').fetchone()[0],2)
 
-    def test_same_episode_is_not_learned_twice_on_retry(self):
-        self.call(self.request())
-        lost = self.request(day=2,heroes=[])
-        _,first = self.call(lost)
-        _,retry = self.call(lost)
-        self.assertEqual(first['experience']['lessons_updated'],1)
-        self.assertEqual(retry['experience']['lessons_updated'],0)
+    def test_uncertainty_does_not_publish_a_new_rule(self):
+        self.episode();self.analyze('uncertain');self.assertEqual(self.lessons(),[])
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assessments').fetchone()[0],1)
 
-    def test_unknown_or_uncertain_evidence_does_not_create_an_actionable_lesson(self):
-        for mode in ('invented','uncertain'):
+    def test_invented_evidence_or_skipped_episode_keeps_pending_and_strategy_usable(self):
+        for mode in ('invented','skip'):
             with self.subTest(mode=mode):
-                database = str(self.folder/(mode+'.sqlite3'))
-                self.call(self.request(),VCMI_EXPERIENCE_DB=database)
-                _,info = self.call(self.request(day=2,heroes=[]),VCMI_EXPERIENCE_DB=database,LEARNING_TEST_MODE=mode)
-                later,_ = self.call(self.request(game='next-party'),VCMI_EXPERIENCE_DB=database)
-                self.assertEqual(later['action_id'],'attack')
-                if mode == 'invented': self.assertEqual(info['provider'],'fallback')
+                self.episode(mode);result=self.analyze(mode,check=False)
+                self.assertNotEqual(result.returncode,0,result.stdout)
+                with closing(sqlite3.connect(self.database)) as db:
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM assessments').fetchone()[0],0)
+                _,metadata=self.call(self.request())
+                self.assertEqual(metadata['provider'],'codex')
 
-    def test_incomplete_own_list_is_not_mistaken_for_a_lost_hero(self):
-        self.call(self.request())
-        later = self.request(day=2)
-        later['observation'].pop('heroes')
-        _,info = self.call(later)
-        self.assertEqual(info['experience']['lessons_updated'],0)
+    def test_publication_recovers_after_commit_without_new_analysis_or_counters(self):
+        self.episode();self.analyze();expected=self.lessons()
+        self.database.with_suffix('.knowledge.json').unlink()
+        result=self.analyze()
+        self.assertEqual(json.loads(result.stdout)['status'],'idle')
+        self.assertEqual(self.lessons(),expected)
 
-    def test_read_only_and_off_modes_never_modify_the_library(self):
-        self.learn_loss()
-        database = self.folder/'experience.sqlite3'
-        before = database.read_bytes()
-        reply,_ = self.call(self.request(game='evaluation'),VCMI_EXPERIENCE_MODE='read_only')
-        self.assertEqual(reply['action_id'],'defend')
-        self.assertEqual(database.read_bytes(),before)
-        reply,_ = self.call(self.request(game='without-memory'),VCMI_EXPERIENCE_MODE='off')
-        self.assertEqual(reply['action_id'],'attack')
-        self.assertEqual(database.read_bytes(),before)
+    def test_corrupted_publication_is_rebuilt_from_committed_sqlite(self):
+        self.episode();self.analyze();target=self.database.with_suffix('.knowledge.json');expected=target.read_bytes()
+        for invalid in ('[]','null','1',json.dumps({'revision':json.loads(expected)['revision'],'lessons':'corrupt'})):
+            target.write_text(invalid)
+            publish(self.database)
+            self.assertEqual(target.read_bytes(),expected)
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM analysis_usage').fetchone()[0],1)
 
-    def test_terminal_result_is_reviewed_without_inventing_a_last_observation(self):
-        self.call(self.request())
-        final = self.request(day=2)
-        final['request_id']='0:2:final'
-        final['observation']={'day':2,'player':0,'terminal_result':'loss'}
-        final['actions']=[{'id':'end','kind':'end_turn'}]
-        reply,info = self.call(final)
-        self.assertEqual(reply['action_id'],'end')
-        self.assertEqual(info['experience']['lessons_updated'],1)
-        later,_ = self.call(self.request(game='after-defeat'))
-        self.assertEqual(later['action_id'],'defend')
+    def test_recovery_removes_retired_advice_without_another_model_call(self):
+        self.episode('one');self.analyze()
+        target=self.database.with_suffix('.knowledge.json');stale=target.read_bytes()
+        self.episode('two');self.analyze('contradict');target.write_bytes(stale)
+        with closing(sqlite3.connect(self.database)) as db:
+            counters=db.execute('SELECT supports,contradictions FROM lessons').fetchall()
+            usage=db.execute('SELECT COUNT(*) FROM analysis_usage').fetchone()[0]
+        result=self.analyze()
+        self.assertEqual(json.loads(result.stdout)['status'],'idle')
+        self.assertEqual(self.lessons(),[])
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT supports,contradictions FROM lessons').fetchall(),counters)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM analysis_usage').fetchone()[0],usage)
 
-    def test_storage_failure_keeps_the_valid_game_decision_available(self):
-        reply,info = self.call(self.request(),VCMI_EXPERIENCE_DB=str(self.folder))
-        self.assertEqual(reply['action_id'],'attack')
-        self.assertEqual(info['provider'],'codex')
-        self.assertIn('experience_error',info)
+    def test_save_rollback_discards_unassessed_future_and_reoffers_consequence(self):
+        self.episode();self.call(self.request())
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM episodes WHERE assessed=0').fetchone()[0],0)
+        self.call(self.request(day=2,heroes=[]));self.analyze()
+        self.assertEqual(self.lessons()[0]['supports'],1)
 
-    def test_fallback_is_recorded_as_infrastructure_instead_of_a_model_attack(self):
-        self.call(self.request())  # Same request revisited after loading an earlier save.
-        _,info=self.call(self.request(),LEARNING_TEST_MODE='invalid-action')
-        self.assertEqual(info['provider'],'fallback')
-        source=MODEL.replace("episodes = context.get('episodes', [])", "episodes = context.get('episodes', [])\nif episodes:\n    assert episodes[0]['trajectory'][0]['action']['kind']=='end_turn'\n    assert episodes[0]['trajectory'][0]['action']['provider']=='fallback'")
-        self.env.update(codex_fixture(self.folder,source))
-        _,info=self.call(self.request(day=2,heroes=[]))
-        self.assertEqual(info['provider'],'codex')
+    def test_incomplete_own_roster_does_not_prove_hero_loss(self):
+        self.call(self.request(heroes=[{'id':99}]))
+        self.call(self.request(day=2,heroes=[{'id':n} for n in range(33)]))
+        with closing(sqlite3.connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM episodes').fetchone()[0],0)
 
-    def test_a_model_cannot_silently_skip_offered_reflection(self):
-        self.call(self.request())
-        _,info=self.call(self.request(day=2,heroes=[]),LEARNING_TEST_MODE='skip-reflection')
-        self.assertEqual(info['provider'],'fallback')
-        reply,_=self.call(self.request(game='later-party'))
-        self.assertEqual(reply['action_id'],'attack')
+    def test_read_only_and_off_controller_leave_library_unchanged(self):
+        self.episode();self.analyze();before=self.database.read_bytes()
+        for mode in ('read_only','off'):
+            env={**self.env,'VCMI_EXPERIENCE_MODE':mode}
+            r=subprocess.run([sys.executable,str(ROOT/'controller/main.py')],input=json.dumps(self.request()),
+                             capture_output=True,text=True,env=env,timeout=10)
+            self.assertEqual(r.returncode,0,r.stderr)
+            self.assertEqual(self.database.read_bytes(),before)
 
-    def test_rollback_reoffers_an_unassessed_consequence_instead_of_losing_it(self):
-        self.call(self.request())
-        self.call(self.request(day=2,heroes=[]),LEARNING_TEST_MODE='skip-reflection')
-        self.call(self.request())
-        _,info=self.call(self.request(day=2,heroes=[]))
-        self.assertEqual(info['experience']['lessons_updated'],1)
+    def test_stale_analysis_cannot_restore_a_discarded_episode(self):
+        self.episode();store=Experience(self.database,'learn')
+        try:
+            context=store.context({'protocol':1,'memory':{'experience_id':'player-game'},'observation':{'day':2}})
+            store.observe(self.request())
+            episode=context['episodes'][0]
+            assessment={'episode_id':episode['id'],'lesson_id':None,'verdict':'support',
+                'rule':'Retain confirmed evidence.','conditions':['combat'],
+                'evidence_ids':[episode['signals'][0]['id']],'explanation':'Confirmed observation.'}
+            with self.assertRaisesRegex(ValueError,'stale'):
+                store.assess('player-game',context,{'expectation':'Separate analysis.','assessments':[assessment]})
+        finally:store.close()
 
-    def test_same_day_rollback_does_not_expose_a_future_terminal_result(self):
-        self.call(self.request())
-        final=self.request()
-        final['request_id']='0:1:final'
-        final['observation']={'day':1,'player':0,'terminal_result':'loss'}
-        self.call(final)
-        self.call(self.request())
-        source=MODEL.replace("episodes = context.get('episodes', [])", "episodes = context.get('episodes', [])\nassert not any('terminal_result' in d['observation'] for e in episodes for d in e['trajectory'])")
-        self.env.update(codex_fixture(self.folder,source))
-        _,info=self.call(self.request(day=2,heroes=[]))
-        self.assertEqual(info['provider'],'codex')
+    def test_large_provenance_keeps_the_complete_rule_and_exceptions_readable(self):
+        lesson={'id':'one','rule':'Check current defense obligations.','conditions':['defense'],
+            'status':'active','confidence':'hypothesis','exceptions':['Required delivery.'],
+            'mechanism':'Protect current commitments.',
+            'evidence_contexts':[{'engine_revision':'x'*600,'supporting_games':1} for _ in range(4)]}
+        reader=KnowledgeReader({'revision':'fixed','lessons':[lesson]})
+        found=reader.call('search_knowledge',{'query':'defense'})['lessons']
+        self.assertEqual(found[0]['id'],'one')
+        read=reader.call('read_lesson',{'id':'one'})['lessons'][0]
+        self.assertEqual(read['rule'],lesson['rule'])
+        self.assertEqual(read['exceptions'],lesson['exceptions'])
+        self.assertEqual(read['mechanism'],lesson['mechanism'])
+        self.assertFalse(read['evidence_contexts_complete'])
 
-    def test_retired_popular_rules_cannot_crowd_out_their_active_refinements(self):
-        sys.path.insert(0,str(ROOT/'controller'))
-        from experience import Experience
-        store=Experience(self.folder/'ranking.sqlite3')
-        self.addCleanup(store.close)
-        day=0
-        def offer():
-            nonlocal day
-            day+=1
-            request=self.request(game='ranking',day=day)
-            request['observation']['resources']=[1000+day]
-            request['actions'].append({'id':'build','kind':'build'})
-            request['experience']=store.prepare(request)
-            return request
-        def accept(request,rule,verdict='support',lesson_id=None):
-            items=[{'episode_id':e['id'],'lesson_id':lesson_id,'verdict':verdict,'rule':rule,
-                    'conditions':['economy'],'evidence_ids':[e['signals'][0]['id']],
-                    'explanation':'Fixture-controlled resource change is the observed evidence.'}
-                   for e in request['experience']['episodes']]
-            store.accept(request,{'action_id':'build','learning':{'expectation':'Preserve useful resources.','assessments':items}})
-        accept(offer(),'Initial expectation')
-        for number in range(6):
-            rule=f'Reserve resources for economic objective {number}.'
-            for _ in range(10):
-                request=offer()
-                known=next((l['id'] for l in request['experience']['lessons'] if l['rule']==rule),None)
-                accept(request,rule,lesson_id=known)
-        for number in range(6):
-            request=offer()
-            old=next(l for l in request['experience']['lessons'] if l['rule']==f'Reserve resources for economic objective {number}.')
-            accept(request,f'Refined rule {number}: reserve resources only when a funded economic follow-up is feasible.',
-                   verdict='revise',lesson_id=old['id'])
-        fresh=self.request(game='new-ranking-party')
-        fresh['actions'].append({'id':'build','kind':'build'})
-        lessons=store.prepare(fresh)['lessons']
-        self.assertEqual(len([l for l in lessons if l['status']=='active' and l['rule'].startswith('Refined rule')]),6)
+    def test_knowledge_reader_has_shared_budget_and_no_path_read_operation(self):
+        self.episode();self.analyze();reader=KnowledgeReader({'revision':'one','lessons':self.lessons()})
+        result=reader.call('search_knowledge',{'query':'battle','category':'combat'})
+        self.assertEqual(len(result['lessons']),1)
+        self.assertEqual(reader.call('read_lesson',{'id':'/etc/passwd'})['lessons'],[])
+        for _ in range(2):reader.call('read_lesson',{'id':self.lessons()[0]['id']})
+        self.assertIn('unavailable',reader.call('search_knowledge',{'query':'battle'}))
+        with self.assertRaisesRegex(ValueError,'unknown'):
+            KnowledgeReader({'lessons':[]}).call('read_file',{'path':'/etc/passwd'})
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__=='__main__':unittest.main()
