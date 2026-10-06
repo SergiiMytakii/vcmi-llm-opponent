@@ -681,4 +681,71 @@ inline JsonNode forecastDefenses(const JsonNode & world, const CampaignState & c
     }
     return result;
 }
+
+// Counterfactual capacities, not decisions or battle guarantees. Each choice
+// uses the same current pools and budget independently, never cumulatively.
+inline JsonNode forecastTownChoices(const JsonNode & world,const CampaignState & campaign,
+    const std::map<std::string,std::string> & replacements = {})
+{
+    JsonNode result;result.Vector();
+    for(const auto & town:world["towns"].Vector()) for(const auto & hero:world["heroes"].Vector())
+    {
+        if(!town["position"].isVector() || hero["position"]!=town["position"]) continue;
+        JsonNode item;item["town_ref"]=town["ref"];item["actor_ref"]=hero["ref"];
+        const auto force=hero["army_value"].Integer();
+        const auto stationary=town["army_holder_ref"]==hero["ref"] ? 0 : town["defense_value"].Integer();
+        item["hero_force_now"].Integer()=force;
+        item["garrison_after_departure"].Integer()=stationary;
+        item["hold_force"].Integer()=town["army_holder_ref"]==hero["ref"] ? force : force+stationary;
+        item["active_main_floor"].Integer()=campaign.exchangeForce(hero["ref"].String(),world,replacements);
+        item["separable_surplus_under_current_plan"].Integer()=std::max<int64_t>(0,force-item["active_main_floor"].Integer());
+        item["detachable_units"]=hero["army_units"];
+        item["threats"].Vector();
+        for(const auto & threat:world["forecasts"]["threats"].Vector())
+            if(threat["town_ref"]==town["ref"]) item["threats"].Vector().push_back(threat);
+        auto budget=world["resources"];
+        const auto reserved=campaign.reservedResources();
+        for(int i=0;i<7;++i) budget[i].Integer()=std::max<int64_t>(0,budget[i].Integer()-reserved[i].Integer());
+        JsonNode purchase;purchase["units"].Vector();for(int i=0;i<7;++i) purchase["cost"].Vector().emplace_back(0);
+        int64_t bought=0;
+        for(const auto & unit:town["recruitment_options"].Vector())
+        {
+            auto count=unit["available"].Integer();
+            for(int i=0;i<7;++i) if(unit["unit_cost"][i].Integer()>0)
+                count=std::min(count,budget[i].Integer()/unit["unit_cost"][i].Integer());
+            if(count<=0) continue;
+            JsonNode quoted;quoted["creature"]=unit["creature"];quoted["count"].Integer()=count;
+            purchase["units"].Vector().push_back(quoted);bought+=count*unit["unit_value"].Integer();
+            for(int i=0;i<7;++i)
+            {
+                const auto cost=count*unit["unit_cost"][i].Integer();
+                budget[i].Integer()-=cost;purchase["cost"][i].Integer()+=cost;
+            }
+        }
+        purchase["additional_force"].Integer()=bought;
+        purchase["garrison_after_preparation"].Integer()=stationary+bought;
+        purchase["main_after_purchase"].Integer()=force;
+        purchase["requires_separate_town_pool"].Bool()=true;
+        purchase["assumptions"].String()="Independent stock quote before native stack/fund revalidation; not delivery to the main. Occupied visitor/garrison may prevent preparation.";
+        item["buy_garrison"]=purchase;
+        item["operations"].Vector();
+        for(const auto & entry:world["forecasts"]["routes"].Vector())
+        {
+            const JsonNode * target=nullptr;
+            for(const auto & object:world["visible_objects"].Vector())
+                if(object["ref"]==entry["target_ref"] && std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),object["owner"])!=world["enemy_players"].Vector().end()) target=&object;
+            if(!target) continue;
+            for(const auto & arrival:entry["own_arrivals"].Vector()) if(arrival["hero_ref"]==hero["ref"])
+            {
+                JsonNode operation;operation["target_ref"]=entry["target_ref"];operation["target_kind"]=(*target)["kind"];
+                operation["arrival"]=arrival;operation["enemy_army_interval"]=(*target)["army_interval"];
+                operation["main_after_preparation_requires_fresh_route"].Bool()=true;
+                item["operations"].Vector().push_back(operation);
+            }
+        }
+        item["assumptions"].String()="Compare departure, funded separate garrison, whole-creature detachment, interception and hold. Threat ETA/intent remain unknown; city value, walls, hero bonuses and return route require explicit reasoning. Smaller post-split armies need fresh native routes.";
+        result.Vector().push_back(item);
+    }
+    return result;
+}
 }

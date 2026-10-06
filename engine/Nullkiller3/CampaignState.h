@@ -91,6 +91,11 @@ class CampaignState
     {
         return fields(receipt,{"goal","day"}) && receipt["goal"]==goal && integer(receipt["day"],1,goal["deadline_day"].Integer());
     }
+    static bool interceptionProved(const JsonNode & goal,const JsonNode & receipt)
+    {
+        return receipt.isStruct() && receipt["goal"]==goal && receipt["won"].isBool() && receipt["won"].Bool()
+            && integer(receipt["day"],1,goal["deadline_day"].Integer());
+    }
     bool finished(const JsonNode & goal, const JsonNode & world) const
     {
         const auto & predicate = goal["complete_when"];
@@ -108,6 +113,17 @@ class CampaignState
         }
         if(kind == "reserve_at_least") return contains(world["confirmed_resource_pickups"], goal["target_ref"])
             && world["resources"][6].Integer() >= predicate["value"].Integer();
+        if(kind == "enemy_engaged")
+        {
+            auto proves=[&](const JsonNode & receipt) { return interceptionProved(goal,receipt); };
+            if(proves(state["interception_completions"][goal["id"].String()])) return true;
+            for(const auto & receipt:world["confirmed_interceptions"].Vector()) if(proves(receipt)) return true;
+            return false;
+        }
+        if(kind == "garrison_at_least")
+            return !town.isNull() && !hero.isNull() && town["army_holder_ref"]!=goal["actor_ref"]
+                && town["defense_value"].Integer()>=predicate["value"].Integer()
+                && hero["army_value"].Integer()>=goal["min_army_value"].Integer();
         if(kind == "site_visited")
         {
             for(const auto & receipt:world["confirmed_site_visits"].Vector()) if(siteProved(goal,receipt)) return true;
@@ -238,9 +254,15 @@ public:
             if(!status.isStruct() || !label(status["state"]) || !states.count(status["state"].String())
                 || !label(status["reason"])) return;
             if(status["state"].String() == "completed"
-                && !integer(status["completed_day"], (goal["kind"].String()=="explore_passage" || goal["kind"].String()=="visit_site") ? 1 : saved["accepted_day"].Integer(), 2147483647)) return;
+                && !integer(status["completed_day"], (goal["kind"].String()=="explore_passage" || goal["kind"].String()=="visit_site" || goal["kind"].String()=="intercept_hero") ? 1 : saved["accepted_day"].Integer(), 2147483647)) return;
             if(status["state"].String() == "completed" && goal["kind"].String()=="reinforce_hero"
                 && !validated.deliveryProved(goal,saved["delivery_completions"][goal["id"].String()])) return;
+            if(status["state"].String()=="completed" && goal["kind"].String()=="intercept_hero")
+            {
+                const auto & receipt=saved["interception_completions"][goal["id"].String()];
+                if(!interceptionProved(goal,receipt)
+                    || !integer(status["completed_day"],receipt["day"].Integer(),goal["deadline_day"].Integer())) return;
+            }
             if(status["state"].String()=="completed" && goal["kind"].String()=="visit_site")
             {
                 const auto & receipt=saved["site_completions"][goal["id"].String()];
@@ -291,7 +313,9 @@ public:
         const int64_t day = world["day"].Integer();
         for(const auto & goal : goals.Vector())
         {
-            if(!fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when"})
+            if(!(goal["kind"].String()=="prepare_garrison"
+                ? fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when", "garrison_mode"})
+                : fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when"}))
                 || !label(goal["kind"]) || !label(goal["id"]) || !byID.emplace(goal["id"].String(), &goal).second
                 || !integer(goal["priority"], 1, 100) || !integer(goal["deadline_day"], day, day + proposal["horizon_days"].Integer())
                 || !integer(goal["min_army_value"], 0, 1000000000) || !integer(goal["building_id"], -1, 100000)) return reject("invalid_goal");
@@ -332,6 +356,21 @@ public:
                     || (object["kind"].String()!="scholar" && object["kind"].String()!="treasure_chest" && object["kind"].String()!="obelisk")))
                     return reject("unsupported_visit_site");
             }
+            else if(kind == "intercept_hero")
+            {
+                bool confirmed=interceptionProved(goal,state["interception_completions"][goal["id"].String()]);
+                for(const auto & receipt:world["confirmed_interceptions"].Vector()) confirmed |= interceptionProved(goal,receipt);
+                if(!confirmed && (hero.isNull() || object.isNull() || object["kind"].String()!="hero"
+                    || !object["visible"].Bool() || !contains(world["enemy_players"],object["owner"])))
+                    return reject("unknown_visible_enemy_hero");
+            }
+            else if(kind == "prepare_garrison")
+            {
+                if(!goal["garrison_mode"].isString() || (goal["garrison_mode"].String()!="recruit"
+                    && goal["garrison_mode"].String()!="detach" && goal["garrison_mode"].String()!="recruit_then_detach")
+                    || hero.isNull() || town.isNull() || goal["min_army_value"].Integer()>hero["army_value"].Integer())
+                    return reject("invalid_garrison_participants");
+            }
             else if(kind == "defend_area")
             {
                 if(hero.isNull() || town.isNull()) return reject("invalid_defense_participants");
@@ -371,7 +410,9 @@ public:
             const auto & predicate = goal["complete_when"];
             if(!fields(predicate, {"kind", "value"}) || !label(predicate["kind"]) || !integer(predicate["value"], 0, 1000000000)) return reject("invalid_completion_predicate");
             const auto & completion = predicate["kind"].String();
-            const bool valid = (kind == "develop_town" && completion == "building_present" && predicate["value"] == goal["building_id"])
+            const bool valid = (kind == "intercept_hero" && completion == "enemy_engaged" && predicate["value"].Integer()==0)
+                || (kind == "prepare_garrison" && completion == "garrison_at_least" && predicate["value"].Integer()>0)
+                || (kind == "develop_town" && completion == "building_present" && predicate["value"] == goal["building_id"])
                 || ((kind == "capture_target" || (kind == "secure_resource" && object["kind"].String() == "mine")) && completion == "target_owned" && predicate["value"] == world["player"])
                 || (kind == "secure_resource" && object["kind"].String() == "resource" && completion == "reserve_at_least")
                 || (kind == "reinforce_hero" && completion == "army_at_least" && predicate["value"].Integer() >= goal["min_army_value"].Integer())
@@ -404,7 +445,7 @@ public:
         auto participants = [&](const JsonNode & goal) {
             std::set<std::string> heroes;
             if(goal["actor_ref"].isString()) heroes.insert(armyPool(goal["actor_ref"].String(),world));
-            if(goal["kind"].String() == "reinforce_hero")
+            if(goal["kind"].String() == "reinforce_hero" || goal["kind"].String()=="prepare_garrison")
                 heroes.insert(armyPool(goal["target_ref"].String(),world));
             return heroes;
         };
@@ -465,6 +506,9 @@ public:
         for(const auto & goal:goals.Vector())
             if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="visit_site")
                 accepted["site_completions"][goal["id"].String()]=state["site_completions"][goal["id"].String()];
+        for(const auto & goal:goals.Vector())
+            if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="intercept_hero")
+                accepted["interception_completions"][goal["id"].String()]=state["interception_completions"][goal["id"].String()];
         state = accepted;
         review(world);
         reason.clear();
@@ -479,7 +523,7 @@ public:
         feedback["target_ref"]=goal["target_ref"];feedback["deadline_day"]=goal["deadline_day"];
         feedback["supported"].Bool()=false;feedback["assigned_routes"].Vector();feedback["safe_options"].Vector();
         const auto & kind=goal["kind"].String();
-        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier" && kind!="scout_area" && kind!="visit_site" && kind!="explore_passage")
+        if(kind!="capture_target" && kind!="intercept_hero" && kind!="secure_resource" && kind!="scout_frontier" && kind!="scout_area" && kind!="visit_site" && kind!="explore_passage")
         { feedback["supported"].Bool()=true;return feedback; }
         const auto & entries=kind=="scout_area" ? world["scouting_options"] : kind=="scout_frontier" ? world["frontier_options"] : world["forecasts"]["routes"];
         for(const auto & entry:entries.Vector())
@@ -631,6 +675,9 @@ public:
                 if(goal["kind"].String()=="visit_site")
                     for(const auto & receipt:world["confirmed_site_visits"].Vector()) if(siteProved(goal,receipt))
                         state["site_completions"][id]=receipt;
+                if(goal["kind"].String()=="intercept_hero")
+                    for(const auto & receipt:world["confirmed_interceptions"].Vector()) if(interceptionProved(goal,receipt))
+                        state["interception_completions"][id]=receipt;
                 if(goal["kind"].String()=="reinforce_hero")
                     for(const auto & receipt:world["confirmed_deliveries"].Vector()) if(deliveryProved(goal,receipt))
                         state["delivery_completions"][id]=receipt;
@@ -640,7 +687,7 @@ public:
             { status["state"].String() = "blocked"; status["reason"].String() = "executor_no_longer_owned"; }
             else if(world["day"].Integer() > goal["deadline_day"].Integer())
             { status["state"].String() = "blocked"; status["reason"].String() = "deadline_missed"; }
-            else if((goal["kind"].String()=="develop_town" || goal["kind"].String()=="defend_area")
+            else if((goal["kind"].String()=="develop_town" || goal["kind"].String()=="prepare_garrison" || goal["kind"].String()=="defend_area")
                 && find(world,"towns",goal["target_ref"]).isNull())
             { status["state"].String()="blocked";status["reason"].String()="target_no_longer_owned"; }
             else if(goal["kind"].String() == "preserve_force")
@@ -749,7 +796,7 @@ public:
         {
             const auto & kind=goal["kind"].String(), & id=goal["id"].String();
             if(id==spendingGoal || !holdsCommitment(id)
-                || (kind!="capture_target" && kind!="secure_resource")
+                || (kind!="capture_target" && kind!="intercept_hero" && kind!="secure_resource")
                 || !goal["actor_ref"].isString() || armyPool(goal["actor_ref"].String(),world)!=pool) continue;
             floor=std::max(floor,goal["min_army_value"].Integer());
         }
@@ -765,10 +812,13 @@ public:
         for(const auto & goal : plan()["goals"].Vector())
         {
             const auto & id = goal["id"].String();
+            if(goal["kind"].String()=="prepare_garrison" && world["day"].Integer()<=goal["deadline_day"].Integer()
+                && armyPool(goal["target_ref"].String(),world)==pool && pool!=goal["actor_ref"].String())
+                floor=std::max(floor,goal["complete_when"]["value"].Integer());
             if(!holdsCommitment(id)) continue;
             const bool actor = goal["actor_ref"].isString() && armyPool(goal["actor_ref"].String(),world) == pool;
             if((goal["kind"].String() == "defend_area" && armyPool(goal["target_ref"].String(),world) == pool)
-                || (actor && (goal["kind"].String() == "preserve_force" || goal["kind"].String() == "defend_area")))
+                || (actor && (goal["kind"].String() == "preserve_force" || goal["kind"].String() == "prepare_garrison" || goal["kind"].String() == "defend_area")))
                 floor = std::max(floor, goal["min_army_value"].Integer());
             for(const auto & reserve : plan()["reserves"].Vector())
                 if(actor && reserve["goal_id"].String() == id) floor = std::max(floor, reserve["force_value"].Integer());

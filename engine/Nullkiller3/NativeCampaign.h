@@ -32,6 +32,7 @@ class NativeCampaign
     JsonNode persisted;
     std::string experienceID; // Immutable after construction; callbacks never read mutable JSON.
     std::atomic<bool> terminalRecorded{false};
+    std::atomic<int> observedBattleEnemy{-1};
     JsonNode world;
     CampaignState campaign;
     std::string spendingGoal;
@@ -111,6 +112,7 @@ public:
     void forceChanged(const CGHeroInstance * hero, int day);
     void resourcesChanged(const TResources & resources);
     void battleResult(JsonNode ownResult);
+    void battleOpponent(int engineID) { observedBattleEnemy.store(engineID); }
     void terminalResult(int player,int day,bool won);
     void recordDelivery(NK2AI::Nullkiller & ai, const CGHeroInstance * receiver, const CArmedInstance * source,
                         uint64_t receiverBefore, uint64_t sourceBefore);

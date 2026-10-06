@@ -19,6 +19,67 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--interception")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            auto world=input["world"];const auto & goal=input["plan"]["goals"][0];
+            nullkiller3::CampaignState campaign;std::string reason;
+            require(campaign.accept(input["plan"],world,reason),reason.c_str());
+            campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()!="completed","visibility alone completed interception");
+            JsonNode receipt;receipt["goal"]=goal;receipt["goal"]["target_ref"].String()="different-enemy";receipt["won"].Bool()=true;receipt["day"]=world["day"];
+            world["confirmed_interceptions"].Vector().push_back(receipt);campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()!="completed","different battle completed interception");
+            receipt["goal"]=goal;receipt["won"].Bool()=false;world["confirmed_interceptions"].Vector().push_back(receipt);campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()!="completed","lost battle completed interception");
+            receipt["won"].Bool()=true;world["confirmed_interceptions"].Vector().push_back(receipt);campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()=="completed","exact won engagement did not complete");
+            auto renewed=input["plan"];renewed["revision"].Integer()++;
+            world["day"].Integer()++;
+            for(auto & object:world["objects"].Vector()) if(object["ref"]==goal["target_ref"]) object["visible"].Bool()=false;
+            require(campaign.accept(renewed,world,reason),"acknowledged interception was lost on revision");
+            nullkiller3::CampaignState restored(campaign.save());
+            require(!restored.plan().isNull() && restored.statuses()[goal["id"].String()]["state"].String()=="completed","save lost exact engagement receipt");
+            std::cout<<"Exact interception and save receipt passed\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--garrison")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            auto world=input["world"];
+            nullkiller3::CampaignState campaign;
+            std::string reason;
+            require(campaign.accept(input["plan"],world,reason),reason.c_str());
+            const auto & goal=input["plan"]["goals"][0];
+            campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()!="completed","main army was counted as separate garrison");
+            const auto choices=nullkiller3::forecastTownChoices(world,campaign);
+            require(choices.Vector().size()==1 && choices[0]["garrison_after_departure"].Integer()==0,"departure kept the main in two places");
+            require(choices[0]["buy_garrison"]["additional_force"].Integer()==39052
+                && choices[0]["buy_garrison"]["cost"][6].Integer()==24530,"owned day100 stock/funds quote changed");
+            world["towns"][0]["army_holder_ref"]=world["towns"][0]["ref"];
+            world["towns"][0]["defense_value"]=goal["complete_when"]["value"];
+            world["heroes"][0]["army_value"].Integer()=goal["min_army_value"].Integer()-1;
+            campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()!="completed","garrison spent the main floor");
+            world["heroes"][0]["army_value"]=goal["min_army_value"];
+            campaign.review(world,false);
+            require(campaign.statuses()[goal["id"].String()]["state"].String()=="completed","separate garrison did not release dependent attack");
+            auto withAttack=input["plan"];
+            auto attack=withAttack["goals"][0];
+            attack["id"].String()="after-garrison";attack["kind"].String()="capture_target";
+            attack.Struct().erase("garrison_mode");attack["target_ref"].String()="object:1";
+            attack["min_army_value"].Integer()=510000;attack["depends_on"].Vector().push_back(goal["id"]);
+            attack["complete_when"]["kind"].String()="target_owned";attack["complete_when"]["value"]=input["world"]["player"];
+            withAttack["goals"].Vector().push_back(attack);
+            nullkiller3::CampaignState protectedAttack;
+            require(protectedAttack.accept(withAttack,input["world"],reason),reason.c_str());
+            const auto protectedChoices=nullkiller3::forecastTownChoices(input["world"],protectedAttack);
+            require(protectedChoices[0]["active_main_floor"].Integer()==510000
+                && protectedChoices[0]["separable_surplus_under_current_plan"].Integer()==1587,
+                "garrison quote omitted the dependent attack floor");
+            std::cout<<"Separate garrison and main floor completion passed\n";
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--idle-sites")
         {
             const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));

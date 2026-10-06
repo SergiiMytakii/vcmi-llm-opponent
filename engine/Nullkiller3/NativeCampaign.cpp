@@ -170,6 +170,74 @@ void NativeCampaign::finishLearningTurn()
 }
 namespace
 {
+class PrepareGarrison final : public NK2AI::Goals::ElementarGoal<PrepareGarrison>
+{
+    int64_t required, retained;
+    std::string mode;
+public:
+    PrepareGarrison(const CGTownInstance * target,const CGHeroInstance * source,int64_t defense,int64_t keep,const std::string & method)
+        : ElementarGoal(NK2AI::Goals::BUY_ARMY),required(defense),retained(keep),mode(method)
+    { town=target;hero=source; }
+    bool operator==(const PrepareGarrison & other) const override
+    { return town==other.town && hero==other.hero && required==other.required && retained==other.retained && mode==other.mode; }
+    std::string toString() const override { return "Prepare separate town garrison"; }
+    void accept(NK2AI::AIGateway * gateway) override
+    {
+        auto & ai=*gateway->nullkiller;
+        const auto floor=std::max<int64_t>(retained,ai.strategicCampaign->forceReserve(hero));
+        if(town->getOwner()!=ai.playerID || hero->getOwner()!=ai.playerID || hero->getVisitedTown()!=town
+            || hero->estimateCombatValue()<floor)
+            throw NK2AI::cannotFulfillGoalException("Garrison participants changed");
+        if(town->getGarrisonHero()==hero)
+        {
+            if(town->getVisitingHero()) throw NK2AI::cannotFulfillGoalException("Town visitor occupies exit");
+            gateway->checkStrategicTurn();ai.cc->swapGarrisonHero(town);
+        }
+        if(town->getVisitingHero()!=hero)
+            throw NK2AI::cannotFulfillGoalException("Separate garrison unavailable");
+        const auto * defense=town->getUpperArmy();
+        if(defense==hero) throw NK2AI::cannotFulfillGoalException("Garrison aliases departing hero");
+        // Recruit into the stationary town pool, never into the departing hero.
+        const auto stock=ai.armyManager->getArmyAvailableToBuy(defense,town,ai.getFreeResources());
+        if(mode!="detach") for(const auto & unit:stock)
+        {
+            const auto current=defense->estimateCombatValue();
+            if(current>=required) break;
+            const auto power=unit.creID.toCreature()->getAIValue();
+            if(!power || !defense->getSlotFor(unit.creID).validSlot()) continue;
+            const auto count=std::min<int64_t>(unit.count,(required-current+power-1)/power);
+            if(count<=0) continue;
+            gateway->checkStrategicTurn();ai.cc->recruitCreatures(town,defense,unit.creID,count,unit.level);
+        }
+        // Whole creatures only; preserve every active source obligation too.
+        std::vector<SlotID> slots;
+        for(const auto & entry:hero->Slots()) slots.push_back(entry.first);
+        std::sort(slots.begin(),slots.end(),[&](SlotID a,SlotID b) {
+            return hero->getStack(a).estimateCombatValue()/hero->getStackCount(a)
+                < hero->getStack(b).estimateCombatValue()/hero->getStackCount(b);
+        });
+        if(mode!="recruit") for(const auto sourceSlot:slots)
+        {
+            if(defense->estimateCombatValue()>=required) break;
+            if(!hero->hasStackAtSlot(sourceSlot)) continue;
+            const auto count=hero->getStackCount(sourceSlot);
+            const auto strength=hero->estimateCombatValue();
+            const auto power=hero->getStack(sourceSlot).estimateCombatValue()/count;
+            const auto destination=defense->getSlotFor(hero->getCreature(sourceSlot));
+            if(!power || !destination.validSlot() || strength<=floor) continue;
+            auto moved=std::min<int64_t>(count,std::min<int64_t>((strength-floor)/power,
+                (required-defense->estimateCombatValue()+power-1)/power));
+            if(hero->needsLastStack() && hero->stacksCount()==1) moved=std::min<int64_t>(moved,count-1);
+            if(moved<=0) continue;
+            gateway->checkStrategicTurn();
+            if(moved==count) ai.cc->mergeOrSwapStacks(hero,defense,sourceSlot,destination);
+            else ai.cc->splitStack(hero,defense,sourceSlot,destination,defense->getStackCount(destination)+moved);
+        }
+        if(defense->estimateCombatValue()<required || hero->estimateCombatValue()<floor)
+            throw NK2AI::cannotFulfillGoalException("Garrison floor not reached");
+        ai.unlockHero(hero);
+    }
+};
 size_t unseenInArea(const CCallback & callback,const int3 & position,int radius,PlayerColor player)
 {
     FowTilesType hidden;
@@ -457,6 +525,7 @@ void NativeCampaign::applyPassageObservations()
 }
 void NativeCampaign::battleResult(JsonNode ownResult)
 {
+    ownResult["enemy_engine_object_id"].Integer()=observedBattleEnemy.exchange(-1);
     ownResult["goal_id"].String()=executingGoal();
     ownResult["campaign_revision"].Integer()=acceptedRevision.load();
     // The callback uses only immutable own result facts and atomic accepted
@@ -508,6 +577,18 @@ void NativeCampaign::applyBattleObservations()
         const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
         const auto found=aliases.find(std::to_string(action["engine_object_id"].Integer()));
         action["actor_ref"]=found==aliases.end() ? JsonNode() : JsonNode(externalai::objectReference(found->second));
+        const auto enemy=action["enemy_engine_object_id"].Integer()<0 ? aliases.end()
+            : aliases.find(std::to_string(action["enemy_engine_object_id"].Integer()));
+        if(enemy!=aliases.end()) action["target_ref"].String()=externalai::objectReference(enemy->second);
+        if(won && action["campaign_revision"]==campaign.plan()["revision"])
+            for(const auto & goal:campaign.plan()["goals"].Vector())
+                if(goal["kind"].String()=="intercept_hero" && goal["id"]==action["goal_id"]
+                    && goal["actor_ref"]==action["actor_ref"] && goal["target_ref"]==action["target_ref"])
+                {
+                    JsonNode receipt;receipt["goal"]=goal;receipt["won"].Bool()=true;receipt["day"].Integer()=day;
+                    persisted["confirmed_interceptions"].Vector().push_back(receipt);
+                }
+        action.Struct().erase("enemy_engine_object_id");
         for(const auto * field:{"engine_object_id","day","won","draw"}) action.Struct().erase(field);
         action["kind"].String()="battle";
         action["source"].String()="own_battle_result";
@@ -638,6 +719,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
             ==campaign.plan()["goals"].Vector().end();
     });
     for(const auto & [id,receipt]:passageReceipts) world["confirmed_passage_explorations"].Vector().push_back(receipt);
+    world["confirmed_interceptions"]=persisted["confirmed_interceptions"];
     world["confirmed_site_visits"].Vector();
     auto & siteReceipts=persisted["site_receipts"].Struct();
     std::erase_if(siteReceipts,[&](const auto & item) {
@@ -989,7 +1071,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     for(const auto & object:world["visible_objects"].Vector())
     {
         const auto & kind=object["kind"].String();
-        if(kind!="town" && kind!="mine" && kind!="resource" && kind!="subterranean_gate"
+        if(kind!="hero" && kind!="town" && kind!="mine" && kind!="resource" && kind!="subterranean_gate"
             && kind!="scholar" && kind!="treasure_chest" && kind!="obelisk") continue;
         const auto & pos=object["position"];
         JsonNode route;
@@ -1005,6 +1087,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
         forecasts["routes"].Vector().push_back(route);
     }
     forecasts["defenses"]=forecastDefenses(world,campaign);
+    forecasts["town_choices"]=forecastTownChoices(world,campaign,helperSources());
     const auto joint=forecastCommitments(world,campaign,helperSources());
     for(const auto * field:{"commitments","resource_calendar","army_pools","deliveries","stock_at_deadline"}) forecasts[field]=joint[field];
     world["goal_statuses"]=campaign.review(world);
@@ -1012,7 +1095,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     world["goal_feedback"].Vector();
     for(const auto & goal:campaign.plan()["goals"].Vector())
     {
-        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="scout_area" && goal["kind"].String()!="visit_site" && goal["kind"].String()!="explore_passage") continue;
+        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="intercept_hero" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="scout_area" && goal["kind"].String()!="visit_site" && goal["kind"].String()!="explore_passage") continue;
         auto feedback=campaign.routeFeedback(goal,world);
         feedback["status"]=world["goal_statuses"][goal["id"].String()];
         world["goal_feedback"].Vector().push_back(feedback);
@@ -1233,6 +1316,23 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
         if(kind=="defend_area" && unchangedHoldingAttempt(persisted["memory"],goal["id"].String(),campaign.plan()["revision"].Integer(),executionSnapshot(ai))) continue;
         const auto * target = resolve(ai, goal["target_ref"]);
         const auto * actor = dynamic_cast<const CGHeroInstance *>(resolve(ai, goal["actor_ref"]));
+        if(kind=="prepare_garrison" && actor)
+        {
+            const auto before=output.size();
+            const auto * town=dynamic_cast<const CGTownInstance *>(target);
+            if(town && town->getOwner()==ai.playerID && actor->getVisitedTown()==town
+                && !(town->getGarrisonHero()==actor && town->getVisitingHero()))
+                rememberTasks(output,{sptr(PrepareGarrison(town,actor,goal["complete_when"]["value"].Integer(),
+                    goal["min_army_value"].Integer(),goal["garrison_mode"].String()))},goal,ai);
+            else if(town && actor->getVisitedTown()!=town)
+                rememberTasks(output,CaptureObjectsBehavior::getVisitGoals(ai.pathfinder->getPathInfo(town->visitablePos(),false),&ai,town,true),goal,ai);
+            if(output.size()==before)
+            {
+                campaign.blocked(goal["id"].String(),"garrison_location_not_established");
+                world["goal_statuses"]=campaign.statuses();
+            }
+            continue;
+        }
         if(kind=="defend_area" && actor)
         {
             const auto * town=dynamic_cast<const CGTownInstance *>(target);
@@ -1896,6 +1996,12 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
     using namespace NK2AI::Goals;
     action["kind"].String()=goalType==BUILD_STRUCTURE ? "build" : goalType==BUY_ARMY ? "recruit"
         : goalType==RECRUIT_HERO ? "hire_hero" : goalType==EXECUTE_HERO_CHAIN ? "visit" : "native_task";
+    if(goalType==BUY_ARMY) for(const auto & intention:campaign.plan()["goals"].Vector())
+        if(intention["id"].String()==goalID && intention["kind"].String()=="prepare_garrison")
+        {
+            action["kind"].String()="prepare_garrison";
+            action["garrison_mode"]=intention["garrison_mode"];
+        }
     if(goal && !goal->strategicEmergencyTown.empty())
     {
         action["emergency"]["town_ref"].String()=goal->strategicEmergencyTown;

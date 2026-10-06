@@ -24,6 +24,45 @@ def strategic_request():
 
 
 class NativeStrategyControllerTest(unittest.TestCase):
+    def test_post_capture_goals_use_owned_town_and_visible_enemy_with_distinct_predicates(self):
+        from controller.native_strategy import validate_reply
+        request=strategic_request()
+        request['observation']['enemy_players']=[1]
+        request['observation']['objects'].append(dict(ref='object:2',id=2,kind='hero',owner=1,visible=True))
+        def answer(kind,target,completion,value):
+            reply=dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
+                reason='Compare post-capture alternatives',evidence_refs=['observation:day'],victory_method='Maintain conquest',
+                assignments=[dict(hero_ref='object:0',role='main')],
+                alternatives=[dict(approach='offense',benefit='Advance',cost='Expose town',uncertainty='Enemy intent'),
+                              dict(approach='defense',benefit='Hold',cost='Delay',uncertainty='Enemy timing')],
+                reconsider_when=[dict(goal_id='prepare',kind='deadline_missed')],
+                plan=dict(version=3,revision=1,approach='offense',horizon_days=3,
+                    goals=[dict(id='prepare',kind=kind,actor_ref='object:0',target_ref=target,deadline_day=3,
+                        priority=90,building_id=-1,min_army_value=4000,depends_on=[],required_capabilities=['land'],
+                        complete_when=dict(kind=completion,value=value))],reserves=[],
+                    policy=dict(max_loss_ratio=.25,allow_route_repair=True,allow_helper_replacement=True,critical_towns=[])))
+            if kind=='prepare_garrison':reply['plan']['goals'][0]['garrison_mode']='recruit_then_detach'
+            return reply
+        validate_reply(request,answer('prepare_garrison','object:1','garrison_at_least',1000))
+        validate_reply(request,answer('intercept_hero','object:2','enemy_engaged',0))
+        for bad in [answer('prepare_garrison','object:0','garrison_at_least',1000),
+                    answer('prepare_garrison','object:1','garrison_at_least',0),
+                    answer('intercept_hero','object:2','target_owned',0)]:
+            with self.assertRaises(ValueError):validate_reply(request,bad)
+        request['observation']['objects'][-1]['visible']=False
+        with self.assertRaises(ValueError):validate_reply(request,answer('intercept_hero','object:2','enemy_engaged',0))
+        completed=answer('intercept_hero','object:2','enemy_engaged',0)
+        goal=completed['plan']['goals'][0]
+        request['campaign']=completed['plan']
+        request['observation']['goal_statuses']={'prepare':{'state':'completed'}}
+        request['observation']['confirmed_interceptions']=[{'goal':goal,'day':1,'won':True}]
+        validate_reply(request,completed)
+        changed=answer('intercept_hero','object:2','enemy_engaged',0)
+        changed['plan']['goals'][0]['min_army_value']=3999
+        with self.assertRaises(ValueError):validate_reply(request,changed)
+        request['observation']['confirmed_interceptions']=[]
+        with self.assertRaises(ValueError):validate_reply(request,completed)
+
     def exchange(self, mode,learn=False):
         with tempfile.TemporaryDirectory() as folder:
             env=codex_fixture(Path(folder), '''

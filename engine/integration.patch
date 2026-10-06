@@ -328,6 +328,13 @@ index 02b0d31bf..7a5bd6373 100644
  	}
  }
  
+@@ -1023,1 +1023,6 @@
++	if(nullkiller->strategicCampaign)
++	{
++		const auto * opponent=side==BattleSide::ATTACKER ? hero2 : hero1;
++		nullkiller->strategicCampaign->battleOpponent(opponent ? opponent->id.getNum() : -1);
++	}
+ 	CAdventureAI::battleStart(battleID, army1, army2, tile, hero1, hero2, side, replayAllowed);
 @@ -1028,6 +1154,35 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
  	assert(status.getBattle() == ONGOING_BATTLE);
  	status.setBattle(ENDING_BATTLE);
@@ -615,6 +622,14 @@ diff --git a/AI/Nullkiller2/Analyzers/DangerHitMapAnalyzer.cpp b/AI/Nullkiller2/
 index d92ca65b6..0c212ea8f 100644
 --- a/AI/Nullkiller2/Analyzers/DangerHitMapAnalyzer.cpp
 +++ b/AI/Nullkiller2/Analyzers/DangerHitMapAnalyzer.cpp
+@@ -14,6 +14,7 @@
+ #include "../pforeach.h"
+ #include "../../../lib/callback/GameRandomizer.h"
+ #include "../../../lib/logging/VisualLogger.h"
++#include "../../../lib/mapping/TerrainTile.h"
+ 
+ namespace NK2AI
+ {
 @@ -71,6 +71,7 @@ void DangerHitMapAnalyzer::updateHitMap()
  {
  	if(hitMapUpToDate)
@@ -632,7 +647,7 @@ index d92ca65b6..0c212ea8f 100644
  		if(!obj)
  			continue;
  
-@@ -209,6 +210,39 @@ void DangerHitMapAnalyzer::updateHitMap()
+@@ -209,6 +210,53 @@ void DangerHitMapAnalyzer::updateHitMap()
  	logHitmap(aiNk->playerID, *this, *aiNk->cc);
  }
  
@@ -650,20 +665,34 @@ index d92ca65b6..0c212ea8f 100644
 +    {
 +        const auto * object = aiNk->observedObject(id);
 +        if(!object || object->ID != Obj::HERO || aiNk->cc->getPlayerRelations(object->getOwner(), aiNk->playerID) != PlayerRelations::ENEMIES) continue;
++        const auto * heroEnemy=dynamic_cast<const CGHeroInstance *>(object);
++        if(!heroEnemy) continue;
 +        HitMapInfo threat;
-+        threat.heroPtr = HeroPtr(dynamic_cast<const CGHeroInstance *>(object), aiNk->cc.get());
++        threat.heroPtr = HeroPtr(heroEnemy, aiNk->cc.get());
 +        threat.danger = aiNk->observedStrength(object);
 +        threat.threat = threat.danger;
-+        threat.turn = 0;
++        // Unknown arrival must not become an urgent native defense order.
++        threat.turn = std::numeric_limits<uint8_t>::max();
 +        foreach_tile_pos(*aiNk->cc, [&](const int3 & pos) {
 +            if(!aiNk->cc->isVisible(pos) || pos.z != object->visitablePos().z) return;
 +            auto & node = hitMap[pos.x][pos.y][pos.z];
-+            if(threat.danger > node.maximumDanger.danger) node.maximumDanger = node.fastestDanger = threat;
++            auto local=threat;
++            const auto from=object->visitablePos();
++            const auto * sourceTile=aiNk->cc->getTile(from), * targetTile=aiNk->cc->getTile(pos);
++            if(!heroEnemy->inBoat() && sourceTile && targetTile && sourceTile->isLand() && targetTile->isLand()
++                && from.dist2dSQ(pos)<=2 && aiNk->cc->canMoveBetween(from,pos)) local.turn=0;
++            if(local.danger > node.maximumDanger.danger) node.maximumDanger=local;
++            if(local.turn<node.fastestDanger.turn || (local.turn==node.fastestDanger.turn && local.danger>node.fastestDanger.danger)) node.fastestDanger=local;
 +        });
 +        for(const auto * town : aiNk->cc->getTownsInfo())
 +            if(town->visitablePos().z == object->visitablePos().z) {
-+                townThreats[town->id].push_back(threat);
-+                enemyHeroAccessibleObjects.emplace_back(threat.heroPtr.get(), town);
++                auto local=threat;
++                const auto from=object->visitablePos(),to=town->visitablePos();
++                const auto * sourceTile=aiNk->cc->getTile(from), * targetTile=aiNk->cc->getTile(to);
++                if(!heroEnemy->inBoat() && sourceTile && targetTile && sourceTile->isLand() && targetTile->isLand()
++                    && aiNk->cc->isVisible(to) && from.dist2dSQ(to)<=2 && aiNk->cc->canMoveBetween(from,to)) local.turn=0;
++                townThreats[town->id].push_back(local);
++                if(local.turn==0) enemyHeroAccessibleObjects.emplace_back(local.heroPtr.get(),town);
 +            }
 +    }
 +    hitMapUpToDate = true;

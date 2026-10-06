@@ -74,6 +74,28 @@ A later arrival requires a revised deadline. Do not repeat unsupported assignmen
 Future troops, unknown post-delivery forecasts and missing routes cannot make an
 operation immediately ready.
 
+# Town preparation and interception contract
+Use prepare_garrison at the owned town: actor is the departing hero;
+complete_when.garrison_at_least is the separate stationary defense required,
+min_army_value is the main force that must remain AFTER detachment. Native
+execution extracts a garrisoned hero. Choose garrison_mode explicitly: recruit
+buys only into the separate town pool; detach moves only your own creatures;
+recruit_then_detach buys first and detaches the missing force. All modes protect
+the retained main force and other active force floors.
+An occupied visitor may prevent extraction. Stock quotes are independent
+alternatives, not promises. Put the next capture/interception behind this
+preparation dependency and set its minimum to the intended remaining army;
+its route and losses are validated again after the split. If keeping the main
+at current full strength is required, buy a separate garrison or explain why
+preparation cannot succeed. reinforce_hero from the recipient's aliased town
+does not express buying a separate garrison.
+
+Use intercept_hero only for a currently visible hostile hero with a supported
+own route and acceptable estimated losses. enemy_engaged completes after a
+confirmed won battle against that exact target, not loss of visibility or a
+different fight on the way. The enemy may retreat; reassess the observed result
+and movement instead of promising a kill or pursuit into unknown terrain.
+
 # Threat evidence
 Use enemy_approaches, visible army intervals, observed enemy movement, established
 approaches and neutral barriers. Unknown/unbounded strength or straight-line advance
@@ -93,6 +115,9 @@ capabilities and factual completion predicates.
 
 - develop_town: owned town/building ID; actor=null.
 - reinforce_hero: recipient as actor; owned donor hero/town as target.
+- prepare_garrison: departing hero as actor; owned town as target; separate
+  garrison_at_least value and retained main min_army_value.
+- intercept_hero: owned actor; visible hostile hero; enemy_engaged value=0.
 - preserve_force: owned safe town; maintain specified floor through its day.
 - scout_frontier: supplied frontier ref, never hidden land.
 - scout_area: supplied scouting_options ref, a currently known land viewpoint.
