@@ -106,8 +106,10 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
             || (!offense["hero_ref"].isNull() && (!offense["hero_ref"].isString() || offense["hero_ref"].String().size()>240))
             || (!offense["army_value"].isNull() && !savedInteger(offense["army_value"],0,1000000000000LL));
     }
-    for(const auto * field:{"confirmed_resource_pickups","frontier_positions","local_repairs","delivery_receipts","passage_receipts","site_receipts","helper_hire_receipts","goal_blockers"})
+    for(const auto * field:{"confirmed_border_visits","confirmed_resource_pickups","frontier_positions","local_repairs","delivery_receipts","passage_receipts","site_receipts","helper_hire_receipts","goal_blockers"})
         invalid |= !saved[field].isNull() && !saved[field].isStruct();
+    if(saved["confirmed_border_visits"].isStruct())
+        for(const auto & [ref,day]:saved["confirmed_border_visits"].Struct()) invalid |= !savedInteger(day,1,2147483647);
     if(saved["confirmed_resource_pickups"].isStruct())
         for(const auto & [ref,day]:saved["confirmed_resource_pickups"].Struct()) invalid |= !savedInteger(day,1,2147483647);
     if(saved["frontier_positions"].isStruct())
@@ -215,7 +217,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     }
     if(invalid)
         for(const auto * field:{"object_ids","memory","native_campaign","strategy_metadata","local_repairs",
-                               "delivery_receipts","passage_receipts","site_receipts","helper_hire_receipts","observed_passages","goal_blockers","frontier_positions","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
+                               "delivery_receipts","passage_receipts","site_receipts","helper_hire_receipts","observed_passages","goal_blockers","frontier_positions","confirmed_border_visits","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
             result.Struct().erase(field);
     if(result["strategy_metadata"].isStruct())
         for(auto & assignment:result["strategy_metadata"]["assignments"].Vector())

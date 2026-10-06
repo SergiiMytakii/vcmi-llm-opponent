@@ -1,5 +1,6 @@
 #pragma once
 #include "json/JsonNode.h"
+#include "KeymasterAccess.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -166,7 +167,8 @@ inline JsonNode generateTargetCandidates(const JsonNode & world,const JsonNode &
         if(kind=="mine") return std::string("income");
         if(kind=="resource") return std::string("supplies");
         if(kind=="subterranean_gate") return std::string("passages");
-        if((kind=="scholar" || kind=="treasure_chest" || kind=="obelisk") && !object["visited"].Bool()) return std::string("sites");
+        if(keymasterObject(object) && strategicSiteAvailable(object)) return std::string(kind=="keymaster_tent" ? "key_tents" : "key_borders");
+        if(strategicSiteAvailable(object)) return std::string("sites");
         return std::string();
     };
     auto add=[&](const JsonNode & object,bool mandatory) {
@@ -235,7 +237,7 @@ inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & p
     {
         const auto & kind=object["kind"].String();
         if(selected.count(object["ref"].String()) || kind=="hero" || kind=="town" || kind=="monster"
-            || kind=="garrison" || kind=="boat" || kind=="shipyard" || kind=="other")
+            || kind=="garrison" || kind=="boat" || kind=="shipyard" || kind=="other" || keymasterObject(object))
             view["visible_objects"].Vector().push_back(object);
     }
     view["frontiers"].Vector().clear();

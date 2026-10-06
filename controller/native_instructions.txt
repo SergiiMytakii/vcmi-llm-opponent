@@ -144,7 +144,21 @@ route repair and helper replacement guarantee neither reinforcement nor arrival.
   arrival; area_observed value is its sight_radius. Completion needs all tiles in
   that radius revealed. expected_new_tiles is fog count, not useful objects,
   passability or onward routes.
-- visit_site: supplied visible unvisited scholar, treasure_chest or obelisk;
+- visit_site: supplied visible unvisited scholar, treasure_chest, obelisk,
+  keymaster_tent, or unlocked border_guard/border_gate. A tent's key_color
+  identifies the player-wide key: discovery alone gives no key; key_owned becomes
+  true only after a hero of this player visits that colour's tent. Any owned hero
+  may then open matching borders, subject to its eligible_hero_refs and offered
+  native route. matching_visible_refs contains only currently seen matching
+  sites, never hidden gates. For borders select an eligible actor; site_visited
+  confirms that actor's guard removal or permitted gate entry, not safety beyond.
+  Give opening a newly accessible region or route to a supported objective high
+  strategic priority; compare its movement, losses and gain with other operations.
+  Prefer a suitable helper for safe key collection/opening. Reassess offered routes
+  after the key/guard changes; do not invent onward routes or promise a safe exit.
+  A locked border is not executable yet: first visit its matching visible tent,
+  then reconsider after the key is confirmed. Do not repeat gates with a confirmed strategic visit.
+- visit_site completion:
   site_visited value=0 needs the assigned actor's native visit, not another hero's.
   Scholar lessons/chest contents remain unknown before visiting.
 - secure_resource: mine uses target_owned value=observation.player. A resource pile

@@ -87,6 +87,16 @@ def needs_defense_exit(request):
                for g in (request.get('campaign') or {}).get('goals',[]))
 
 
+def visit_site_available(site):
+    if site.get('visible') is not True or site.get('visited') is not False:
+        return False
+    kind=site.get('kind')
+    return (kind in ('scholar','treasure_chest','obelisk')
+            or kind=='keymaster_tent' and site.get('key_owned') is False
+            or kind in ('border_guard','border_gate') and site.get('key_owned') is True
+               and bool(site.get('eligible_hero_refs')))
+
+
 def reply_schema(request):
     world = request['observation']
     day = world['day']
@@ -128,7 +138,7 @@ def reply_schema(request):
         'capture_target':[o['ref'] for o in objects if o.get('kind') in ('town','mine') and (o.get('owner')!=world['player'] or o.get('visible') is not True)],
         'defend_area':town_refs,'scout_frontier':world['frontiers'],
         'scout_area':[a['ref'] for a in world.get('scouting_options',[])],'preserve_force':town_refs,
-        'visit_site':[o['ref'] for o in objects if o.get('kind') in ('scholar','treasure_chest','obelisk') and o.get('visible') is True and o.get('visited') is False]
+        'visit_site':[o['ref'] for o in objects if visit_site_available(o)]
             +[g['target_ref'] for g in (request.get('campaign') or {}).get('goals',[]) if g['kind']=='visit_site' and world.get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'],
         'explore_passage':[o['ref'] for o in objects if o.get('kind')=='subterranean_gate' and o.get('visible') is True]}
     supported_buildings = sorted({b['id'] for t in world['towns'] for b in t.get('building_options',[]) if b.get('supported') is True})
@@ -283,6 +293,12 @@ def validate_reply(request, reply, wire=False):
             if not (target.get('kind')=='hero' and target.get('visible') is True
                     and target.get('owner') in request['observation'].get('enemy_players',[])):
                 if not any(same_goal(g,old) for old in completed_interceptions(request)):raise ValueError('unconfirmed hidden interception')
+        if kind=='visit_site':
+            target=by_ref.get(g['target_ref'],{})
+            if target.get('kind') in ('border_guard','border_gate') and not any(
+                    same_goal(g,receipt.get('goal')) for receipt in request['observation'].get('confirmed_site_visits',[])):
+                if g['actor_ref'] not in target.get('eligible_hero_refs',[]):
+                    raise ValueError('border_actor_not_eligible')
         if kind=='develop_town' and predicate['value'] != g['building_id']:raise ValueError('building predicate does not prove goal')
         if kind=='reinforce_hero' and (g['actor_ref']==g['target_ref'] or predicate['value']<g['min_army_value']):
             raise ValueError('invalid reinforcement predicate or participants')

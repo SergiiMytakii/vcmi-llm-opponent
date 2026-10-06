@@ -13,6 +13,7 @@
 #include "../Nullkiller2/Markers/DefendTown.h"
 #include "../../lib/mapObjects/IOwnableObject.h"
 #include "../../lib/mapObjects/MiscObjects.h"
+#include "../../lib/mapObjects/Quest.h"
 #include "../ExternalAI/StrategyMemory.h"
 #include "../ExternalAI/ObservationRules.h"
 #include "../Nullkiller2/Engine/Nullkiller.h"
@@ -268,6 +269,14 @@ JsonNode armyUnits(const CArmedInstance * army)
     }
     return result;
 }
+bool canOpenKeyBorder(const CGObjectInstance * object,const CGHeroInstance * hero)
+{
+    if(object->ID==Obj::BORDER_GATE) return object->passableFor(hero);
+    if(object->ID!=Obj::BORDERGUARD) return false;
+    const auto * source=object->asQuestSource();
+    const auto * quest=source ? source->getActiveQuest() : nullptr;
+    return quest && quest->checkQuest(hero);
+}
 std::string objectKind(const CGObjectInstance * object)
 {
     switch(object->ID.toEnum())
@@ -277,6 +286,9 @@ std::string objectKind(const CGObjectInstance * object)
     case Obj::MINE: return "mine";
     case Obj::RESOURCE: return "resource";
     case Obj::SUBTERRANEAN_GATE: return "subterranean_gate";
+    case Obj::KEYMASTER: return "keymaster_tent";
+    case Obj::BORDERGUARD: return "border_guard";
+    case Obj::BORDER_GATE: return "border_gate";
     case Obj::MONSTER: return "monster";
     case Obj::SCHOLAR: return "scholar";
     case Obj::TREASURE_CHEST: return "treasure_chest";
@@ -481,8 +493,11 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
         siteVisits.erase(actor);
         if(object && actor==activeSiteActor && object->id.getNum()==activeSiteObject && !activeSiteGoal.isNull())
         {
-            JsonNode receipt;receipt["goal"]=activeSiteGoal;receipt["day"].Integer()=activeSiteDay;
-            siteVisits[actor]=receipt;
+            JsonNode event;event["goal"]=activeSiteGoal;event["day"].Integer()=activeSiteDay;
+            event["target_id"].Integer()=object->id.getNum();event["kind"].String()=objectKind(object);
+            event["position"]=coordinate(object->visitablePos());
+            event["entry_allowed"].Bool()=object->ID==Obj::BORDER_GATE && canOpenKeyBorder(object,hero);
+            siteVisits[actor]=event;
         }
         if(object && object->ID==Obj::SUBTERRANEAN_GATE)
         {
@@ -505,8 +520,7 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
         const auto site=siteVisits.find(actor);
         if(site!=siteVisits.end())
         {
-            if(!object || (object->id.getNum()==activeSiteObject && object->wasVisited(hero->getOwner())))
-                completedSiteVisits.push_back(site->second);
+            endedSiteVisits.push_back(site->second);
             siteVisits.erase(site);
         }
         const auto passage=passageVisits.find(actor);
@@ -520,6 +534,25 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
             passageVisits.erase(passage);
         }
     }
+}
+void NativeCampaign::applySiteObservations(NK2AI::Nullkiller & ai)
+{
+    std::lock_guard lock(visitMutex);
+    for(const auto & event:endedSiteVisits)
+    {
+        const auto * actor=dynamic_cast<const CGHeroInstance *>(resolve(ai,event["goal"]["actor_ref"]));
+        const auto * target=ai.cc->getObj(ObjectInstanceID(event["target_id"].Integer()),false);
+        const auto & pos=event["position"];
+        const int3 position(pos[0].Integer(),pos[1].Integer(),pos[2].Integer());
+        JsonNode facts;facts["kind"]=event["kind"];facts["entry_allowed"]=event["entry_allowed"];
+        facts["actor_owned"].Bool()=actor && actor->getOwner()==ai.playerID;
+        facts["target_visible"].Bool()=ai.cc->isVisible(position);
+        facts["target_present"].Bool()=target!=nullptr;
+        facts["visited_by_player"].Bool()=target && target->wasVisited(ai.playerID);
+        facts["actor_at_target"].Bool()=actor && actor->visitablePos()==position;
+        if(keySiteVisitConfirmed(facts)) recordStrategicSiteVisit(persisted,event);
+    }
+    endedSiteVisits.clear();
 }
 void NativeCampaign::applyPassageObservations()
 {
@@ -730,10 +763,8 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
                 persisted["confirmed_resource_pickups"][externalai::objectReference(found->second)] = world["day"];
         }
         completedResourceVisits.clear();
-        for(const auto & receipt:completedSiteVisits)
-            persisted["site_receipts"][receipt["goal"]["id"].String()]=receipt;
-        completedSiteVisits.clear();
     }
+    applySiteObservations(ai);
     applyPassageObservations();
     world["confirmed_resource_pickups"].Vector();
     for(const auto & [ref, day] : persisted["confirmed_resource_pickups"].Struct())
@@ -930,8 +961,20 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["ref"].String() = reference(object);
         item["id"].Integer() = externalai::objectAlias(persisted["object_ids"], object->id.getNum());
         item["kind"].String() = objectKind(object);
+        item["visible"].Bool()=true;
         if(object->ID==Obj::SCHOLAR || object->ID==Obj::TREASURE_CHEST || object->ID==Obj::OBELISK)
             item["visited"].Bool()=object->wasVisited(ai.playerID);
+        if(keymasterObject(item))
+        {
+            item["key_color"].Integer()=object->subID.getNum();
+            item["key_owned"].Bool()=ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(object->subID);
+            item["visited"].Bool()=object->ID==Obj::KEYMASTER ? object->wasVisited(ai.playerID)
+                : !static_cast<const JsonNode &>(persisted)["confirmed_border_visits"][item["ref"].String()].isNull();
+            item["eligible_hero_refs"].Vector();
+            if(object->ID!=Obj::KEYMASTER)
+                for(const auto * hero:ai.cc->getHeroesInfo())
+                    if(canOpenKeyBorder(object,hero)) item["eligible_hero_refs"].Vector().emplace_back(reference(hero));
+        }
         item["owner"].Integer() = object->getOwner().getNum();
         item["position"] = coordinate(object->visitablePos());
         item["army_value"].Integer() = observedArmyStrength(*ai.cc, object);
@@ -948,6 +991,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
             }
         }
     }
+    linkKeymasterSites(world);
     JsonNode visiblePositions;
     world["frontiers"].Vector();
     world["frontier_options"].Vector();
@@ -1007,6 +1051,11 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     for(auto object : persisted["memory"]["known_objects"].Vector())
     {
         object["visible"].Bool() = !object["stale"].Bool() && !object["not_seen_at_last_position"].Bool();
+        if(keymasterObject(object) && object["key_color"].isNumber())
+        {
+            object["key_owned"].Bool()=ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(MapObjectSubID(object["key_color"].Integer()));
+            if(!object["visible"].Bool()) object["eligible_hero_refs"].Vector().clear();
+        }
         world["objects"].Vector().push_back(object);
     }
     applyBattleObservations();
@@ -1306,6 +1355,7 @@ void NativeCampaign::persist(NK2AI::Nullkiller & ai)
 {
     // Publish confirmed crossings before any ordinary save can observe an
     // acknowledged task with its pending intent already removed.
+    applySiteObservations(ai);
     applyPassageObservations();
     applyBattleObservations();
     applyForceObservations();
@@ -1346,7 +1396,7 @@ bool NativeCampaign::repairOwnHeroObstruction(NK2AI::Nullkiller & ai)
     {
         const auto kind=object["kind"].String();
         if((kind=="mine" && object["owner"]!=world["player"]) || kind=="resource"
-            || ((kind=="treasure_chest" || kind=="obelisk" || kind=="scholar") && !object["visited"].Bool()))
+            || strategicSiteAvailable(object))
             if(const auto * target=resolve(ai,object["ref"])) targets.push_back(target);
     }
     std::optional<NK2AI::AIPath> best;const CGHeroInstance * yielding=nullptr;const CGObjectInstance * opened=nullptr;
@@ -2349,7 +2399,9 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
                 const auto * actor=dynamic_cast<const CGHeroInstance *>(resolve(ai,item["actor_ref"]));
                 const auto * site=resolve(ai,item["target_ref"]);
                 if(actor && actor->getOwner()==ai.playerID && site && ai.cc->isVisible(site->visitablePos())
-                    && (site->ID==Obj::SCHOLAR || site->ID==Obj::TREASURE_CHEST || site->ID==Obj::OBELISK))
+                    && (site->ID==Obj::SCHOLAR || site->ID==Obj::TREASURE_CHEST || site->ID==Obj::OBELISK
+                        || site->ID==Obj::KEYMASTER || ((site->ID==Obj::BORDERGUARD || site->ID==Obj::BORDER_GATE)
+                            && ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(site->subID) && canOpenKeyBorder(site,actor))))
                 {
                     activeSiteGoal=item;activeSiteActor=actor->id.getNum();activeSiteObject=site->id.getNum();
                     activeSiteDay=ai.cc->getCalendar().getCurrentDay();

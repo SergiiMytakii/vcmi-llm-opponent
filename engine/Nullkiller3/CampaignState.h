@@ -1,6 +1,7 @@
 #pragma once
 
 #include "json/JsonNode.h"
+#include "KeymasterAccess.h"
 #include <boost/uuid/detail/sha1.hpp>
 #include <algorithm>
 #include <functional>
@@ -457,8 +458,7 @@ public:
                     confirmed |= sameGoal(previous,goal) && state["statuses"][goal["id"].String()]["state"].String()=="completed"
                         && siteProved(goal,state["site_completions"][goal["id"].String()]);
                 if(!confirmed && (hero.isNull() || object.isNull() || !object["visible"].Bool()
-                    || !object["visited"].isBool() || object["visited"].Bool()
-                    || (object["kind"].String()!="scholar" && object["kind"].String()!="treasure_chest" && object["kind"].String()!="obelisk")))
+                    || !strategicSiteAvailable(object,goal["actor_ref"])))
                     return reject("unsupported_visit_site");
             }
             else if(kind == "intercept_hero")

@@ -58,7 +58,8 @@ class NativeCampaign
     JsonNode activeSiteGoal;
     int activeSiteActor=-1,activeSiteObject=-1,activeSiteDay=0;
     std::map<int,JsonNode> siteVisits;
-    std::vector<JsonNode> completedSiteVisits;
+    std::vector<JsonNode> endedSiteVisits;
+    void applySiteObservations(NK2AI::Nullkiller & ai);
     std::vector<JsonNode> completedBattles;
     void applyBattleObservations();
     void applyPassageObservations();
