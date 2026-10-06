@@ -38,7 +38,8 @@ def restore_request(encoded):
         if isinstance(value, dict):
             if list(value) == [encoded.get('object_key')]:
                 shape, *cells = value[encoded['object_key']]
-                return {key:expand(cell) for key,cell in zip(encoded['fields'][shape], cells)}
+                return {**{key:expand(cell) for key,cell in encoded.get('field_defaults',{}).get(str(shape),{}).items()},
+                        **{key:expand(cell) for key,cell in zip(encoded['fields'][shape], cells)}}
             if list(value) == [marker]:
                 return expand(definitions[value[marker]])
             return {key:expand(item) for key,item in value.items()}
@@ -78,6 +79,65 @@ class PromptContextTest(unittest.TestCase):
             self.assertEqual(schema['properties']['action_id']['enum'], [a['id'] for a in request['actions']])
             self.assertEqual(info['input_encoding']['sent_bytes'], len(raw.encode('utf-8')))
             return raw, info
+
+    @unittest.skipUnless(os.environ.get('VCMI_CONTEXT_OVERFLOW_REQUEST'),
+                         'requires private recorded own strategic overflow request')
+    def test_recorded_strategic_request_fits_without_losing_current_facts(self):
+        sys.path.insert(0,str(ROOT/'controller'))
+        from prompt_context import bounded_history, without_unknown_army_values, encode_request, compact_json, SOFT_INPUT_BYTES
+        request=json.loads(Path(os.environ['VCMI_CONTEXT_OVERFLOW_REQUEST']).read_text())
+        original=copy.deepcopy(request)
+        projected,_=bounded_history(without_unknown_army_values(request))
+        encoded=encode_request(projected)
+        self.assertEqual(json.dumps(restore_request(encoded),sort_keys=True),json.dumps(projected,sort_keys=True))
+        self.assertEqual(request,original)
+        self.assertLessEqual(len(compact_json(encoded).encode('utf-8')),SOFT_INPUT_BYTES)
+
+    @unittest.skipUnless(os.environ.get('VCMI_CONTEXT_OVERFLOW_REQUEST'),
+                         'requires private recorded own strategic overflow request')
+    def test_recorded_request_reaches_provider_through_strategic_controller(self):
+        request=json.loads(Path(os.environ['VCMI_CONTEXT_OVERFLOW_REQUEST']).read_text())
+        previous=ROOT/'.build/s-duel-review-v18/decisions/9b5e5e591691441dbd58a336e87b3e29/stdout.bin'
+        answer=json.loads(previous.read_bytes())
+        answer.update(request_id=request['request_id'],identity=request['identity'],decision='retain',plan=None)
+        answer.pop('usage',None)
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            (folder/'reply.json').write_text(json.dumps(answer))
+            script="""
+import json,os,pathlib,sys
+if sys.argv[1:]==['--version']:
+ print('codex-cli 0.160.0');sys.exit(0)
+r=json.load(sys.stdin);pathlib.Path(os.environ['PROMPT_CAPTURE']).write_text(json.dumps(r))
+answer=json.loads(pathlib.Path(os.environ['PROBE_REPLY']).read_text())
+pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps(answer))
+print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_tokens':1}}))
+"""
+            result=subprocess.run([sys.executable,str(ROOT/'controller/main.py')],input=json.dumps(request),
+                text=True,capture_output=True,timeout=10,
+                env={**os.environ,**codex_fixture(folder,script),'VCMI_EXPERIENCE_MODE':'off',
+                     'PROMPT_CAPTURE':str(folder/'capture.json'),'PROBE_REPLY':str(folder/'reply.json')})
+            self.assertEqual(result.returncode,0,result.stderr)
+            info=json.loads(result.stderr)
+            self.assertEqual(info['provider'],'codex')
+            self.assertLessEqual(info['input_encoding']['sent_bytes'],131072)
+            self.assertEqual(json.loads(result.stdout)['identity'],request['identity'])
+            from prompt_context import without_unknown_army_values
+            projected=without_unknown_army_values(request)
+            captured=json.loads((folder/'capture.json').read_text())
+            self.assertEqual(json.dumps(captured['observation'],sort_keys=True),json.dumps(projected['observation'],sort_keys=True))
+
+    def test_route_defaults_preserve_overrides_nulls_and_scalar_types_on_model_stdin(self):
+        request=self.request()
+        request['observation']['routes']=[
+            dict(hero_ref='object:0',army_value=516972,army_loss=0,stale=False,
+                 day=95+n%4,movement_cost=n/100,position=[n,2,0],unknown=None) for n in range(240)]
+        for n,value in enumerate([False,0,True,1,1.0,None]):
+            request['observation']['routes'][n].update(army_loss=value,unknown=value)
+        raw,_=self.call(request)
+        encoded=json.loads(raw)
+        self.assertIn('field_defaults',encoded)
+        self.assertEqual(json.dumps(restore_request(encoded),sort_keys=True),json.dumps(request,sort_keys=True))
 
     def test_model_receives_compact_utf8_without_changing_game_facts(self):
         request = self.request()

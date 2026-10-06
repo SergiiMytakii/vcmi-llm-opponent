@@ -28,7 +28,8 @@ if sys.argv[1:2] == ['exec']:
             if isinstance(value, dict):
                 if list(value) == [wire.get('object_key')]:
                     shape, *cells = value[wire['object_key']]
-                    return {key:expand(cell) for key,cell in zip(wire['fields'][shape], cells)}
+                    return {**{key:expand(cell) for key,cell in wire.get('field_defaults',{}).get(str(shape),{}).items()},
+                            **{key:expand(cell) for key,cell in zip(wire['fields'][shape], cells)}}
                 if list(value) == [marker]:
                     return expand(definitions[value[marker]])
                 return {key:expand(item) for key,item in value.items()}

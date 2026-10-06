@@ -1,5 +1,5 @@
 """Lossless, per-request sharing for the model input; engine protocol stays intact."""
-from collections import Counter
+from collections import Counter, defaultdict
 import copy
 import json
 
@@ -24,7 +24,9 @@ With reference_key/shared/request, read the game request inside request.
 A one-key object keyed by reference_key means shared[its integer value].
 With object_key/fields, a one-key object keyed by object_key holds
 [field_set_index, value1, ...]: pair fields[field_set_index] with those values.
-Resolve both forms recursively, including strings. Other objects are ordinary
+If field_defaults is present, merge field_defaults[str(field_set_index)] into
+the reconstructed object; omitted defaults mean {}. Defaults are encoded values.
+Resolve both forms recursively, including defaults and strings. Other objects are ordinary
 data. Encoding preserves every field, null, occurrence, date and uncertainty;
 null differs from absence. Output original game refs, action IDs and request_id,
 never encoding indices.
@@ -130,6 +132,65 @@ def bounded_history(request):
     return {**request, 'memory':memory}, info
 
 
+def share_field_defaults(envelope):
+    """Factor exact recurring cells from existing field rows when bytes are saved."""
+    marker=envelope['object_key']
+    groups=defaultdict(list)
+
+    def collect(value):
+        if isinstance(value,dict):
+            if set(value)=={marker}: groups[value[marker][0]].append(value[marker][1:])
+            for item in value.values(): collect(item)
+        elif isinstance(value,list):
+            for item in value: collect(item)
+
+    collect(envelope['request'])
+    for value in envelope['shared']: collect(value)
+    fields=list(envelope['fields'])
+    defaults,variants,common_columns={},{},{}
+    for index,rows in groups.items():
+        common={}
+        for column in range(len(fields[index])):
+            literal,count=Counter(compact_json(row[column]) for row in rows).most_common(1)[0]
+            if count>=max(3,len(rows)*.6): common[column]=literal
+        buckets=defaultdict(list)
+        for row in rows:
+            mask=tuple(column for column,literal in common.items() if compact_json(row[column])==literal)
+            buckets[mask].append(row)
+        for mask,matching in buckets.items():
+            if not mask or len(matching)<3: continue
+            varying=[key for column,key in enumerate(fields[index]) if column not in mask]
+            fixed={fields[index][column]:json.loads(common[column]) for column in mask}
+            next_index=len(fields)
+            before=sum(len(compact_json({marker:[index,*row]})) for row in matching)
+            after=sum(len(compact_json({marker:[next_index,*[cell for column,cell in enumerate(row) if column not in mask]]}))
+                      for row in matching)
+            overhead=len(compact_json(varying))+len(compact_json(fixed))+20
+            if before-after<=overhead: continue
+            fields.append(varying)
+            defaults[str(next_index)]=fixed
+            variants[(index,mask)]=next_index
+        common_columns[index]=common
+
+    def transform(value):
+        if isinstance(value,dict):
+            if set(value)=={marker}:
+                index,*row=value[marker]
+                common=common_columns.get(index,{})
+                mask=tuple(column for column,literal in common.items() if compact_json(row[column])==literal)
+                variant=variants.get((index,mask))
+                if variant is not None:
+                    return {marker:[variant,*[transform(cell) for column,cell in enumerate(row) if column not in mask]]}
+            return {key:transform(item) for key,item in value.items()}
+        if isinstance(value,list): return [transform(item) for item in value]
+        return value
+
+    if not defaults: return envelope
+    candidate={**envelope,'fields':fields,'field_defaults':defaults,
+               'request':transform(envelope['request']),'shared':[transform(value) for value in envelope['shared']]}
+    return candidate if len(compact_json(candidate).encode('utf-8'))<len(compact_json(envelope).encode('utf-8')) else envelope
+
+
 def encode_request(request):
     """Return an equivalent JSON value, sharing only substantial exact repeats."""
     counts = Counter()
@@ -157,7 +218,7 @@ def encode_request(request):
     while marker in keys:
         marker += '_'
     repeated = {key for key, count in counts.items()
-                if count > 1 and len(key.encode('utf-8')) >= 160}
+                if count > 1 and len(key.encode('utf-8')) >= 100}
     shared, indices = [], {}
 
     def encode(value, definition=False):
@@ -217,7 +278,7 @@ def encode_request(request):
         tabular = {**envelope, 'object_key':object_marker, 'fields':fields,
                    'shared':[table(value) for value in shared], 'request':table(encoded)}
         if len(compact_json(tabular).encode('utf-8')) < len(compact_json(envelope).encode('utf-8')):
-            envelope = tabular
+            envelope = share_field_defaults(tabular)
     # Definitions and their reading instruction must earn their overhead.
     if len(compact_json(envelope).encode('utf-8')) + len(SHARED_CONTEXT_INSTRUCTIONS.encode('utf-8')) >= len(compact_json(request).encode('utf-8')):
         return request

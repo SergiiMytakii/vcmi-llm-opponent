@@ -141,7 +141,7 @@ def choose(request):
             raise ValueError('context_overflow: complete strategic facts exceed the input budget')
         shared_context = model_request is not projected
         model_input = compact_json(model_request)
-        encoding = {'format':('shared-json-v2' if 'fields' in model_request else 'shared-json-v1') if shared_context else 'json',
+        encoding = {'format':('shared-json-v3' if 'field_defaults' in model_request else 'shared-json-v2' if 'fields' in model_request else 'shared-json-v1') if shared_context else 'json',
                     'original_bytes':len(json.dumps(request).encode('utf-8')),
                     'sent_bytes':len(model_input.encode('utf-8')),
                     'shared_values':len(model_request['shared']) if shared_context else 0,
