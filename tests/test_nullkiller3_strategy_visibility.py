@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,6 +22,15 @@ DATA=Path('Library/Application Support/vcmi')
 def permitted_request(value):
     value=copy.deepcopy(value)
     value['memory'].pop('experience_id',None)
+    # Stored strategy decisions retain their originating request ID. Only its
+    # game/generation UUIDs vary between equivalent independent runs; retain
+    # player, day, revision and request sequence for the behavioral comparison.
+    uuid=r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    for result in value['memory'].get('recent_results',[]):
+        action=result.get('action',{})
+        if isinstance(action.get('request_id'),str):
+            action['request_id']=re.sub(r'^'+uuid+':'+uuid+':',
+                                        'game:generation:',action['request_id'],count=1)
     return {key:value[key] for key in ('observation','memory','campaign','signals')}
 
 

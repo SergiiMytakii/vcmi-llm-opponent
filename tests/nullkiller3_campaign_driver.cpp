@@ -786,7 +786,14 @@ int main(int argc,char ** argv)
         world["towns"][0]["buildings"].Vector().push_back(JsonNode(11));
         auto statuses = campaign.review(world);
         require(statuses["develop"]["state"].String() == "completed", "building fact not recognized");
-        require(statuses["attack"]["state"].String() == "ready", "dependent goal did not unlock");
+        require(statuses["attack"]["state"].String()=="blocked"
+            && statuses["attack"]["reason"].String()=="no_supported_route",
+            "dependency completion bypassed current route admission");
+        // The completed prerequisite releases the operation, but native route
+        // admission still needs a current player-visible quote for its actor.
+        world["forecasts"]["routes"]=json(R"([{"target_ref":"object:3","own_arrivals":[{"hero_ref":"object:0","day":2,"army_value":5000,"army_loss_estimate":0}]}])");
+        statuses=campaign.review(world);
+        require(statuses["attack"]["state"].String() == "ready", "quoted dependent goal did not unlock");
         require(campaign.reservedResources()[6].Integer() == 0, "completed reserve retained");
         // Unflaggable resources use VCMI's -2 owner, distinct from neutral -1.
         auto saved = json(campaign.save().toCompactString());
@@ -901,7 +908,10 @@ int main(int argc,char ** argv)
         resourcePlan["goals"].Vector().push_back(json(R"({"id":"supply","kind":"secure_resource","actor_ref":"object:0","target_ref":"object:4","deadline_day":6,"priority":60,"building_id":-1,"min_army_value":0,"depends_on":[],"required_capabilities":["land"],"complete_when":{"kind":"reserve_at_least","value":1000}})"));
         nullkiller3::CampaignState supply;
         require(supply.accept(resourcePlan,world,reason),reason.c_str());
-        require(supply.review(world)["supply"]["state"].String() == "ready","existing gold falsely proves a resource pickup");
+        require(supply.statuses()["supply"]["state"].String()!="completed",
+            "existing gold falsely proves a resource pickup");
+        world["forecasts"]["routes"].Vector().push_back(json(R"({"target_ref":"object:4","own_arrivals":[{"hero_ref":"object:0","day":2,"army_value":5000,"army_loss_estimate":0}]})"));
+        require(supply.review(world)["supply"]["state"].String() == "ready","quoted resource pickup was not admitted");
         world["confirmed_resource_pickups"].Vector().push_back(JsonNode("object:4"));
         require(supply.review(world)["supply"]["state"].String() == "completed","confirmed pickup and funds did not complete supply");
         auto economyWorld = json(R"({"day":1,"days_in_week":7,"resources":[0,0,0,0,0,0,2000],"daily_income":[0,0,0,0,0,0,500],"towns":[{"ref":"home","building_options":[{"id":10,"supported":true,"availability":"allowed_now","cost":[0,0,0,0,0,0,2000],"income_delta":[0,0,0,0,0,0,500]}],"recruitment_options":[{"creature":0,"available":20,"weekly_growth":10,"unit_value":100,"unit_cost":[0,0,0,0,0,0,100]}]}]})");

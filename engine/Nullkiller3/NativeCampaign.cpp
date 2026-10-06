@@ -300,6 +300,177 @@ std::string objectKind(const CGObjectInstance * object)
     default: return "other";
     }
 }
+// Projection functions return values only. Alias allocation, receipt queues and
+// campaign/lifecycle writes remain with NativeCampaign::observe.
+JsonNode projectHero(const CGHeroInstance * hero,const std::string & ref,int64_t alias)
+{
+    JsonNode item;
+    item["ref"].String() = ref;
+    item["id"].Integer() = alias;
+    item["position"] = coordinate(hero->visitablePos());
+    item["in_boat"].Bool() = hero->inBoat();
+    item["army_value"].Integer() = hero->estimateCombatValue();
+    item["hero_type_id"].Integer() = hero->getHeroTypeID().getNum();
+    item["army_units"]=armyUnits(hero);
+    int64_t lastCreatureValue=0;
+    if(hero->needsLastStack())
+        for(const auto & [slot,stack]:hero->Slots())
+        {
+            const auto count=hero->getStackCount(slot);
+            if(count<=0) continue;
+            const auto unitValue=stack->estimateCombatValue()/count;
+            if(!lastCreatureValue || unitValue<lastCreatureValue) lastCreatureValue=unitValue;
+        }
+    item["minimum_retained_army_value"].Integer()=lastCreatureValue;
+    item["strength"]["army_ai_value"] = item["army_value"];
+    item["strength"]["hero_multiplier"].Float()=hero->getHeroStrength();
+    item["strength"]["hero_combat_value"].Integer()=hero->estimateHeroCombatValue();
+    item["movement"].Integer() = hero->movementPointsRemaining();
+    item["mana"].Integer() = hero->mana;
+    item["movement_per_day"].Integer() = hero->movementPointsLimit();
+    item["sight_radius"].Integer() = hero->getSightRadius();
+    return item;
+}
+JsonNode projectTown(const NK2AI::Nullkiller & ai,const CGTownInstance * town,
+    const JsonNode & identity,const JsonNode & ownReturnedHeroes,bool slotAvailable,
+    const std::string & visitorRef)
+{
+    JsonNode item=identity;
+    item["position"] = coordinate(town->visitablePos());
+    item["defense_value"].Integer() = town->getUpperArmy()->estimateCombatValue();
+    item["army_units"]=armyUnits(town->getUpperArmy());
+    item["daily_income"] = resourceValues(town->dailyIncome());
+    item["hiring_options"].Vector();
+    TResources hireCost;hireCost[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
+    const auto * visitor=town->getVisitingHero();
+    const bool explicitCanRecruit=town->hasBuilt(BuildingID::TAVERN) && !ai.heroManager->heroCapReached()
+        && ai.cc->getResourceAmount(EGameResID::GOLD)>=GameConstants::HERO_GOLD_COST;
+    const bool nativeCanRecruit=ai.heroManager->canRecruitHero(town);
+    const bool hireFunds=ai.getFreeResources().canAfford(hireCost);
+    for(const auto * candidate:ai.cc->getAvailableHeroes(town))
+    {
+        if(!candidate) continue;
+        JsonNode option;
+        option["hero_type_id"].Integer()=candidate->getHeroTypeID().getNum();
+        option["ref"].String()="tavern:"+std::to_string(candidate->getHeroTypeID().getNum());
+        option["name"].String()=candidate->getHeroType()->getNameTranslated();
+        option["own_returned_hero"].Bool()=isOwnReturnedHero(ownReturnedHeroes,candidate->getHeroTypeID().getNum(),candidate->id.getNum());
+        option["level"].Integer()=candidate->level;
+        option["primary_skills"].Vector();
+        for(int skill=0;skill<4;++skill) option["primary_skills"].Vector().push_back(JsonNode(candidate->getPrimSkillLevel(PrimarySkill(skill))));
+        option["secondary_skills"].Vector();
+        for(const auto & [skill,level]:candidate->secSkills) if(skill!=SecondarySkill::NONE)
+        {
+            JsonNode entry;entry["skill_id"].Integer()=skill.getNum();entry["level"].Integer()=level;
+            option["secondary_skills"].Vector().push_back(entry);
+        }
+        option["equipped_artifact_ids"].Vector();option["backpack_artifact_ids"].Vector();
+        for(const auto & [slot,info]:candidate->artifactsWorn)
+            if(const auto * artifact=info.getArt();artifact && !info.locked)
+                option["equipped_artifact_ids"].Vector().push_back(JsonNode(artifact->getTypeId().getNum()));
+        for(const auto & info:candidate->artifactsInBackpack)
+            if(const auto * artifact=info.getArt();artifact && !info.locked)
+                option["backpack_artifact_ids"].Vector().push_back(JsonNode(artifact->getTypeId().getNum()));
+        option["army_value"].Integer()=candidate->estimateCombatValue();
+        option["army_units"]=armyUnits(candidate);
+        option["strength"]["army_ai_value"]=option["army_value"];
+        option["strength"]["hero_multiplier"].Float()=candidate->getHeroStrength();
+        option["strength"]["hero_combat_value"].Integer()=candidate->estimateHeroCombatValue();
+        option["cost"]=resourceValues(hireCost);
+        option["native_can_recruit"].Bool()=nativeCanRecruit;
+        option["visiting_slot_available"].Bool()=slotAvailable;
+        option["funds_available"].Bool()=hireFunds;
+        option["can_recruit"].Bool()=explicitCanRecruit && slotAvailable && hireFunds;
+        option["availability"].String()=!explicitCanRecruit ? "native_hiring_gate" : !slotAvailable ? "town_visiting_slot_occupied"
+            : !hireFunds ? "funds_reserved" : visitor ? "allowed_with_safe_garrison_merge" : "allowed_now";
+        if(visitor && slotAvailable)
+        {
+            auto & preparation=option["slot_preparation"];
+            preparation["kind"].String()="merge_visiting_hero_into_garrison";
+            preparation["hero_ref"].String()=visitorRef;
+            preparation["visiting_army_value"].Integer()=visitor->estimateCombatValue();
+            preparation["stationary_army_value"].Integer()=town->estimateCombatValue();
+            preparation["merged_army_value"].Integer()=visitor->estimateCombatValue()+town->estimateCombatValue();
+            preparation["effect"].String()="Town troops join this visiting hero in the garrison; the helper keeps only its own starting army.";
+        }
+        item["hiring_options"].Vector().push_back(option);
+    }
+    item["recruitment_options"].Vector();
+    for(size_t level=0;level<town->creatures.size();++level)
+    {
+        const auto & [amount, types] = town->creatures[level];
+        if(types.empty()) continue;
+        const auto * creature = LIBRARY->creh->objects[types.back().getNum()].get();
+        JsonNode unit;
+        unit["creature"].Integer()=types.back().getNum();
+        unit["available"].Integer()=amount;
+        unit["weekly_growth"].Integer()=town->creatureGrowth(level);
+        unit["unit_value"].Integer()=LIBRARY->creh->getCombatValue().getAIValue(creature);
+        unit["unit_cost"]=resourceValues(creature->getFullRecruitCost());
+        item["recruitment_options"].Vector().push_back(unit);
+    }
+    item["buildings"].Vector();
+    for(const auto & [building, info] : town->getTown()->buildings)
+        if(town->hasBuilt(building)) item["buildings"].Vector().emplace_back(building.getNum());
+    item["building_options"].Vector();
+    for(const auto & [id, building] : town->getTown()->buildings)
+    {
+        JsonNode option;
+        option["id"].Integer() = id.getNum();
+        option["name"].String() = building->getNameTranslated();
+        option["cost"] = resourceValues(building->resources);
+        const auto availability = ai.cc->canBuildStructure(town, id);
+        option["supported"].Bool() = building->mode == CBuilding::BUILD_NORMAL;
+        option["state"].Integer() = static_cast<int>(availability);
+        option["availability"].String() = building->mode == CBuilding::BUILD_NORMAL ? externalai::buildingAvailability(availability) : "unsupported_build_mechanic";
+        option["production"] = resourceValues(building->produce);
+        auto incomeDelta = building->produce;
+        if(town->getTown()->buildings.count(building->upgrade)) incomeDelta -= town->getTown()->buildings.at(building->upgrade)->produce;
+        incomeDelta.applyHandicap(ai.cc->getPlayerSettings(ai.playerID)->handicap.percentIncome);
+        option["income_delta"] = resourceValues(incomeDelta);
+        option["requirements"] = town->genBuildingRequirements(id,false).toJson([](BuildingID required) { return JsonNode(required.getNum()); });
+        item["building_options"].Vector().push_back(option);
+    }
+    return item;
+}
+JsonNode projectVisibleObject(const NK2AI::Nullkiller & ai,const CGObjectInstance * object,
+    const std::string & ref,int64_t alias,bool borderVisited,const JsonNode & eligibleHeroes)
+{
+    JsonNode item;
+    item["ref"].String() = ref;
+    item["id"].Integer() = alias;
+    item["kind"].String() = objectKind(object);
+    item["visible"].Bool()=true;
+    if(object->ID==Obj::SCHOLAR || object->ID==Obj::TREASURE_CHEST || object->ID==Obj::OBELISK)
+        item["visited"].Bool()=object->wasVisited(ai.playerID);
+    if(keymasterObject(item))
+    {
+        item["key_color"].Integer()=object->subID.getNum();
+        item["key_owned"].Bool()=ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(object->subID);
+        item["visited"].Bool()=object->ID==Obj::KEYMASTER ? object->wasVisited(ai.playerID)
+            : borderVisited;
+        item["eligible_hero_refs"]=eligibleHeroes;
+    }
+    item["owner"].Integer() = object->getOwner().getNum();
+    item["position"] = coordinate(object->visitablePos());
+    item["army_value"].Integer() = observedArmyStrength(*ai.cc, object);
+    item["army_interval"] = observedArmyInterval(*ai.cc,object);
+    return item;
+}
+JsonNode projectShipyard(const NK2AI::Nullkiller & ai,const CGObjectInstance * object,const std::string & ref)
+{
+    if(const auto * shipyard=dynamic_cast<const IShipyard *>(object))
+    {
+        const auto place=observedBoatPlacement(*ai.cc,shipyard);
+        if(place.isValid())
+        {
+            JsonNode quote;quote["ref"]=JsonNode(ref);quote["boat_position"]=coordinate(place);
+            TResources cost;shipyard->getBoatCost(cost);quote["cost"]=resourceValues(cost);
+            return quote;
+        }
+    }
+    return JsonNode();
+}
 bool safeStabilizationPath(const NK2AI::AIPath & path,const CGHeroInstance * actor,const NK2AI::Nullkiller & ai)
 {
     if(path.targetHero!=actor || path.getTotalArmyLoss() || path.getTotalDanger()
@@ -807,189 +978,50 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         world["unsupported_capabilities"].Vector().emplace_back(cap);
     world["movement_support"]["water"].String()="Current visible boats, known water tiles and legal embark/disembark. New sailing boats require an owned visible shipyard with all potential launch tiles visible, a current placement quote and available funds under the active goal. Summon/scuttle boat, airships, whirlpools and unobserved routes are unsupported.";
     world["movement_support"]["passages"].String()="Observed_passages records real own subterranean crossings. Offered whole routes may cross these learned pairs only while both ends are visible gates; their arrival/loss estimates cover the entire offered known route. explore_passage may visit a visible entrance with an unknown exit; an entry-only quote does not estimate that unknown exit or onward travel. Unlearned channels, other teleport types and teleport spells remain unsupported.";
-    // These complete own lists, and visible object sorting, make aliases
-    // independent of gaps and insertions in global hidden object IDs.
-    world["heroes"].Vector();
+    // Complete own lists and visible sorting preserve aliases independently
+    // of gaps or insertions in global hidden object IDs. Only this owner writes
+    // the alias table; projections receive resolved identities and const facts.
     world["heroes"].Vector();
     world["towns"].Vector();
     for(const auto * hero : ai.cc->getHeroesInfo())
     {
-        JsonNode item;
-        item["ref"].String() = reference(hero);
-        item["id"].Integer() = externalai::objectAlias(persisted["object_ids"], hero->id.getNum());
-        item["position"] = coordinate(hero->visitablePos());
-        item["in_boat"].Bool() = hero->inBoat();
-        item["army_value"].Integer() = hero->estimateCombatValue();
-        item["hero_type_id"].Integer() = hero->getHeroTypeID().getNum();
-        item["army_units"]=armyUnits(hero);
-        int64_t lastCreatureValue=0;
-        if(hero->needsLastStack())
-            for(const auto & [slot,stack]:hero->Slots())
-            {
-                const auto count=hero->getStackCount(slot);
-                if(count<=0) continue;
-                const auto unitValue=stack->estimateCombatValue()/count;
-                if(!lastCreatureValue || unitValue<lastCreatureValue) lastCreatureValue=unitValue;
-            }
-        item["minimum_retained_army_value"].Integer()=lastCreatureValue;
-        item["strength"]["army_ai_value"] = item["army_value"];
-        item["strength"]["hero_multiplier"].Float()=hero->getHeroStrength();
-        item["strength"]["hero_combat_value"].Integer()=hero->estimateHeroCombatValue();
-        item["movement"].Integer() = hero->movementPointsRemaining();
-        item["mana"].Integer() = hero->mana;
-        item["movement_per_day"].Integer() = hero->movementPointsLimit();
-        item["sight_radius"].Integer() = hero->getSightRadius();
-        world["heroes"].Vector().push_back(item);
+        const auto ref=reference(hero);
+        const auto alias=externalai::objectAlias(persisted["object_ids"],hero->id.getNum());
+        world["heroes"].Vector().push_back(projectHero(hero,ref,alias));
     }
-    world["towns"].Vector();
     for(const auto * town : ai.cc->getTownsInfo())
     {
-        JsonNode item;
-        item["ref"].String() = reference(town);
-        item["id"].Integer() = externalai::objectAlias(persisted["object_ids"], town->id.getNum());
-        item["position"] = coordinate(town->visitablePos());
-        item["defense_value"].Integer() = town->getUpperArmy()->estimateCombatValue();
-        item["army_units"]=armyUnits(town->getUpperArmy());
-        item["army_holder_ref"].String() = reference(town->getUpperArmy());
-        if(const auto * visitor=town->getVisitingHero();visitor && visitor->getOwner()==ai.playerID)
-            item["visiting_hero_ref"].String()=reference(visitor);
-        item["daily_income"] = resourceValues(town->dailyIncome());
-        item["hiring_options"].Vector();
-        TResources hireCost;hireCost[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
+        JsonNode identity;
+        identity["ref"].String()=reference(town);
+        identity["id"].Integer()=externalai::objectAlias(persisted["object_ids"],town->id.getNum());
+        identity["army_holder_ref"].String()=reference(town->getUpperArmy());
         const auto * visitor=town->getVisitingHero();
+        if(visitor && visitor->getOwner()==ai.playerID)
+            identity["visiting_hero_ref"].String()=reference(visitor);
         const bool slotAvailable=helperHireSlotAvailable(ai,town);
-        const bool explicitCanRecruit=town->hasBuilt(BuildingID::TAVERN) && !ai.heroManager->heroCapReached()
-            && ai.cc->getResourceAmount(EGameResID::GOLD)>=GameConstants::HERO_GOLD_COST;
-        const bool nativeCanRecruit=ai.heroManager->canRecruitHero(town);
-        const bool hireFunds=ai.getFreeResources().canAfford(hireCost);
-        for(const auto * candidate:ai.cc->getAvailableHeroes(town))
-        {
-            if(!candidate) continue;
-            JsonNode option;
-            option["hero_type_id"].Integer()=candidate->getHeroTypeID().getNum();
-            option["ref"].String()="tavern:"+std::to_string(candidate->getHeroTypeID().getNum());
-            option["name"].String()=candidate->getHeroType()->getNameTranslated();
-            option["own_returned_hero"].Bool()=isOwnReturnedHero(persisted["own_returned_heroes"],candidate->getHeroTypeID().getNum(),candidate->id.getNum());
-            option["level"].Integer()=candidate->level;
-            option["primary_skills"].Vector();
-            for(int skill=0;skill<4;++skill) option["primary_skills"].Vector().push_back(JsonNode(candidate->getPrimSkillLevel(PrimarySkill(skill))));
-            option["secondary_skills"].Vector();
-            for(const auto & [skill,level]:candidate->secSkills) if(skill!=SecondarySkill::NONE)
-            {
-                JsonNode entry;entry["skill_id"].Integer()=skill.getNum();entry["level"].Integer()=level;
-                option["secondary_skills"].Vector().push_back(entry);
-            }
-            option["equipped_artifact_ids"].Vector();option["backpack_artifact_ids"].Vector();
-            for(const auto & [slot,info]:candidate->artifactsWorn)
-                if(const auto * artifact=info.getArt();artifact && !info.locked)
-                    option["equipped_artifact_ids"].Vector().push_back(JsonNode(artifact->getTypeId().getNum()));
-            for(const auto & info:candidate->artifactsInBackpack)
-                if(const auto * artifact=info.getArt();artifact && !info.locked)
-                    option["backpack_artifact_ids"].Vector().push_back(JsonNode(artifact->getTypeId().getNum()));
-            option["army_value"].Integer()=candidate->estimateCombatValue();
-            option["army_units"]=armyUnits(candidate);
-            option["strength"]["army_ai_value"]=option["army_value"];
-            option["strength"]["hero_multiplier"].Float()=candidate->getHeroStrength();
-            option["strength"]["hero_combat_value"].Integer()=candidate->estimateHeroCombatValue();
-            option["cost"]=resourceValues(hireCost);
-            option["native_can_recruit"].Bool()=nativeCanRecruit;
-            option["visiting_slot_available"].Bool()=slotAvailable;
-            option["funds_available"].Bool()=hireFunds;
-            option["can_recruit"].Bool()=explicitCanRecruit && slotAvailable && hireFunds;
-            option["availability"].String()=!explicitCanRecruit ? "native_hiring_gate" : !slotAvailable ? "town_visiting_slot_occupied"
-                : !hireFunds ? "funds_reserved" : visitor ? "allowed_with_safe_garrison_merge" : "allowed_now";
-            if(visitor && slotAvailable)
-            {
-                auto & preparation=option["slot_preparation"];
-                preparation["kind"].String()="merge_visiting_hero_into_garrison";
-                preparation["hero_ref"].String()=reference(visitor);
-                preparation["visiting_army_value"].Integer()=visitor->estimateCombatValue();
-                preparation["stationary_army_value"].Integer()=town->estimateCombatValue();
-                preparation["merged_army_value"].Integer()=visitor->estimateCombatValue()+town->estimateCombatValue();
-                preparation["effect"].String()="Town troops join this visiting hero in the garrison; the helper keeps only its own starting army.";
-            }
-            item["hiring_options"].Vector().push_back(option);
-        }
-        item["recruitment_options"].Vector();
-        for(size_t level=0;level<town->creatures.size();++level)
-        {
-            const auto & [amount, types] = town->creatures[level];
-            if(types.empty()) continue;
-            const auto * creature = LIBRARY->creh->objects[types.back().getNum()].get();
-            JsonNode unit;
-            unit["creature"].Integer()=types.back().getNum();
-            unit["available"].Integer()=amount;
-            unit["weekly_growth"].Integer()=town->creatureGrowth(level);
-            unit["unit_value"].Integer()=LIBRARY->creh->getCombatValue().getAIValue(creature);
-            unit["unit_cost"]=resourceValues(creature->getFullRecruitCost());
-            item["recruitment_options"].Vector().push_back(unit);
-        }
-        item["buildings"].Vector();
-        for(const auto & [building, info] : town->getTown()->buildings)
-            if(town->hasBuilt(building)) item["buildings"].Vector().emplace_back(building.getNum());
-        item["building_options"].Vector();
-        for(const auto & [id, building] : town->getTown()->buildings)
-        {
-            JsonNode option;
-            option["id"].Integer() = id.getNum();
-            option["name"].String() = building->getNameTranslated();
-            option["cost"] = resourceValues(building->resources);
-            const auto availability = ai.cc->canBuildStructure(town, id);
-            option["supported"].Bool() = building->mode == CBuilding::BUILD_NORMAL;
-            option["state"].Integer() = static_cast<int>(availability);
-            option["availability"].String() = building->mode == CBuilding::BUILD_NORMAL ? externalai::buildingAvailability(availability) : "unsupported_build_mechanic";
-            option["production"] = resourceValues(building->produce);
-            auto incomeDelta = building->produce;
-            if(town->getTown()->buildings.count(building->upgrade)) incomeDelta -= town->getTown()->buildings.at(building->upgrade)->produce;
-            incomeDelta.applyHandicap(ai.cc->getPlayerSettings(ai.playerID)->handicap.percentIncome);
-            option["income_delta"] = resourceValues(incomeDelta);
-            option["requirements"] = town->genBuildingRequirements(id,false).toJson([](BuildingID required) { return JsonNode(required.getNum()); });
-            item["building_options"].Vector().push_back(option);
-        }
-        world["towns"].Vector().push_back(item);
+        const auto visitorRef=visitor && slotAvailable ? reference(visitor) : std::string();
+        world["towns"].Vector().push_back(projectTown(ai,town,identity,
+            static_cast<const JsonNode &>(persisted)["own_returned_heroes"],slotAvailable,visitorRef));
     }
-    auto objects = ai.cc->getAllVisitableObjs();
-    std::ranges::sort(objects, [](const auto * a, const auto * b) {
-        if(a->visitablePos() != b->visitablePos()) return a->visitablePos() < b->visitablePos();
-        return a->ID < b->ID;
+    auto objects=ai.cc->getAllVisitableObjs();
+    std::ranges::sort(objects,[](const auto * a,const auto * b) {
+        if(a->visitablePos()!=b->visitablePos()) return a->visitablePos()<b->visitablePos();
+        return a->ID<b->ID;
     });
     world["visible_objects"].Vector();
     world["shipyards"].Vector();
     for(const auto * object : objects)
     {
-        JsonNode item;
-        item["ref"].String() = reference(object);
-        item["id"].Integer() = externalai::objectAlias(persisted["object_ids"], object->id.getNum());
-        item["kind"].String() = objectKind(object);
-        item["visible"].Bool()=true;
-        if(object->ID==Obj::SCHOLAR || object->ID==Obj::TREASURE_CHEST || object->ID==Obj::OBELISK)
-            item["visited"].Bool()=object->wasVisited(ai.playerID);
-        if(keymasterObject(item))
-        {
-            item["key_color"].Integer()=object->subID.getNum();
-            item["key_owned"].Bool()=ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(object->subID);
-            item["visited"].Bool()=object->ID==Obj::KEYMASTER ? object->wasVisited(ai.playerID)
-                : !static_cast<const JsonNode &>(persisted)["confirmed_border_visits"][item["ref"].String()].isNull();
-            item["eligible_hero_refs"].Vector();
-            if(object->ID!=Obj::KEYMASTER)
-                for(const auto * hero:ai.cc->getHeroesInfo())
-                    if(canOpenKeyBorder(object,hero)) item["eligible_hero_refs"].Vector().emplace_back(reference(hero));
-        }
-        item["owner"].Integer() = object->getOwner().getNum();
-        item["position"] = coordinate(object->visitablePos());
-        item["army_value"].Integer() = observedArmyStrength(*ai.cc, object);
-        item["army_interval"] = observedArmyInterval(*ai.cc,object);
-        world["visible_objects"].Vector().push_back(item);
-        if(const auto * shipyard=dynamic_cast<const IShipyard *>(object))
-        {
-            const auto place=observedBoatPlacement(*ai.cc,shipyard);
-            if(place.isValid())
-            {
-                JsonNode quote;quote["ref"]=item["ref"];quote["boat_position"]=coordinate(place);
-                TResources cost;shipyard->getBoatCost(cost);quote["cost"]=resourceValues(cost);
-                world["shipyards"].Vector().push_back(quote);
-            }
-        }
+        const auto ref=reference(object);
+        const auto alias=externalai::objectAlias(persisted["object_ids"],object->id.getNum());
+        JsonNode eligibleHeroes;eligibleHeroes.Vector();
+        if(object->ID==Obj::BORDER_GATE || object->ID==Obj::BORDERGUARD)
+            for(const auto * hero:ai.cc->getHeroesInfo())
+                if(canOpenKeyBorder(object,hero)) eligibleHeroes.Vector().emplace_back(reference(hero));
+        const bool borderVisited=!static_cast<const JsonNode &>(persisted)["confirmed_border_visits"][ref].isNull();
+        world["visible_objects"].Vector().push_back(projectVisibleObject(ai,object,ref,alias,borderVisited,eligibleHeroes));
+        const auto shipyard=projectShipyard(ai,object,ref);
+        if(!shipyard.isNull()) world["shipyards"].Vector().push_back(shipyard);
     }
     linkKeymasterSites(world);
     JsonNode visiblePositions;

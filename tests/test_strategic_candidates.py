@@ -86,7 +86,7 @@ class StrategicCandidatesTest(unittest.TestCase):
         for kind in ('town','hero','mine','subterranean_gate','obelisk'):
             for i in range(100):
                 ref=f'{kind}-{i}';pos=[i+1,2,0]
-                obj={'ref':ref,'kind':kind,'owner':0,'position':pos,'visited':False}
+                obj={'ref':ref,'kind':kind,'owner':0,'position':pos,'visible':True,'visited':False}
                 data['world']['visible_objects'].append(obj);data['world']['objects'].append(obj)
                 data['memory']['known_objects'].append(obj)
                 data['world']['forecasts']['routes'].append({'target_ref':ref,'own_arrivals':[
