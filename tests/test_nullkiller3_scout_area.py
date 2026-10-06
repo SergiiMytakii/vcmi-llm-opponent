@@ -47,7 +47,19 @@ class NativeScoutAreaTest(unittest.TestCase):
                 while child.poll() is None and time.monotonic()<deadline:
                     records=campaign_records(run)
                     state=run/'turn-review/state.json'
-                    if state.exists() and json.loads(state.read_text()).get('status')=='paused':break
+                    if state.exists() and json.loads(state.read_text()).get('status')=='paused':
+                        checkpoint=json.loads(state.read_text())
+                        if checkpoint['completed_day']==60 and not list((run/'decisions').glob('*/request.json')):
+                            # Repaired town entry completes both old obligations
+                            # on day60. Exhaustion is reviewed on the next own
+                            # turn; the private harness must cross that boundary.
+                            self.assertTrue(records)
+                            self.assertTrue(all(v['state']=='completed' for v in records[-1]['statuses'].values()))
+                            subprocess.run([sys.executable,str(ROOT/'scripts/playtest.py'),'continue',
+                                            '--run',str(run),'--completed-day','60'],check=True,capture_output=True)
+                            while json.loads(state.read_text()).get('status')=='paused' and child.poll() is None and time.monotonic()<deadline:
+                                time.sleep(.03)
+                        else:break
                     time.sleep(.03)
             finally:
                 (run/'STOP').touch(exist_ok=True);child.wait(timeout=15)
@@ -79,7 +91,7 @@ class NativeScoutAreaTest(unittest.TestCase):
         self.assertGreaterEqual(hero['army_value'],266477,'zero-loss scouting spent the strike army')
         if reload:
             state=json.loads((run/'turn-review/state.json').read_text())
-            self.assertEqual(state['completed_day'],60)
+            self.assertIn(state['completed_day'],(60,63))
             resumed=output/'resumed';config.update(profile_template=str(run/'profile'),save_resource=state['save_resource'],
                 case_id='nk3-scout-area-restored',nk3_mode='native',review_interval_days=1)
             path.write_text(json.dumps(config))

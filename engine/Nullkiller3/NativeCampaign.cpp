@@ -1048,6 +1048,64 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
         if(kind=="defend_area" && unchangedHoldingAttempt(persisted["memory"],goal["id"].String(),campaign.plan()["revision"].Integer(),executionSnapshot(ai))) continue;
         const auto * target = resolve(ai, goal["target_ref"]);
         const auto * actor = dynamic_cast<const CGHeroInstance *>(resolve(ai, goal["actor_ref"]));
+        if(kind=="defend_area" && actor)
+        {
+            const auto * town=dynamic_cast<const CGTownInstance *>(target);
+            const auto * visitor=town ? town->getVisitingHero() : nullptr;
+            if(town && town->getOwner()==ai.playerID && visitor && visitor!=actor)
+            {
+                auto safeOwnPath=[&](const AIPath & path,const CGHeroInstance * hero) {
+                    return path.targetHero==hero && path.heroArmy && path.turn()==0
+                        && path.exchangeCount<=1 && !path.getFirstBlockedAction()
+                        && !path.getTotalDanger() && !path.getTotalArmyLoss()
+                        && std::all_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node) {
+                            return node.targetHero==hero && node.layer==EPathfindingLayer::LAND && ai.cc->isVisible(node.coord);
+                        });
+                };
+                const auto entries=ai.pathfinder->getPathInfo(town->visitablePos(),false);
+                const bool immediate=std::any_of(entries.begin(),entries.end(),[&](const auto & path) {
+                    return safeOwnPath(path,actor) && path.heroArmy->estimateCombatValue()>=goal["min_army_value"].Integer()
+                        && path.heroArmy->estimateCombatValue()>=campaign.reservedForce(reference(actor),world,helperSources());
+                });
+                if(immediate)
+                {
+                    // A visit to an occupied town only meets its visitor. Clear
+                    // an uncommitted visitor first, then replan the entry from
+                    // current state; never replay the old occupied-town path.
+                    const auto before=output.size();
+                    if(visitor->getOwner()==ai.playerID && !ai.isHeroLocked(visitor)
+                        && campaign.participantGoals(reference(visitor),helperSources(),world).empty())
+                    {
+                        std::optional<AIPath> best;
+                        const auto center=town->visitablePos();
+                        for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx)
+                        {
+                            const int3 landing(center.x+dx,center.y+dy,center.z);
+                            if(!ai.cc->isVisible(landing)) continue;
+                            const auto * tile=ai.cc->getTile(landing,false);
+                            if(!tile || !tile->isLand() || tile->blocked() || !ai.cc->getVisitableObjs(landing).empty()) continue;
+                            for(const auto & path:ai.pathfinder->getPathInfo(landing,false))
+                                if(safeOwnPath(path,visitor) && (!best || path.movementCost()<best->movementCost())) best=path;
+                        }
+                        if(best)
+                        {
+                            auto clearance=goal;
+                            clearance["actor_ref"].String()=reference(visitor);
+                            clearance["min_army_value"].Integer()=visitor->estimateCombatValue();
+                            rememberTasks(output,CaptureObjectsBehavior::getVisitGoals({*best},&ai,nullptr,true),clearance,ai);
+                        }
+                    }
+                    if(output.size()==before)
+                    {
+                        persisted["goal_blockers"][goal["id"].String()]["revision"]=campaign.plan()["revision"];
+                        persisted["goal_blockers"][goal["id"].String()]["reason"].String()="town_visiting_slot_occupied";
+                        campaign.blocked(goal["id"].String(),"town_visiting_slot_occupied");
+                        world["goal_statuses"]=campaign.statuses();
+                    }
+                    continue;
+                }
+            }
+        }
         if(kind=="defend_area" && actor && target && actor->visitablePos()==target->visitablePos())
         {
             const auto * town=dynamic_cast<const CGTownInstance *>(target);
