@@ -1084,6 +1084,24 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
                     continue;
                 }
             }
+            if(dynamic_cast<const CGTownInstance *>(target))
+                for(const auto & forecast:world["forecasts"]["deliveries"].Vector())
+                {
+                    const auto & status=forecast["status"].String();
+                    if(forecast["goal_id"]!=goal["id"] || !forecast["source_army_now"].isNumber()
+                        || !forecast["source_floor"].isNumber()
+                        || forecast["source_army_now"].Integer()>forecast["source_floor"].Integer()
+                        || (status!="unfunded_at_deadline" && status!="additional_army_required")) continue;
+                    // A virtual chain may include the town's protected troops.
+                    // No current surplus and no funded completion can
+                    // justify spending movement on that chain.
+                    persisted["goal_blockers"][goal["id"].String()]["revision"]=campaign.plan()["revision"];
+                    persisted["goal_blockers"][goal["id"].String()]["reason"].String()="source_force_unavailable";
+                    campaign.blocked(goal["id"].String(),"source_force_unavailable");
+                    world["goal_statuses"]=campaign.statuses();
+                    break;
+                }
+            if(world["goal_statuses"][goal["id"].String()]["state"].String()=="blocked") continue;
             generated=deliveryTasks(ai,actor,target);
         }
         else

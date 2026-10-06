@@ -90,7 +90,10 @@ class NativeTownDeliveryTest(unittest.TestCase):
     def test_supported_weekly_delivery_wait_does_not_trigger_a_stagnation_review(self):
         self.run_delivery(False,recruit=True,weekly=True,review=True)
 
-    def run_delivery(self,garrison,recruit=False,weekly=False,review=False):
+    def test_town_delivery_without_unpledged_or_funded_force_is_blocked_before_movement(self):
+        self.run_delivery(False,protected=True)
+
+    def run_delivery(self,garrison,recruit=False,weekly=False,review=False,protected=False):
         key='VCMI_NK3_GARRISON_CONFIG' if garrison else 'VCMI_NK3_CAMPAIGN_CONFIG'
         config=json.loads(Path(os.environ[key]).read_text())
         output=Path(tempfile.mkdtemp(prefix='nk3-town-delivery-',dir=ROOT/'.build/playtests'))
@@ -106,7 +109,12 @@ class NativeTownDeliveryTest(unittest.TestCase):
             helper['options'].update(type='christian',army=[dict(type='core:pikeman',amount=100)])
             objects['hero_garrison']=helper
             world['header.json']['players']['red']['heroes']['hero_garrison']={'type':'christian'}
-        town_ref='object:2' if garrison else 'object:1'
+        if protected:
+            helper=copy.deepcopy(hero);helper.update(x=6,y=11)
+            helper['options'].update(type='christian',army=[dict(type='core:pikeman',amount=100)])
+            objects['hero_defender']=helper
+            world['header.json']['players']['red']['heroes']['hero_defender']={'type':'christian'}
+        town_ref='object:2' if garrison or protected else 'object:1'
         town['options']['buildings']['allOf']=['fort','townHall']+(['dwellingLvl1'] if recruit else [])
         town['options']['buildings']['noneOf'] += [f'{prefix}{level}' for prefix in ('dwellingLvl','dwellingUpLvl') for level in range(1,8) if not (recruit and prefix=='dwellingLvl' and level==1)]
         with zipfile.ZipFile(fixture/'Library/Application Support/vcmi/Maps/NK3TownDelivery.vmap','w') as archive:
@@ -123,10 +131,15 @@ class NativeTownDeliveryTest(unittest.TestCase):
             seed['goals'].append(dict(id='hold',kind='preserve_force',actor_ref='object:1',target_ref=town_ref,deadline_day=deadline_day,
                 priority=40,building_id=-1,min_army_value=1000,depends_on=[],required_capabilities=['land'],
                 complete_when=dict(kind='force_preserved_until',value=6)))
+        if protected:
+            seed['goals'].append(dict(id='hold',kind='defend_area',actor_ref='object:1',target_ref=town_ref,
+                deadline_day=6,priority=40,building_id=-1,min_army_value=8900,depends_on=[],
+                required_capabilities=['land'],complete_when=dict(kind='held_until',value=6)))
         seed_path=output/'campaign.json';seed_path.write_text(json.dumps(seed))
         config.update(profile_template=str(fixture),map_resource='Maps/NK3TownDelivery.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},
                       nk3_mode='native',purpose='integration',case_id='nk3-town-delivery',headless=True,max_seconds=20,references={})
-        if review:
+        if protected:config['review_interval_days']=1
+        if review or protected:
             probe=ROOT/'tests/fixtures/nk3_retention_probe.py'
             config.update(nk3_mode='model',controller=[sys.executable,str(probe)],controller_sources=[str(probe)],experience_mode='off')
         config.pop('save_resource',None)
@@ -138,11 +151,30 @@ class NativeTownDeliveryTest(unittest.TestCase):
             try:
                 deadline=time.monotonic()+25
                 while child.poll() is None and time.monotonic()<deadline:
+                    if protected:
+                        state=run/'turn-review/state.json'
+                        if state.exists() and json.loads(state.read_text()).get('status')=='paused':break
                     if any(r['heroes'][0]['army_value']>=required for r in campaign_records(run)):break
                     time.sleep(.03)
             finally:
                 (run/'STOP').touch(exist_ok=True);child.wait(timeout=15)
         records=campaign_records(run)
+        if protected:
+            launch=json.loads((run/'launch.json').read_text())
+            self.assertTrue(launch['cleanup_complete']);self.assertTrue(launch['protected_files_unchanged'])
+            first_day=[r for r in records if r['day']==1]
+            self.assertTrue(first_day,'no accepted native campaign observation')
+            requests=[json.loads(p.read_text()) for p in (run/'decisions').glob('*/request.json')]
+            self.assertTrue(any(s['question']=='repair_exhausted' and 'source_force_unavailable' in s['facts']
+                for r in requests if r['observation']['day']==1 for s in r['signals']),
+                'unfundable town delivery repeated without immediate repair feedback: '+str(run))
+            self.assertFalse(any(r['confirmed_deliveries'] for r in first_day),'protected town produced a false receipt')
+            turns=[json.loads(line) for line in (run/'turn-review/turns.jsonl').read_text().splitlines()]
+            end=next(r for r in turns if r['player']==0 and r['phase']=='end')
+            recipient=next(h for h in end['heroes'] if h['name']=='hero.core.catherine.name')
+            self.assertGreater(recipient['movement'],0,'futile delivery attempts spent the main army movement')
+            self.assertEqual(recipient['army_value'],5900)
+            return
         if review:
             requests=[json.loads(p.read_text()) for p in (run/'decisions').glob('*/request.json')]
             self.assertFalse(any(s['question'].startswith('stagnation:') for r in requests for s in r['signals']),
