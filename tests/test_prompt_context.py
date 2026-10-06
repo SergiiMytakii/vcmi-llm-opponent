@@ -127,6 +127,42 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_toke
             captured=json.loads((folder/'capture.json').read_text())
             self.assertEqual(json.dumps(captured['observation'],sort_keys=True),json.dumps(projected['observation'],sort_keys=True))
 
+    @unittest.skipUnless(os.environ.get('VCMI_LEARNING_PRESSURE_REQUEST') and os.environ.get('VCMI_LEARNING_PRESSURE_DATABASE'),
+                         'requires private recorded request and matching copied learning database')
+    def test_learning_pressure_defers_complete_episode_and_offers_it_when_space_returns(self):
+        sys.path.insert(0,str(ROOT/'controller'))
+        import sqlite3
+        from experience import Experience
+        from prompt_context import bounded_history, without_unknown_army_values, encode_request, compact_json, SOFT_INPUT_BYTES
+        request=json.loads(Path(os.environ['VCMI_LEARNING_PRESSURE_REQUEST']).read_text())
+        request.pop('experience',None)
+        original=copy.deepcopy(request)
+        with tempfile.TemporaryDirectory() as directory:
+            database=Path(directory)/'learning.sqlite3'
+            source=sqlite3.connect(Path(os.environ['VCMI_LEARNING_PRESSURE_DATABASE']).resolve().as_uri()+'?mode=ro',uri=True)
+            target=sqlite3.connect(database);source.backup(target);target.close();source.close()
+            experience=Experience(database,'learn')
+            try:
+                context=experience.prepare(request)
+                self.assertEqual(len(context['episodes']),0,'a complete oversized learning episode must remain queued')
+                pending={row['id']:json.loads(row['payload']) for row in experience.db.execute('SELECT id,payload FROM episodes WHERE assessed=0')}
+                self.assertTrue(pending,'deferral erased the durable evidence')
+                projected,_=bounded_history(without_unknown_army_values({**request,'experience':context}))
+                self.assertLessEqual(len(compact_json(encode_request(projected)).encode('utf-8')),SOFT_INPUT_BYTES)
+                self.assertEqual(request,original)
+                smaller=copy.deepcopy(request)
+                smaller['observation']={'player':request['identity']['player'],'day':100,'heroes':[], 'resources':[0]*7}
+                smaller['identity']['day']=100
+                smaller['request_id']=':'.join([*request['request_id'].split(':')[:-4],str(request['identity']['player']),'100',str(request['identity']['revision']),'999'])
+                smaller['memory']={'experience_id':request['memory']['experience_id']}
+                smaller['campaign']=None;smaller['signals']=[]
+                offered=experience.prepare(smaller)['episodes']
+                self.assertTrue(offered,'pending complete evidence was never offered after capacity returned')
+                for episode in offered:
+                    self.assertEqual(episode,pending[episode['id']])
+            finally:
+                experience.close()
+
     def test_route_defaults_preserve_overrides_nulls_and_scalar_types_on_model_stdin(self):
         request=self.request()
         request['observation']['routes']=[

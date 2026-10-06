@@ -11,6 +11,11 @@ import re
 import sqlite3
 import uuid
 
+if __package__:
+    from .prompt_context import bounded_history, without_unknown_army_values, encode_request, compact_json, SOFT_INPUT_BYTES
+else:
+    from prompt_context import bounded_history, without_unknown_army_values, encode_request, compact_json, SOFT_INPUT_BYTES
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / '.build/experience.sqlite3'
 CONDITIONS = ('combat', 'defense', 'economy', 'reinforcement', 'exploration', 'tempo')
@@ -324,8 +329,14 @@ class Experience:
         if self.mode == 'learn':
             for row in self.db.execute('SELECT payload FROM episodes WHERE game=? AND day<=? AND assessed=0 ORDER BY rowid LIMIT 2',(game,day)):
                 episode = json.loads(row['payload'])
-                if len(encoded({**context,'episodes':[*context['episodes'],episode]}).encode()) <= CONTEXT_LIMIT:
-                    context['episodes'].append(episode)
+                candidate={**context,'episodes':[*context['episodes'],episode]}
+                if len(encoded(candidate).encode()) > CONTEXT_LIMIT:
+                    continue
+                if request.get('protocol') == 2:
+                    projected,_=bounded_history(without_unknown_army_values({**request,'experience':candidate}))
+                    if len(compact_json(encode_request(projected)).encode('utf-8')) > SOFT_INPUT_BYTES:
+                        continue  # Keep the whole episode pending until the model has capacity.
+                context=candidate
         return context
 
     def accept(self,request,reply):
