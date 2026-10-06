@@ -180,7 +180,8 @@ spend their own reserves; others release only on observed completion, cancellati
 or confirmed deadline/ownership failure. Fund construction/recruitment; each extra
 hero costs 2500 gold. Army minima/reserves use creature AI value;
 fighting_strength_estimate includes hero bonuses. Count each army_holder_ref pool
-once, including stationary defense, conditional return and field armies. Forecast
+once. conditional_force_available may include the returning main; it is not
+stationary defense while the main continues its operation. Forecast
 alternatives are not jointly spendable; resource_calendar shares funds/stock across
 construction/recruitment. Money buys no absent stock; late return proves no timely
 defense. Delivery needs current routes, floors, legal stack packing and confirmed

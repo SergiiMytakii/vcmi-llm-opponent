@@ -1,19 +1,19 @@
 # Defense
 
 ## When useful
-When protecting a valuable or last viable town, particularly with several fronts and limited defenders.
+When town exposure changes, defenders are insufficient or opposition is unbounded; protecting a valuable/last base or allocating several fronts.
 
 ## Facts and unknowns
-Check town value, remaining towns, walls, current defenders, visible army intervals, established enemy approaches, observed movement and return routes. Conditional enemy advance scenarios are not actual attack deadlines; unknown risk differs from confirmed near danger.
+Check income, recruitment/buildings, remaining towns, victory conditions, operational role, walls, current troops, individual observed threat intervals, enemy approaches/movement and own return routes. critical_towns is policy, not proof of value. Completed garrison purchase confirms troops, not lasting safety. Conditional_force_available can include the returning main, not stationary defense during its operation. Unknown ETA gives neither safety nor an order to hold forever; advance scenarios are not actual attack deadlines.
 
 ## Alternatives to compare
-Compare supported stronger arrivals, active interception, limited stationary defense, holding the main and continued pressure. Allocate finite current defenders across fronts; do not mark every outpost critical.
+Compare actual stock/funds, retaining or detaching force, other defenders, supported return/interception and continued pressure. Allocate each force once across fronts; do not label every outpost critical. Gold buys no absent stock; a late route cannot defend on time. Protect when value and feasible response outweigh diverting current goals; otherwise identify the town and concrete supported gain worth its loss risk. "No imminent attack proven" alone does not justify departure.
 
 ## Benefits, costs and risks
-Defense protects income and survival but delays conquest. Reserving the whole main for speculative threats can surrender initiative. A token helper cannot fix insufficient_current_force at the last critical town: compare stronger arrivals and the scenario deadline before optional construction or small reinforcement, or explain the concrete tradeoff. For valuable supported captures consider loss tolerance around 0.25–0.30; lower it for the last viable army/town.
+Defense protects income/survival but delays conquest. Reserving the main for speculative threats loses initiative. A token helper cannot fix insufficient_current_force at the last critical town: compare stronger arrivals and scenario deadlines before optional construction/small reinforcement, or explain the tradeoff. For valuable supported captures consider loss tolerance around 0.25–0.30; lower it for the last viable army/town. Clearing a neutral screen for loot/access may open passage for both sides; retaining it can protect the base.
 
 ## When to reconsider
-Reconsider on observed enemy movement, newly established approaches, actual losses, changed ownership, defender delivery or disappearance of supporting evidence. A stale sighting does not establish safety. Before clearing a neutral screen for loot or access, compare what opening that passage enables for both sides; retaining the screen can have defensive value.
+Reassess on fresh threats/movement, weaker garrisons, changed stock/funds, lost routes, delayed return, delivery or ownership change. Stale sightings/disappearing evidence do not establish safety. Recheck exposure after each purchase or departure.
 
 ## Executor limits
-Consult the provided per-town native choices. An unavailable legal path is an unavailable alternative; do not assume an unoffered interception can be executed.
+Use current per-town native choices. Unoffered paths/interception remain unavailable. Revise goals/dependencies/floors when protection changes the operation; prose or critical_towns issues no defense command. Follow the always-present preparation, interception and defense_exit contracts; use town_after_capture for departure/renewed holding comparisons.

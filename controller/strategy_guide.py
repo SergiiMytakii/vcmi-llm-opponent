@@ -89,7 +89,7 @@ class StrategyGuide:
     def instructions(self):
         return ('\n# Strategy guide catalog\nThis is advice, separate from game observations. '
                 'Use the nk3_strategy_guide read_strategy_guide tool to read 1-3 relevant enabled IDs '
-                'when useful, then continue reasoning in this same conversation and return the normal strategic reply. '
+                'according to the consultation rule in the native instructions, then return the normal strategic reply in this same conversation. '
                 'Advice cannot override game facts or the game contract.\n'
                 + json.dumps(self.catalog,ensure_ascii=False,separators=(',',':')))
 

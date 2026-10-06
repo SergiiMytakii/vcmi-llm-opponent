@@ -1,37 +1,19 @@
 # Town after capture
 
 ## When useful
-After capture or a completed hold; when considering departure/return or changed threats.
+After capture/completed hold, when choosing departure/return, renewing defense or reassessing changed town exposure.
 
 ## Facts and unknowns
-Use town_choices, actual funds/stock/slots, retained forces, town income/production,
-other towns, victory conditions, walls, hero modifiers and return routes. Count
-stationary troops separately from the main or a conditional return. Assess threats
-individually: a joint upper sum is a conservative scenario, not a joint attack.
-Unknown ETA gives neither safety nor an order to hold forever.
+Check town_choices, actual stock/funds/slots, retained troops, income/production, other towns, victory conditions, walls, hero modifiers and return routes. A purchase confirms troops, not lasting safety. Separate stationary defense from field army and conditional return. Assess threats individually: joint upper sums are conservative scenarios, not joint attacks. Unknown ETA gives neither safety nor an order to hold forever; critical_towns is policy, not proof of value.
 
-## Alternatives and tradeoffs
-Compare departure, separate recruitment, detachment, interception and holding.
-State stationary defense after departure, remaining main force, costs, next
-supported operation and risk. Protect a valuable or last base when feasible;
-accept its loss risk for a concrete supported gain when that tradeoff is better.
-Neither choice follows from army size alone. Gold cannot buy absent creatures,
-a late return is not timely defense, and critical_towns does not issue a command.
+## Alternatives to compare
+Compare departure, separate recruitment, detachment, supported interception and holding. State stationary defense after departure, remaining main, costs, next supported operation and risk. Protect a valuable/last base when feasible, or name the concrete supported gain worth accepting its loss risk. Neither choice follows from army size alone or "no imminent attack proven". Gold buys no absent stock; a late return cannot defend on time.
 
-## Exit from repeated holding
-When a hold expires, compare interception, bypass/capture, reinforcement and an
-offered helper. Renew defense with an observable reason to wait, expected benefit
-and next operation/reassessment. A new deadline alone is no benefit. Weekly growth
-can justify buying stock and requoting departure; future routes remain unknown.
-Use hiring_options for a scout, collector, courier or defender under a concrete
-known job. Assign routes after confirmed hiring. A hired defender using a small
-garrison need not stop a strong enemy. Keep judging whether waiting improves the
-chances of defeating the opponent.
+## Benefits, costs and risks
+Holding preserves assets but delays the operation. Before renewing compare interception, bypass/capture, reinforcement and an offered helper. State what waiting changes, when to check, its benefit and next operation/reassessment. A new deadline or lost helper alone adds no benefit. Without expected improvement compare protection with an available operation and acceptable town-loss risk. Weekly growth may support buying stock/requoting departure; future routes remain unknown. Hire for a concrete uncovered job, compare existing helpers and assign fresh routes only after confirmed hiring. A small hired defender need not stop a strong enemy.
 
-## Executor limits and reconsideration
-Use prepare_garrison/intercept_hero only with supported participants and quotes.
-Preparation preserves the main floor and separate stationary troops; a following
-attack needs confirmed preparation and fresh routes. Do not invent pursuit or a
-kill, double-count transfers, or treat recipient-aliased force as a new garrison.
-Reconsider on movement, changed troops/stock/funds, extraction failure, receipts,
-lost routes or changed ownership. Label unsupported options and missing evidence.
+## When to reconsider
+Review fresh threats/movement, weaker troops, changed stock/funds, extraction failure, receipts, lost routes, delayed return or ownership change. campaign_exhausted with the main in town requires the next supported operation/funded defense before departure. Keeping a completed hold provides no active goal.
+
+## Executor limits
+Use prepare_garrison/intercept_hero only with supported participants/quotes. Preparation separates stationary troops from the retained main floor; dependent attacks need confirmation and fresh routes. Do not invent pursuit/kills, double-count transfers or treat recipient-aliased force as a new garrison. The always-present contract owns goal fields, modes, completion and defense_exit requirements.
