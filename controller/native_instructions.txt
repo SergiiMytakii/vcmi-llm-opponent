@@ -166,6 +166,11 @@ capabilities and factual completion predicates.
   that radius to be revealed. expected_new_tiles counts fog, not known useful
   objects, passability, or an onward route. When frontier/capture routes are
   blocked, compare these safe information gains before choosing another wait.
+- visit_site: a supplied visible, unvisited scholar, treasure_chest or obelisk.
+  Use site_visited with value=0. Completion requires a native visit by the
+  assigned actor; another hero's visit does not confirm this intention. Scholar
+  lessons and chest contents are unknown before the visit. Compare safe useful
+  sites with further fog viewpoints when conquest routes remain blocked.
 - secure_resource: for a mine, complete_when is target_owned with value equal to
   observation.player. For a resource pile, use reserve_at_least: native code
   requires a confirmed pickup of that target and gold at least value. Use value=0

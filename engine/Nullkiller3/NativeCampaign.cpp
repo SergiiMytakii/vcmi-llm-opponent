@@ -67,6 +67,9 @@ std::string objectKind(const CGObjectInstance * object)
     case Obj::RESOURCE: return "resource";
     case Obj::SUBTERRANEAN_GATE: return "subterranean_gate";
     case Obj::MONSTER: return "monster";
+    case Obj::SCHOLAR: return "scholar";
+    case Obj::TREASURE_CHEST: return "treasure_chest";
+    case Obj::OBELISK: return "obelisk";
     case Obj::GARRISON:
     case Obj::GARRISON2: return "garrison";
     case Obj::BOAT: return "boat";
@@ -252,6 +255,12 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
         if(object && object->ID == Obj::RESOURCE) resourceVisits[actor] = object->id.getNum();
         else resourceVisits.erase(actor);
         passageVisits.erase(actor);
+        siteVisits.erase(actor);
+        if(object && actor==activeSiteActor && object->id.getNum()==activeSiteObject && !activeSiteGoal.isNull())
+        {
+            JsonNode receipt;receipt["goal"]=activeSiteGoal;receipt["day"].Integer()=activeSiteDay;
+            siteVisits[actor]=receipt;
+        }
         if(object && object->ID==Obj::SUBTERRANEAN_GATE)
         {
             JsonNode receipt;receipt["from"]=coordinate(object->visitablePos());
@@ -269,6 +278,13 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
         {
             if(!object) completedResourceVisits.push_back(found->second);
             resourceVisits.erase(found);
+        }
+        const auto site=siteVisits.find(actor);
+        if(site!=siteVisits.end())
+        {
+            if(!object || (object->id.getNum()==activeSiteObject && object->wasVisited(hero->getOwner())))
+                completedSiteVisits.push_back(site->second);
+            siteVisits.erase(site);
         }
         const auto passage=passageVisits.find(actor);
         if(passage!=passageVisits.end())
@@ -452,6 +468,9 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
                 persisted["confirmed_resource_pickups"][externalai::objectReference(found->second)] = world["day"];
         }
         completedResourceVisits.clear();
+        for(const auto & receipt:completedSiteVisits)
+            persisted["site_receipts"][receipt["goal"]["id"].String()]=receipt;
+        completedSiteVisits.clear();
     }
     applyPassageObservations();
     world["confirmed_resource_pickups"].Vector();
@@ -464,6 +483,13 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
             ==campaign.plan()["goals"].Vector().end();
     });
     for(const auto & [id,receipt]:passageReceipts) world["confirmed_passage_explorations"].Vector().push_back(receipt);
+    world["confirmed_site_visits"].Vector();
+    auto & siteReceipts=persisted["site_receipts"].Struct();
+    std::erase_if(siteReceipts,[&](const auto & item) {
+        return std::find(campaign.plan()["goals"].Vector().begin(),campaign.plan()["goals"].Vector().end(),item.second["goal"])
+            ==campaign.plan()["goals"].Vector().end();
+    });
+    for(const auto & [id,receipt]:siteReceipts) world["confirmed_site_visits"].Vector().push_back(receipt);
     world["confirmed_deliveries"].Vector();
     auto & receipts=persisted["delivery_receipts"].Struct();
     std::erase_if(receipts,[&](const auto & item) {
@@ -577,6 +603,8 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         item["ref"].String() = reference(object);
         item["id"].Integer() = externalai::objectAlias(persisted["object_ids"], object->id.getNum());
         item["kind"].String() = objectKind(object);
+        if(object->ID==Obj::SCHOLAR || object->ID==Obj::TREASURE_CHEST || object->ID==Obj::OBELISK)
+            item["visited"].Bool()=object->wasVisited(ai.playerID);
         item["owner"].Integer() = object->getOwner().getNum();
         item["position"] = coordinate(object->visitablePos());
         item["army_value"].Integer() = observedArmyStrength(*ai.cc, object);
@@ -806,7 +834,8 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     for(const auto & object:world["visible_objects"].Vector())
     {
         const auto & kind=object["kind"].String();
-        if(kind!="town" && kind!="mine" && kind!="resource" && kind!="subterranean_gate") continue;
+        if(kind!="town" && kind!="mine" && kind!="resource" && kind!="subterranean_gate"
+            && kind!="scholar" && kind!="treasure_chest" && kind!="obelisk") continue;
         const auto & pos=object["position"];
         JsonNode route;
         route["target_ref"]=object["ref"];
@@ -828,7 +857,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     world["goal_feedback"].Vector();
     for(const auto & goal:campaign.plan()["goals"].Vector())
     {
-        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="scout_area" && goal["kind"].String()!="explore_passage") continue;
+        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="scout_area" && goal["kind"].String()!="visit_site" && goal["kind"].String()!="explore_passage") continue;
         auto feedback=campaign.routeFeedback(goal,world);
         feedback["status"]=world["goal_statuses"][goal["id"].String()];
         world["goal_feedback"].Vector().push_back(feedback);
@@ -859,6 +888,7 @@ void NativeCampaign::traceCampaign() const
         trace["forecasts"] = world["forecasts"];
         trace["local_repairs"] = persisted["local_repairs"];
         trace["confirmed_deliveries"] = world["confirmed_deliveries"];
+        trace["confirmed_site_visits"] = world["confirmed_site_visits"];
         for(const auto & town : world["towns"].Vector())
         { JsonNode item; for(const auto * field:{"ref","buildings","army_holder_ref","defense_value"}) item[field]=town[field]; trace["towns"].Vector().push_back(item); }
         logAi->info("NK3_CAMPAIGN %s", trace.toCompactString());
@@ -1670,6 +1700,20 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
     {
         std::lock_guard lock(visitMutex);
         activePassageGoal=JsonNode();activePassageActor=activePassageEntry=-1;activePassageDay=0;
+        activeSiteGoal=JsonNode();activeSiteActor=activeSiteObject=-1;activeSiteDay=0;
+        siteVisits.clear();
+        for(const auto & item:campaign.plan()["goals"].Vector())
+            if(item["id"].String()==goalID && item["kind"].String()=="visit_site")
+            {
+                const auto * actor=dynamic_cast<const CGHeroInstance *>(resolve(ai,item["actor_ref"]));
+                const auto * site=resolve(ai,item["target_ref"]);
+                if(actor && actor->getOwner()==ai.playerID && site && ai.cc->isVisible(site->visitablePos())
+                    && (site->ID==Obj::SCHOLAR || site->ID==Obj::TREASURE_CHEST || site->ID==Obj::OBELISK))
+                {
+                    activeSiteGoal=item;activeSiteActor=actor->id.getNum();activeSiteObject=site->id.getNum();
+                    activeSiteDay=ai.cc->getCalendar().getCurrentDay();
+                }
+            }
         passageVisits.clear();
         for(const auto & item:campaign.plan()["goals"].Vector())
             if(item["id"].String()==goalID && item["kind"].String()=="explore_passage")

@@ -54,6 +54,10 @@ class NativeCampaign
     int activePassageActor=-1, activePassageEntry=-1, activePassageDay=0;
     std::map<int, JsonNode> passageVisits;
     std::vector<JsonNode> completedPassageVisits;
+    JsonNode activeSiteGoal;
+    int activeSiteActor=-1,activeSiteObject=-1,activeSiteDay=0;
+    std::map<int,JsonNode> siteVisits;
+    std::vector<JsonNode> completedSiteVisits;
     std::vector<JsonNode> completedBattles;
     void applyBattleObservations();
     void applyPassageObservations();

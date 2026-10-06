@@ -19,6 +19,57 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--visit-site")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            const auto world=input["world"],plan=input["plan"],goal=plan["goals"][0];
+            const auto id=goal["id"].String();
+            std::string reason;
+            for(const auto * field:{"actor_ref","target_ref"})
+            {
+                auto forged=input["receipt"];
+                bool changed=false;
+                for(const auto & item:world[std::string(field)=="actor_ref" ? "heroes" : "objects"].Vector())
+                    if(item["ref"]!=goal[field]) {forged["goal"][field]=item["ref"];changed=true;break;}
+                require(changed,"fixture has no different actor or target");
+                nullkiller3::CampaignState state;
+                require(state.accept(plan,world,reason),reason.c_str());
+                auto observed=world;observed["confirmed_site_visits"].Vector().push_back(forged);
+                state.review(observed);
+                require(state.statuses()[id]["state"].String()!="completed","another actor or target completed the site goal");
+            }
+            nullkiller3::CampaignState state;
+            require(state.accept(plan,world,reason),reason.c_str());
+            auto observed=world;observed["confirmed_site_visits"].Vector().push_back(input["receipt"]);
+            state.review(observed);
+            require(state.statuses()[id]["state"].String()=="completed","exact site visit did not complete its goal");
+            nullkiller3::CampaignState restored(state.save());
+            require(restored.restoreReason().empty(),"completed site goal failed save/load");
+            auto forgedSave=state.save();forgedSave.Struct().erase("site_completions");
+            require(!nullkiller3::CampaignState(forgedSave).restoreReason().empty(),"completed site without a receipt survived load");
+            auto later=input["later_world"],next=plan,newGoal=goal;
+            next["revision"].Integer()++;
+            newGoal["id"].String()="next-site";
+            newGoal["deadline_day"].Integer()=later["day"].Integer()+2;
+            newGoal["depends_on"].Vector().push_back(goal["id"]);
+            bool found=false;
+            for(const auto & item:later["objects"].Vector())
+                if(item["kind"].String()=="treasure_chest" && item["visible"].Bool() && !item["visited"].Bool())
+                {newGoal["target_ref"]=item["ref"];found=true;break;}
+            require(found,"fixture has no next visible unvisited site");
+            next["goals"].Vector().push_back(newGoal);
+            require(restored.accept(next,later,reason),reason.c_str());
+            require(restored.statuses()[id]["completed_day"]==input["receipt"]["day"],"retaining a consumed site lost its completion day");
+            require(restored.statuses()["next-site"]["state"].String()!="completed","a different site inherited completion");
+            nullkiller3::CampaignState retained(restored.save());
+            require(retained.restoreReason().empty(),"retained consumed site dependency failed save/load");
+            auto changed=plan;changed["revision"].Integer()++;
+            changed["goals"][0]["id"].String()="renamed-consumed-site";
+            nullkiller3::CampaignState fresh;
+            require(!fresh.accept(changed,later,reason),"renamed goal admitted an invisible consumed site");
+            std::cout<<"Site visit actor/target receipt and retained dependency proof passed\n";
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--scout-area")
         {
             const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));

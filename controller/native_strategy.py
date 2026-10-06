@@ -10,7 +10,7 @@ except ImportError:
     from experience import learning_schema, validate_learning
 
 KINDS = ('develop_town', 'secure_resource', 'reinforce_hero', 'capture_target',
-         'defend_area', 'scout_frontier', 'scout_area', 'preserve_force', 'explore_passage')
+         'defend_area', 'scout_frontier', 'scout_area', 'visit_site', 'preserve_force', 'explore_passage')
 APPROACHES = ('economy', 'expansion', 'offense', 'defense', 'scouting')
 ROLES = ('main', 'defender', 'scout', 'collector', 'reinforcement')
 
@@ -78,7 +78,7 @@ def reply_schema(request):
     target = {'type': 'string', 'enum': sorted(references(request))}
     label = {'type': 'string', 'minLength': 1, 'maxLength': 30}
     predicate = _object({'kind': {'type': 'string', 'enum': ['building_present', 'target_owned', 'reserve_at_least',
-                       'army_at_least', 'frontier_observed', 'area_observed', 'held_until', 'force_preserved_until', 'passage_explored']},
+                       'army_at_least', 'frontier_observed', 'area_observed', 'site_visited', 'held_until', 'force_preserved_until', 'passage_explored']},
                          'value': integer(0, 1000000000)})
     goal = _object({'id': label, 'kind': {'type': 'string', 'enum': list(KINDS)}, 'actor_ref': hero,
                     'target_ref': target, 'deadline_day': integer(day, day+7), 'priority': integer(1,100),
@@ -100,11 +100,13 @@ def reply_schema(request):
         'capture_target':[o['ref'] for o in objects if o.get('kind') in ('town','mine') and (o.get('owner')!=world['player'] or o.get('visible') is not True)],
         'defend_area':town_refs,'scout_frontier':world['frontiers'],
         'scout_area':[a['ref'] for a in world.get('scouting_options',[])],'preserve_force':town_refs,
+        'visit_site':[o['ref'] for o in objects if o.get('kind') in ('scholar','treasure_chest','obelisk') and o.get('visible') is True and o.get('visited') is False]
+            +[g['target_ref'] for g in (request.get('campaign') or {}).get('goals',[]) if g['kind']=='visit_site' and world.get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'],
         'explore_passage':[o['ref'] for o in objects if o.get('kind')=='subterranean_gate' and o.get('visible') is True]}
     supported_buildings = sorted({b['id'] for t in world['towns'] for b in t.get('building_options',[]) if b.get('supported') is True})
     completions = {'develop_town':['building_present'],'secure_resource':['target_owned','reserve_at_least'],
                    'reinforce_hero':['army_at_least'],'capture_target':['target_owned'],
-                   'defend_area':['held_until'],'scout_frontier':['frontier_observed'],'scout_area':['area_observed'],'preserve_force':['force_preserved_until'],'explore_passage':['passage_explored']}
+                   'defend_area':['held_until'],'scout_frontier':['frontier_observed'],'scout_area':['area_observed'],'visit_site':['site_visited'],'preserve_force':['force_preserved_until'],'explore_passage':['passage_explored']}
     for kind in KINDS:
         if not targets[kind] or (kind!='develop_town' and not heroes) or (kind=='develop_town' and not supported_buildings):continue
         variant = copy.deepcopy(goal)
@@ -115,7 +117,7 @@ def reply_schema(request):
         props['building_id'] = {**integer(-1,100000),'enum':supported_buildings if kind=='develop_town' else [-1]}
         predicate_props = props['complete_when']['properties']
         predicate_props['kind'] = {'type':'string','enum':completions[kind]}
-        if kind in ('scout_frontier','explore_passage'):predicate_props['value'] = {**integer(0,0),'enum':[0]}
+        if kind in ('scout_frontier','explore_passage','visit_site'):predicate_props['value'] = {**integer(0,0),'enum':[0]}
         elif kind=='scout_area':predicate_props['value']={**integer(1,64),'enum':sorted({p['sight_radius'] for a in world.get('scouting_options',[]) for p in a['own_arrivals']})}
         elif kind=='capture_target':predicate_props['value'] = {**integer(0,7),'enum':[world['player']]}
         elif kind=='develop_town':predicate_props['value'] = {**integer(0,100000),'enum':supported_buildings}
