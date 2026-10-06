@@ -25,7 +25,7 @@ mode=os.environ.get('GUIDE_TEST_MODE','decision')
 answer={'kind':'decision','decision':reply,'guide_request':None}
 if mode=='off':answer=reply
 if mode not in ('decision','off') and n==1:
- answer={'kind':'guide_request','decision':None,'guide_request':{'ids':['opening','defense'],'reason':'Compare current risks'}}
+ answer={'kind':'guide_request','decision':None,'guide_request':{'ids':json.loads(os.environ.get('GUIDE_TEST_IDS','["opening","defense"]')),'reason':'Compare current risks'}}
  if mode=='duplicate':answer['guide_request']['ids']=['opening','opening']
  if mode=='unknown':answer['guide_request']['ids']=['secret']
  if mode=='inconsistent':answer['decision']=reply
@@ -117,6 +117,17 @@ class StrategyGuideTest(unittest.TestCase):
                 self.assertEqual(len(list(self.folder.glob('call-*.json'))),1)
                 info=json.loads(result.stderr)
                 if mode!='first_unknown':self.assertEqual(info['usage']['output_tokens'],40)
+
+    def test_exploration_advice_is_delivered_only_after_its_request(self):
+        self.env.update(GUIDE_TEST_MODE='consult',GUIDE_TEST_IDS='["exploration"]')
+        result=self.exchange();self.assertEqual(result.returncode,0,result.stderr)
+        calls=[json.loads((self.folder/f'call-{n}.json').read_text()) for n in (1,2)]
+        self.assertIn('Strategy Guide access',calls[0]['instructions'])
+        self.assertIn('exploration',calls[0]['instructions'])
+        card=(ROOT/'controller/strategy_guide/rules/exploration.md').read_text()
+        self.assertNotIn(json.dumps(card,ensure_ascii=False)[1:-1],calls[0]['instructions'])
+        self.assertIn(json.dumps(card,ensure_ascii=False)[1:-1],calls[1]['instructions'])
+        self.assertEqual(json.loads(result.stderr)['strategy_guide']['requested_ids'],['exploration'])
 
     def test_second_failure_retains_first_cost_and_never_becomes_a_command(self):
         self.env['GUIDE_TEST_MODE']='second_exit'

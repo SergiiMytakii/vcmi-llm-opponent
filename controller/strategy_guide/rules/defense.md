@@ -13,7 +13,7 @@ Compare supported stronger arrivals, active interception, limited stationary def
 Defense protects income and survival but delays conquest. Reserving the whole main for speculative threats can surrender initiative. A token helper cannot fix insufficient_current_force at the last critical town: compare stronger arrivals and the scenario deadline before optional construction or small reinforcement, or explain the concrete tradeoff. For valuable supported captures consider loss tolerance around 0.25–0.30; lower it for the last viable army/town.
 
 ## When to reconsider
-Reconsider on observed enemy movement, newly established approaches, actual losses, changed ownership, defender delivery or disappearance of supporting evidence. A stale sighting does not establish safety.
+Reconsider on observed enemy movement, newly established approaches, actual losses, changed ownership, defender delivery or disappearance of supporting evidence. A stale sighting does not establish safety. Before clearing a neutral screen for loot or access, compare what opening that passage enables for both sides; retaining the screen can have defensive value.
 
 ## Executor limits
 Consult the provided per-town native choices. An unavailable legal path is an unavailable alternative; do not assume an unoffered interception can be executed.

@@ -49,6 +49,13 @@
       "applicability": "Comparing departure, separate recruitment, detachment, interception and holding.",
       "file": "rules/town_after_capture.md",
       "enabled": true
+    },
+    {
+      "id": "exploration",
+      "title": "Exploration",
+      "applicability": "Choosing safe viewpoints, useful sites, visible gates and onward operations through learned passages.",
+      "file": "rules/exploration.md",
+      "enabled": true
     }
   ]
 }
