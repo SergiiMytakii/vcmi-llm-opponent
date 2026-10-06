@@ -1,5 +1,6 @@
 #include "../Nullkiller2/StdInc.h"
 #include "PlayerView.h"
+#include "ObservedPassages.h"
 
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/gameState/InfoAboutArmy.h"
@@ -8,6 +9,7 @@
 #include "../../lib/mapObjects/CGTownInstance.h"
 #include "../../lib/mapObjects/ObjectTemplate.h"
 #include "../../lib/mapObjects/IObjectInterface.h"
+#include "../../lib/mapObjects/MiscObjects.h"
 #include "../../lib/pathfinder/CPathfinder.h"
 #include "../../lib/pathfinder/PathfinderOptions.h"
 
@@ -42,6 +44,39 @@ void PlayerView::refresh()
                 std::erase_if(tile.blockingObjects, hidden);
                 tiles.emplace(pos, std::move(tile));
             }
+}
+bool PlayerView::setObservedPassages(const JsonNode & links)
+{
+    if(!validObservedPassages(links) || observedPassages==links) return false;
+    observedPassages=links;return true;
+}
+std::vector<ObjectInstanceID> PlayerView::getTeleportChannelExits(TeleportChannelID id,PlayerColor player) const
+{
+    std::vector<ObjectInstanceID> exits;
+    const auto owner=source.getPlayerID();
+    if(!owner || (player!=PlayerColor::UNFLAGGABLE && player!=*owner) || !observedPassages.isVector()) return exits;
+    auto gateAt=[&](const JsonNode & p) -> const CGTeleport * {
+        if(!passagePosition(p)) return nullptr;
+        const int3 position(p[0].Integer(),p[1].Integer(),p[2].Integer());
+        if(!source.isInTheMap(position) || !source.isVisible(position)) return nullptr;
+        const auto * tile=source.getTile(position,false);
+        if(!tile) return nullptr;
+        for(const auto objectID:tile->visitableObjects)
+            if(const auto * object=source.getObj(objectID,false);object && object->ID==Obj::SUBTERRANEAN_GATE)
+                return dynamic_cast<const CGTeleport *>(object);
+        return nullptr;
+    };
+    // Pairing comes from a real own crossing, not the map's global channel
+    // table. Seeing two entrances alone does not establish their connection.
+    for(const auto & link:observedPassages.Vector())
+    {
+        if(!link.isStruct()) continue;
+        const auto * from=gateAt(link["from"]), *to=gateAt(link["to"]);
+        if(!from || !to || from->channel!=id || to->channel!=id) continue;
+        for(const auto endpoint:{from->id,to->id})
+            if(std::find(exits.begin(),exits.end(),endpoint)==exits.end()) exits.push_back(endpoint);
+    }
+    return exits;
 }
 void PlayerView::calculatePaths(const std::shared_ptr<PathfinderConfig> & config) const
 {
@@ -94,7 +129,9 @@ void restrictToSupportedMovement(PathfinderOptions & options)
 {
     options.useFlying = options.useWaterWalking = false;
     options.useEmbarkAndDisembark = true;
-    options.useTeleportTwoWay = options.useTeleportOneWay = options.useTeleportOneWayRandom = false;
+    // PlayerView admits only actually observed, currently visible gate pairs.
+    options.useTeleportTwoWay = true;
+    options.useTeleportOneWay = options.useTeleportOneWayRandom = false;
     options.useTeleportWhirlpool = options.forceUseTeleportWhirlpool = options.useCastleGate = false;
     options.canUseCast = options.useDimensionDoor = options.ignoreGuards = false;
 }
@@ -122,9 +159,10 @@ int3 observedBoatPlacement(const CCallback & callback, const IShipyard * shipyar
 
 // Each command may reveal tiles or remove a visitable object. Do not reuse the
 // planning snapshot for the next command: stale tile IDs can name deleted objects.
-std::shared_ptr<const CPathsInfo> currentPlayerPaths(const CCallback & callback, const CGHeroInstance * hero)
+std::shared_ptr<const CPathsInfo> currentPlayerPaths(const CCallback & callback, const CGHeroInstance * hero, const JsonNode & observedPassages)
 {
     PlayerView view(callback);
+    view.setObservedPassages(observedPassages);
     auto paths = std::make_shared<CPathsInfo>(callback.getMapSize(), hero);
     auto config = std::make_shared<SingleHeroPathfinderConfig>(*paths, view, hero);
     restrictToSupportedMovement(config->options);

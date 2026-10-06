@@ -109,6 +109,7 @@ public:
     void updateForecasts(NK2AI::Nullkiller & ai);
     bool accept(const JsonNode & proposal, std::string & reason);
     const JsonNode & observation() const { return world; }
+    JsonNode observedPassages() const { return persisted["observed_passages"]; }
     const JsonNode & memory() const { return persisted["memory"]; }
     const CampaignState & commitments() const { return campaign; }
     NK2AI::Goals::TGoalVec generate(NK2AI::Nullkiller & ai, bool priorityPass, bool stabilizationOnly = false);

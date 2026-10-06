@@ -1,6 +1,7 @@
 #pragma once
 
 #include "json/JsonNode.h"
+#include "ObservedPassages.h"
 #include <charconv>
 #include <set>
 
@@ -91,7 +92,8 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         return result; // Unknown consumed budget cannot become fresh allowance.
     }
     JsonNode result=saved;
-    bool invalid=!validNativeAliases(saved["object_ids"]) || !validPendingTask(saved["pending_native_task"]);
+    bool invalid=!validNativeAliases(saved["object_ids"]) || !validPendingTask(saved["pending_native_task"])
+        || !validObservedPassages(saved["observed_passages"]);
     const auto & checkpoint=saved["checkpoint_baseline"];
     if(!checkpoint.isNull())
         invalid |= !checkpoint.isStruct() || (checkpoint.Struct().size()!=2 && checkpoint.Struct().size()!=3)
@@ -206,7 +208,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     }
     if(invalid)
         for(const auto * field:{"object_ids","memory","native_campaign","strategy_metadata","local_repairs",
-                               "delivery_receipts","passage_receipts","goal_blockers","frontier_positions","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
+                               "delivery_receipts","passage_receipts","observed_passages","goal_blockers","frontier_positions","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
             result.Struct().erase(field);
     if(result["strategy_metadata"].isStruct())
         for(auto & assignment:result["strategy_metadata"]["assignments"].Vector())

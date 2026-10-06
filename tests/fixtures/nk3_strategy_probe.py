@@ -18,6 +18,26 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
            reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan,
            usage=dict(input_tokens=0,output_tokens=0,known=True))
 mode=os.environ.get('NK3_PROBE_MODE','valid')
+if mode=='known_passage_scout':
+    own=r['observation'];actor=max(own['heroes'],key=lambda h:h['army_value'])
+    existing=next((g for g in (r.get('campaign') or {}).get('goals',[]) if g['id']=='known-passage-scout'),None)
+    if existing:
+        goal.update(existing)
+    else:
+        choices=[(f,a) for f in own['frontier_options'] if f['position'][2]!=actor['position'][2]
+                 for a in f.get('own_arrivals',[]) if a['hero_ref']==actor['ref']
+                 and a['army_loss_estimate']<=actor['army_value']*.1 and a['day']<=own['day']+3]
+        frontier,arrival=min(choices,key=lambda pair:(pair[1]['day'],pair[1]['movement_cost']))
+        goal.update(id='known-passage-scout',kind='scout_frontier',actor_ref=actor['ref'],target_ref=frontier['ref'],
+            building_id=-1,min_army_value=int(actor['army_value']*.8),required_capabilities=['land'],
+            complete_when=dict(kind='frontier_observed',value=0))
+    plan['policy']['max_loss_ratio']=.1
+    reply['assignments']=[dict(hero_ref=actor['ref'],role='main')]
+    reply['reconsider_when']=[dict(goal_id=goal['id'],kind='deadline_missed')]
+    reply['evidence_refs']=['hero:'+actor['ref']]
+    reply['reason']='Use an offered whole route through a learned passage'
+    if r.get('campaign') and any(g['id']==goal['id'] for g in r['campaign']['goals']):
+        reply.update(decision='retain',plan=None,assignments=own['strategy_assignments'])
 if mode=='passage':
     own=r['observation']
     entries=[o for o in own['objects'] if o.get('kind')=='subterranean_gate' and o.get('visible') is True]

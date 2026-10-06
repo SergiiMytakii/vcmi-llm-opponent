@@ -271,3 +271,13 @@ justified, not a critical defender or the main army by default. A passage offers
 information; do not assume a needed key, enemy town or safe route lies beyond it.
 Global teleport/spell planning remains unsupported. Do not invent another teleporter
 type as a subterranean gate. After exploration, use newly observed frontiers/targets.
+
+observation.observed_passages is durable knowledge from actual own crossings,
+independent of whether the exploration goal remains in the plan. Offered frontier
+and target routes can use these learned passages while both ends are visible; their
+cost/loss quote covers the whole known route. Prefer a useful onward operation over
+repeating an already explored entrance merely because an old surface route failed.
+A return through a known passage needs a concrete follow-up purpose. Seeing two gates
+alone is not proof that they connect. Unknown exits still require exploration and do
+not receive invented onward forecasts. Keep ordinary force/reserve/risk constraints;
+revise a preservation commitment explicitly when the new operation justifies it.

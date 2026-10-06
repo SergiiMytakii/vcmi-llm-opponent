@@ -20,10 +20,13 @@ class PlayerView final : public CGameInfoCallback
     const CCallback & source;
     TerrainTile unknown;
     mutable std::map<int3, TerrainTile> tiles;
+    JsonNode observedPassages;
 
 public:
     explicit PlayerView(const CCallback & callback);
     void refresh();
+    bool setObservedPassages(const JsonNode & links);
+    std::vector<ObjectInstanceID> getTeleportChannelExits(TeleportChannelID id, PlayerColor player=PlayerColor::UNFLAGGABLE) const override;
     void calculatePaths(const std::shared_ptr<PathfinderConfig> & config) const override;
     CGameState & gameState() override;
     const CGameState & gameState() const override;
@@ -41,7 +44,7 @@ public:
 // armies retain exact information; other visible armies use the ordinary UI DTO.
 void restrictToSupportedMovement(PathfinderOptions & options);
 int3 observedBoatPlacement(const CCallback & callback, const IShipyard * shipyard);
-std::shared_ptr<const CPathsInfo> currentPlayerPaths(const CCallback & callback, const CGHeroInstance * hero);
+std::shared_ptr<const CPathsInfo> currentPlayerPaths(const CCallback & callback, const CGHeroInstance * hero, const JsonNode & observedPassages);
 
 uint64_t observedArmyStrength(const CCallback & callback, const CGObjectInstance * object);
 JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance * object);

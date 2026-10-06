@@ -86,6 +86,16 @@ NativeCampaign::NativeCampaign(const JsonNode & saved) : persisted(restoreNative
     experienceID=externalai::initializeExperience(persisted);
     acceptedRevision=campaign.plan()["revision"].Integer();
     if(acceptedRevision) acceptedLossRatio=campaign.plan()["policy"]["max_loss_ratio"].Float();
+    persisted["observed_passages"].Vector();
+    // Older saves already contain validated completed-crossing proofs. Their
+    // actual geometry is player knowledge even after those goals are replaced.
+    if(campaign.restoreReason().empty())
+        for(const auto & goal:campaign.plan()["goals"].Vector())
+            if(goal["kind"].String()=="explore_passage" && campaign.statuses()[goal["id"].String()]["state"].String()=="completed")
+            {
+                const auto & receipt=static_cast<const JsonNode &>(persisted)["native_campaign"]["passage_completions"][goal["id"].String()];
+                recordObservedPassage(persisted["observed_passages"],receipt["from"],receipt["to"]);
+            }
     restoreArbiter();
 }
 std::string NativeCampaign::reference(const CGObjectInstance * object)
@@ -235,11 +245,12 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
         if(object && object->ID == Obj::RESOURCE) resourceVisits[actor] = object->id.getNum();
         else resourceVisits.erase(actor);
         passageVisits.erase(actor);
-        if(object && object->ID==Obj::SUBTERRANEAN_GATE && actor==activePassageActor
-            && object->id.getNum()==activePassageEntry && !activePassageGoal.isNull())
+        if(object && object->ID==Obj::SUBTERRANEAN_GATE)
         {
-            JsonNode receipt;receipt["goal"]=activePassageGoal;receipt["day"].Integer()=activePassageDay;
-            receipt["from"]=coordinate(object->visitablePos());passageVisits[actor]=receipt;
+            JsonNode receipt;receipt["from"]=coordinate(object->visitablePos());
+            if(actor==activePassageActor && object->id.getNum()==activePassageEntry && !activePassageGoal.isNull())
+            { receipt["goal"]=activePassageGoal;receipt["day"].Integer()=activePassageDay; }
+            passageVisits[actor]=receipt;
         }
     }
     else
@@ -268,7 +279,10 @@ void NativeCampaign::applyPassageObservations()
 {
     std::lock_guard lock(visitMutex);
     for(const auto & receipt:completedPassageVisits)
-        persisted["passage_receipts"][receipt["goal"]["id"].String()]=receipt;
+    {
+        recordObservedPassage(persisted["observed_passages"],receipt["from"],receipt["to"]);
+        if(receipt["goal"].isStruct()) persisted["passage_receipts"][receipt["goal"]["id"].String()]=receipt;
+    }
     completedPassageVisits.clear();
 }
 void NativeCampaign::battleResult(JsonNode ownResult)
@@ -458,7 +472,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     for(const auto * cap : {"teleport", "fly", "water_walk", "town_portal", "dimension_door"})
         world["unsupported_capabilities"].Vector().emplace_back(cap);
     world["movement_support"]["water"].String()="Current visible boats, known water tiles and legal embark/disembark. New sailing boats require an owned visible shipyard with all potential launch tiles visible, a current placement quote and available funds under the active goal. Summon/scuttle boat, airships, whirlpools and unobserved routes are unsupported.";
-    world["movement_support"]["passages"].String()="explore_passage visits a currently visible subterranean_gate through a permitted route to its entrance. Ordinary engine visit/query may reveal an unknown exit. Entry arrival/loss forecasts do not estimate the exit, its danger or onward travel; these remain unknown until observed. Global teleport planning remains unsupported.";
+    world["movement_support"]["passages"].String()="Observed_passages records real own subterranean crossings. Offered whole routes may cross these learned pairs only while both ends are visible gates; their arrival/loss estimates cover the entire offered known route. explore_passage may visit a visible entrance with an unknown exit; an entry-only quote does not estimate that unknown exit or onward travel. Unlearned channels, other teleport types and teleport spells remain unsupported.";
     // These complete own lists, and visible object sorting, make aliases
     // independent of gaps and insertions in global hidden object IDs.
     world["heroes"].Vector();
@@ -627,6 +641,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         endExecution(ai,"recovered_unknown");
     }
     world["goal_statuses"] = campaign.review(world,false);
+    world["observed_passages"]=observedPassages();
     if(!seedRead && campaign.plan().isNull())
     {
         seedRead = true;
@@ -776,7 +791,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
         world["offensive_preparation"]["recent_losses"].Vector().push_back(item);
     }
     world["main_army_idle"]=mainArmyIdle(campaign,world);
-    forecasts["route_assumptions"].String()="All visible town/mine/resource targets and subterranean gate entrances (exit risk unknown), complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
+    forecasts["route_assumptions"].String()="All visible town/mine/resource targets and subterranean gate entrances, including actually observed visible gate pairs in whole routes (unobserved exits remain unknown), complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
     traceCampaign();
 }
 void NativeCampaign::traceCampaign() const

@@ -1164,12 +1164,17 @@ index c2adab572..bae74e8c0 100644
  	const auto start = std::chrono::high_resolution_clock::now();
  	auto startMethod = start;
  	std::map<std::string, uint64_t> methodToElapsedMs = {};
-@@ -336,6 +396,8 @@ void Nullkiller::updateState()
+@@ -336,6 +396,13 @@ void Nullkiller::updateState()
  	activeHero = nullptr;
  	setTargetObject(-1);
  	decomposer->reset();
 +	if(playerView) playerView->refresh();
 +	if(strategicCampaign) strategicCampaign->observe(*this);
++	if(playerView && strategicCampaign && playerView->setObservedPassages(strategicCampaign->observedPassages()))
++	{
++		invalidatePaths();
++		invalidatePathfinderData();
++	}
  
  	buildAnalyzer->update();
  	methodToElapsedMs.emplace("buildAnalyzer->update", timeElapsed(startMethod));
@@ -1360,7 +1365,7 @@ index c2adab572..bae74e8c0 100644
  
  std::shared_ptr<const CPathsInfo> Nullkiller::getPathsInfo(const CGHeroInstance * h) const
  {
-+	if(strategicMode) return nullkiller3::currentPlayerPaths(*cc, h);
++	if(strategicMode) return nullkiller3::currentPlayerPaths(*cc, h, strategicCampaign ? strategicCampaign->observedPassages() : JsonNode());
  	return pathfinderCache->getPathsInfo(h);
  }
  

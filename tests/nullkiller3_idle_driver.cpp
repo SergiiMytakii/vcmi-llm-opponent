@@ -253,6 +253,30 @@ void passageExploration()
     nullkiller3::CampaignState rejected;
     require(!rejected.accept(plan,hidden,reason),"remembered hidden gate admitted as visible exploration target");
 }
+void learnedPassageNamespace()
+{
+    auto saved=json(R"({"object_ids":{},"native_campaign":{"marker":"old-plan"},"request_arbiter":{"spent":7},"observed_passages":[{"from":[6,5,0],"to":[6,5,1]}]})");
+    require(nullkiller3::restoreNativeNamespace(saved)["observed_passages"]==saved["observed_passages"],
+        "valid learned passage lost on player namespace restore");
+    JsonNode learned;
+    require(nullkiller3::recordObservedPassage(learned,saved["observed_passages"][0]["from"],saved["observed_passages"][0]["to"]),
+        "actual crossing did not record map connectivity");
+    nullkiller3::recordObservedPassage(learned,saved["observed_passages"][0]["to"],saved["observed_passages"][0]["from"]);
+    require(learned.Vector().size()==1,"reverse crossing duplicated a bidirectional passage");
+    require(!nullkiller3::recordObservedPassage(learned,saved["observed_passages"][0]["from"],saved["observed_passages"][0]["from"]),
+        "reaching an entrance without crossing learned a connection");
+    saved["native_campaign"]["marker"].String()="replacement-plan";
+    require(nullkiller3::restoreNativeNamespace(saved)["observed_passages"]==learned,
+        "strategy replacement lost independent player passage knowledge");
+    auto bad=saved;bad["observed_passages"].String()="invalid";
+    auto restored=nullkiller3::restoreNativeNamespace(bad);
+    require(restored["observed_passages"].isNull() && restored["native_campaign"].isNull()
+        && restored["request_arbiter"]==saved["request_arbiter"],
+        "malformed learned passage retained routing facts or refunded spent budget");
+    bad=saved;bad["object_ids"].String()="invalid";
+    require(nullkiller3::restoreNativeNamespace(bad)["observed_passages"].isNull(),
+        "learned passage survived an incoherent player namespace reset");
+}
 int main(int argc,char ** argv)
 {
     try {
@@ -269,7 +293,7 @@ int main(int argc,char ** argv)
             std::cout<<result.toCompactString()<<"\n";return 0;
         }
         require(argc==1,"expected request, reply and prior accepted request paths or no arguments");
-        passageExploration();lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n";
+        learnedPassageNamespace();passageExploration();lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n";
     }
     catch(const std::exception & error) { std::cerr<<error.what()<<"\n";return 1; }
 }
