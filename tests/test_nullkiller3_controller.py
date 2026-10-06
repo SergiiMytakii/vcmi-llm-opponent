@@ -84,6 +84,15 @@ answer=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decisio
                dict(approach='offense',benefit='Earlier pressure',cost='Army resources',uncertainty='Enemy location unknown')],
  reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan)
 mode=os.environ['NK3_STUB_MODE']
+if mode in ('risk_protect','risk_accept'):
+ answer['alternatives'][1]=dict(approach='defense',benefit='Preserve town income and recruits',cost='Divert the current operation',uncertainty='Enemy arrival unknown')
+ answer['reason']='Protect the valuable town' if mode=='risk_protect' else 'Accept the secondary town risk to complete the funded operation'
+ if mode=='risk_protect':
+  answer['assignments']=[dict(hero_ref='object:0',role='defender')]
+  plan['approach']='defense'
+  plan['goals']=[dict(id='guild',kind='defend_area',actor_ref='object:0',target_ref='object:1',deadline_day=3,
+   priority=90,building_id=-1,min_army_value=5000,depends_on=[],required_capabilities=['land'],
+   complete_when=dict(kind='held_until',value=3))]
 if mode=='stale':answer['identity']['generation']='old'
 if mode=='capability':plan['goals'][0]['required_capabilities']=['fly']
 if mode=='policy':plan['policy']['allow_route_repair']=1
@@ -96,12 +105,25 @@ pathlib.Path(args[args.index('-o')+1]).write_text(json.dumps(answer))
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':120,'output_tokens':40}}))
 ''')
             request=strategic_request()
+            if mode.startswith('risk_'):
+                request['observation']['forecasts']={'defenses':[{'town_ref':'object:1',
+                    'status':'insufficient_current_force','threats':[{'source_ref':'object:9'}]}]}
             if learn:request['memory']['experience_id']='nk3-learning-opening'
             result=subprocess.run([sys.executable,str(ROOT/'controller/main.py')],input=json.dumps(request),
                                   text=True,capture_output=True,timeout=10,
                                   env={**os.environ,**env,'NK3_STUB_MODE':mode,'VCMI_EXPERIENCE_MODE':'learn' if learn else 'off',
                                        'VCMI_EXPERIENCE_DB':str(Path(folder)/'experience.sqlite3')})
             return result
+
+    def test_exposed_town_requires_comparison_but_model_can_protect_or_accept_risk(self):
+        omitted=self.exchange('risk_omitted')
+        self.assertNotEqual(omitted.returncode,0)
+        self.assertEqual(omitted.stdout,'')
+        for mode,approach in [('risk_protect','defense'),('risk_accept','economy')]:
+            with self.subTest(mode=mode):
+                result=self.exchange(mode)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(json.loads(result.stdout)['plan']['approach'],approach)
 
     def test_model_creates_a_goal_without_a_native_action_shortlist(self):
         result=self.exchange('valid')

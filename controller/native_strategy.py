@@ -188,6 +188,12 @@ def validate_reply(request, reply, wire=False):
             for item in value:byte_limits(item)
     byte_limits(byte_schema)
     _validate_shape(reply, byte_schema)
+    exposed = any(front.get('town_ref') in {t['ref'] for t in request['observation']['towns']}
+                  and front.get('threats') and front.get('status') in
+                  ('insufficient_current_force','unbounded_opposition')
+                  for front in request['observation'].get('forecasts',{}).get('defenses',[]))
+    if exposed and not any(option['approach']=='defense' for option in reply['alternatives']):
+        raise ValueError('exposed town requires a defense comparison, not a mandatory defense decision')
     plan = reply['plan'] if reply['decision'] == 'revise' else request.get('campaign')
     if reply['decision'] == 'retain':
         if reply['plan'] is not None or not plan: raise ValueError('retain requires a current campaign')

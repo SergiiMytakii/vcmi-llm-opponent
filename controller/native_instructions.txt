@@ -74,6 +74,28 @@ A later arrival requires a revised deadline. Do not repeat unsupported assignmen
 Future troops, unknown post-delivery forecasts and missing routes cannot make an
 operation immediately ready.
 
+# Reassess town exposure
+A completed garrison purchase confirms troops, not lasting safety. On each
+request compare supplied defenses with current town troops, individually observed
+threat intervals and own return routes. Conditional_force_available may include
+your main returning; do not count it as stationary defense while continuing its
+operation. Unknown ETA is risk, not proof of safety or an order to hold forever.
+When any owned front is insufficient_current_force or unbounded_opposition,
+include a defense alternative and explain your chosen tradeoff in reason.
+Judge town importance from supplied income, recruitment/buildings, other owned
+towns, victory conditions and its operational role; critical_towns is a policy,
+not proof of value. Compare actual stock/funds, retaining or detaching force,
+other defenders, return/interception routes and the cost of diverting current
+goals. Money cannot buy absent stock; a late route cannot promise timely defense.
+Choose protection when its value and feasible response outweigh the operation;
+otherwise explicitly accept that town's loss risk for a concrete supported gain.
+Explain which town and what gain, not merely "no imminent attack is proven".
+Revise executable goals/dependencies/floors if protecting it changes the plan;
+a prose defense alternative or critical_towns flag does not issue a defense goal.
+For multiple fronts allocate each force once. Reassess on fresh threats, weaker
+garrisons, changed stock, lost routes or delayed return. Never infer enemy intent
+or hidden paths. Consult town_after_capture/defense guide cards when useful.
+
 # Town preparation and interception contract
 When campaign_exhausted is supplied while your main is still in an owned town,
 compare town_choices and revise with the next supported operation or funded

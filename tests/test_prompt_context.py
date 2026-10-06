@@ -97,7 +97,7 @@ class PromptContextTest(unittest.TestCase):
                          'requires private recorded own strategic overflow request')
     def test_recorded_request_reaches_provider_through_strategic_controller(self):
         request=json.loads(Path(os.environ['VCMI_CONTEXT_OVERFLOW_REQUEST']).read_text())
-        previous=ROOT/'.build/s-duel-review-v18/decisions/9b5e5e591691441dbd58a336e87b3e29/stdout.bin'
+        previous=Path(os.environ.get('VCMI_CONTEXT_OVERFLOW_REPLY',ROOT/'.build/s-duel-review-v18/decisions/9b5e5e591691441dbd58a336e87b3e29/stdout.bin'))
         answer=json.loads(previous.read_bytes())
         answer.update(request_id=request['request_id'],identity=request['identity'],decision='retain',plan=None)
         answer.pop('usage',None)
@@ -124,7 +124,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_toke
             self.assertEqual(info['provider'],'codex')
             self.assertLessEqual(info['input_encoding']['sent_bytes'],131072)
             self.assertEqual(json.loads(result.stdout)['identity'],request['identity'])
-            from prompt_context import without_unknown_army_values
+            from controller.prompt_context import without_unknown_army_values
             projected=without_unknown_army_values(request)
             captured=json.loads((folder/'capture.json').read_text())
             self.assertEqual(json.dumps(captured['observation'],sort_keys=True),json.dumps(projected['observation'],sort_keys=True))
@@ -260,11 +260,11 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_toke
         record = {'note':'Сведения о неизвестном противнике, а не подтверждение победы.' * 4,
                   'quantity':None, 'empty':[], 'flags':[False, 0, True, 1, 1.0]}
         request['observation']['records'] = [copy.deepcopy(record) for _ in range(10)]
-        request['observation']['literal'] = {'$ref':0, '$ref_':{'$ref':1}, '$obj':[0,None]}
+        request['observation']['literal'] = {'$ref':0, '$ref_':{'$ref':1}, '$obj':[0,None], '$':0, '$_':None, '@':[0,None]}
         raw, _ = self.call(request)
         encoded = json.loads(raw)
-        self.assertNotIn(encoded['reference_key'], {'$ref', '$ref_'})
-        self.assertNotEqual(encoded.get('object_key'), '$obj')
+        self.assertNotIn(encoded['reference_key'], {'$ref', '$ref_', '$', '$_'})
+        self.assertNotIn(encoded.get('object_key'), {'$obj','@'})
         restored = restore_request(encoded)
         self.assertEqual(restored, request)
         self.assertEqual([type(x) for x in restored['observation']['records'][0]['flags']],

@@ -214,7 +214,7 @@ def encode_request(request):
 
     count(request)
     # Avoid confusing any existing game-data key with an encoding reference.
-    marker = '$ref'
+    marker = '$'
     while marker in keys:
         marker += '_'
     repeated = {key for key, count in counts.items()
@@ -239,7 +239,7 @@ def encode_request(request):
 
     encoded = encode(request)
     envelope = {'reference_key':marker, 'shared':shared, 'request':encoded}
-    object_marker = '$obj'
+    object_marker = '@'
     while object_marker in keys:
         object_marker += '_'
     shapes = Counter()
