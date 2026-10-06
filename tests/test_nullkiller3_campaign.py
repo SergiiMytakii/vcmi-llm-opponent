@@ -47,6 +47,104 @@ def seed_campaign():
 @unittest.skipUnless(sys.platform == 'darwin' and os.environ.get('VCMI_NK3_CAMPAIGN_CONFIG'),
                      'requires a separate NK3 build and private native fixture')
 class NativeCampaignTest(unittest.TestCase):
+    def test_delivery_receipt_unlocks_dependency_and_survives_load_without_handoff(self):
+        config = json.loads(Path(os.environ['VCMI_NK3_CAMPAIGN_CONFIG']).read_text())
+        output = Path(tempfile.mkdtemp(prefix='nk3-delivery-restore-', dir=ROOT / '.build/playtests'))
+        print('\nNK3 delivery restore evidence:', output, flush=True)
+        fixture = output / 'fixture'
+        shutil.copytree(config['profile_template'], fixture)
+        world = variants()['base']
+        objects = world['objects.json']
+        source = copy.deepcopy(next(v for v in objects.values()
+                                    if v['type']=='hero' and v['options']['owner']=='red'))
+        source.update(x=8, y=8)
+        source['options'].update(type='christian', army=[dict(type='core:pikeman', amount=100)])
+        objects['hero_999'] = source
+        with zipfile.ZipFile(fixture / 'Library/Application Support/vcmi/Maps/NK3DeliveryRestore.vmap', 'w') as archive:
+            for filename, value in world.items(): archive.writestr(filename, json.dumps(value))
+        build = seed_campaign()['goals'][0]
+        build.update(id='after_delivery', target_ref='object:2', depends_on=['deliver'])
+        delivery = dict(id='deliver', kind='reinforce_hero', actor_ref='object:0', target_ref='object:1',
+                        deadline_day=6, priority=80, building_id=-1, min_army_value=12000,
+                        depends_on=[], required_capabilities=['land','transfer'],
+                        complete_when=dict(kind='army_at_least',value=12000))
+        preserve = dict(id='courier', kind='preserve_force', actor_ref='object:1', target_ref='object:2',
+                        deadline_day=6, priority=10, building_id=-1, min_army_value=1000,
+                        depends_on=[], required_capabilities=['land'],
+                        complete_when=dict(kind='force_preserved_until',value=6))
+        plan = dict(version=3, revision=1, approach='offense', horizon_days=5,
+                    goals=[delivery,preserve,build],
+                    reserves=[dict(goal_id='courier',resources=[0]*7,force_value=1000)],
+                    policy=dict(max_loss_ratio=.2,allow_route_repair=True,
+                                allow_helper_replacement=True,critical_towns=['object:2']))
+        seed = output / 'campaign.json'; seed.write_text(json.dumps(plan))
+        config.update(profile_template=str(fixture), map_resource='Maps/NK3DeliveryRestore.vmap',
+                      players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', purpose='integration',
+                      case_id='nk3-delivery-restore', headless=False, max_seconds=30, references={})
+        config.pop('save_resource', None)
+        def drive(name, saving):
+            path=output/(name+'.json');path.write_text(json.dumps(config));run=output/name
+            subprocess.run([sys.executable,str(CLI),'prepare','--config',str(path),'--out',str(run)],
+                           check=True,capture_output=True)
+            environment=dict(os.environ);environment.pop('VCMI_NK3_SEED_CAMPAIGN',None)
+            if saving: environment['VCMI_NK3_SEED_CAMPAIGN']=str(seed)
+            with (run/'driver.log').open('w') as log:
+                child=subprocess.Popen([sys.executable,str(CLI),'run','--run',str(run)],env=environment,
+                                       stdin=subprocess.PIPE,stdout=log,stderr=subprocess.STDOUT)
+                sent=reached=False
+                try:
+                    deadline=time.monotonic()+35
+                    while child.poll() is None and time.monotonic()<deadline:
+                        records=campaign_records(run)
+                        if saving:
+                            if any(r['statuses']['deliver']['state']=='completed' for r in records) and not sent:
+                                child.stdin.write(b'save Saves/NK3DeliveryRestore\n');child.stdin.flush();sent=True
+                            client=run/'engine-logs/VCMI_Client_log.txt'
+                            reached=client.exists() and 'Game has been successfully saved!' in client.read_text(errors='replace')
+                        else:
+                            reached=any(r['day']>records[0]['day'] and r['statuses']['after_delivery']['state']=='completed'
+                                        for r in records)
+                        if reached:break
+                        time.sleep(.02)
+                finally:
+                    (run/'STOP').touch(exist_ok=True);child.wait(timeout=15);child.stdin.close()
+            self.assertTrue(reached,str(run))
+            launch=json.loads((run/'launch.json').read_text())
+            self.assertTrue(launch['cleanup_complete']);self.assertTrue(launch['protected_files_unchanged'])
+            self.assertTrue(json.loads((run/'report.json').read_text())['assignment_matches'])
+            self.assertFalse(list((run/'decisions').iterdir()),'native delivery called a model')
+            return run,campaign_records(run)
+        first,before=drive('save',True)
+        index=next(i for i,r in enumerate(before) if r['statuses']['deliver']['state']=='completed')
+        self.assertGreater(index,0)
+        for r in before[:index]:
+            self.assertEqual(r['statuses']['after_delivery']['reason'],'dependency_unconfirmed')
+        previous,delivered=before[index-1],before[index]
+        receipt=next(r for r in delivered['confirmed_deliveries'] if r['goal']==delivery)
+        self.assertEqual(receipt['source_ref'],'object:1')
+        self.assertEqual(receipt['day'],delivered['day'])
+        self.assertGreaterEqual(receipt['recipient_after'],12000)
+        self.assertIn(delivered['statuses']['after_delivery']['state'],['ready','completed'])
+        armies=lambda r:{h['ref']:h['army_value'] for h in r['heroes']}
+        old,new=armies(previous),armies(delivered)
+        self.assertGreater(new['object:0'],old['object:0']);self.assertLess(new['object:1'],old['object:1'])
+        self.assertEqual(sum(old.values()),sum(new.values()))
+        self.assertGreaterEqual(new['object:1'],1000)
+        estimates=[e for r in before[:index] for e in (r['forecasts'] or {}).get('deliveries',[])
+                   if e['goal_id']=='deliver']
+        self.assertTrue(estimates,'delivery had no native forecast')
+        for estimate in estimates:self.assertGreaterEqual(estimate['source_floor'],1000)
+        config.update(profile_template=str(first/'profile'),save_resource='Saves/NK3DeliveryRestore.vsgm1')
+        restored,after=drive('load',False)
+        self.assertEqual(after[0]['statuses']['deliver']['state'],'completed')
+        self.assertIn(receipt,after[0]['confirmed_deliveries'])
+        self.assertTrue(all(r['statuses']['deliver']['state']=='completed' for r in after))
+        text=(restored/'engine-logs/VCMI_Client_log.txt').read_text(errors='replace')
+        self.assertNotIn('Exchange between heroes',text)
+        self.assertNotIn('Hero exchange for',text)
+        self.assertLessEqual(text.count('will build building.core.castle.mageGuild1.name'),1)
+        (output/'results.json').write_text(json.dumps(dict(before=before,after=after,receipt=receipt),indent=2))
+
     def test_explicit_build_dependency_spends_own_reserve_and_does_not_replay_after_load(self):
         config = json.loads(Path(os.environ['VCMI_NK3_CAMPAIGN_CONFIG']).read_text())
         output = Path(tempfile.mkdtemp(prefix='nk3-campaign-', dir=ROOT / '.build/playtests'))
@@ -200,7 +298,10 @@ class NativeCampaignTest(unittest.TestCase):
                 if name=='detour': self.assertGreaterEqual(delivered['day'],2,'fixture did not exercise multi-day replanning')
                 text=(run/'engine-logs/VCMI_Client_log.txt').read_text(errors='replace')
                 self.assertIn('Exchange between heroes',text)
-                self.assertIn('Hero exchange for hero.core.catherine.name',text)
+                receipt=next(r for r in delivered['confirmed_deliveries'] if r['goal']==seed['goals'][0])
+                self.assertEqual(receipt['source_ref'],'object:1')
+                self.assertEqual(receipt['day'],delivered['day'])
+                self.assertEqual(receipt['recipient_after'],recipient['army_value'])
                 launch=json.loads((run/'launch.json').read_text())
                 self.assertTrue(launch['cleanup_complete']); self.assertTrue(launch['protected_files_unchanged'])
                 self.assertTrue(json.loads((run/'report.json').read_text())['assignment_matches'])

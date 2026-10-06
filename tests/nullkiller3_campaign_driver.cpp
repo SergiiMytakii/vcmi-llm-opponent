@@ -22,6 +22,54 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--delivery")
+        {
+            auto world=json(R"({"day":1,"player":0,"resources":[10,0,10,0,0,0,10000],"capabilities":["land","build","transfer"],"heroes":[{"ref":"main","army_value":5000},{"ref":"courier","army_value":2000}],"towns":[{"ref":"home","buildings":[],"building_options":[{"id":0,"supported":true}]}],"objects":[]})");
+            auto plan=json(R"({"version":3,"revision":1,"approach":"offense","horizon_days":5,"goals":[{"id":"deliver","kind":"reinforce_hero","actor_ref":"main","target_ref":"courier","deadline_day":6,"priority":80,"building_id":-1,"min_army_value":5500,"depends_on":[],"required_capabilities":["land","transfer"],"complete_when":{"kind":"army_at_least","value":5500}},{"id":"develop","kind":"develop_town","actor_ref":null,"target_ref":"home","deadline_day":6,"priority":50,"building_id":0,"min_army_value":0,"depends_on":["deliver"],"required_capabilities":["build"],"complete_when":{"kind":"building_present","value":0}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":false,"critical_towns":[]}})");
+            std::string reason;
+            nullkiller3::CampaignState campaign;
+            require(campaign.accept(plan,world,reason),reason.c_str());
+            require(campaign.review(world,false)["develop"]["reason"].String()=="dependency_unconfirmed","delivery dependency opened before receipt");
+            require(campaign.exchangeForce("main",world)==5000 && campaign.exchangeForce("courier",world)==500,"exchange floors changed");
+            auto grown=world;grown["heroes"][0]["army_value"].Integer()=5500;
+            JsonNode receipt;receipt["goal"]=plan["goals"][0];receipt["source_ref"].String()="courier";
+            receipt["day"].Integer()=1;receipt["recipient_after"].Integer()=5500;
+            auto rejects=[&](const JsonNode & invalid) {
+                nullkiller3::CampaignState trial;require(trial.accept(plan,world,reason),reason.c_str());
+                auto observed=grown;observed["confirmed_deliveries"].Vector().push_back(invalid);
+                trial.review(observed,false);
+                require(trial.statuses()["deliver"]["state"].String()!="completed","invalid receipt completed delivery");
+                require(trial.statuses()["develop"]["reason"].String()=="dependency_unconfirmed","invalid receipt unlocked dependency");
+            };
+            rejects(JsonNode()); // Army growth/recruitment is not a handoff.
+            for(const auto * field:{"source_ref","day","recipient_after"})
+            {auto bad=receipt;bad.Struct().erase(field);rejects(bad);bad=receipt;bad[field].String()="invalid";rejects(bad);}
+            for(const auto value:{0,7}) {auto bad=receipt;bad["day"].Integer()=value;rejects(bad);}
+            for(const auto value:{5499LL,1000000001LL}) {auto bad=receipt;bad["recipient_after"].Integer()=value;rejects(bad);}
+            auto bad=receipt;bad["source_ref"].String()="other";rejects(bad);
+            for(const auto * field:{"actor_ref","target_ref","required_capabilities","complete_when","priority"})
+            {bad=receipt;bad["goal"][field]=JsonNode();rejects(bad);}
+            bad=receipt;bad["goal"]["id"].String()="other";rejects(bad);
+            auto observed=grown;observed["confirmed_deliveries"].Vector().push_back(receipt);
+            campaign.review(observed,false);
+            require(campaign.statuses()["deliver"]["state"].String()=="completed" && campaign.statuses()["develop"]["state"].String()=="ready","exact receipt did not complete delivery and open dependency");
+            auto saved=json(campaign.save().toCompactString());
+            nullkiller3::CampaignState restored(saved);
+            require(restored.restoreReason().empty(),restored.restoreReason().c_str());
+            require(restored.review(grown,false)["deliver"]["state"].String()=="completed","load repeated handoff");
+            require(restored.statuses()["develop"]["state"].String()=="ready","load lost open dependency");
+            require(restored.save()["delivery_completions"]["deliver"]==receipt,"load lost exact delivery receipt");
+            auto revision=plan;revision["revision"].Integer()=2;
+            require(restored.accept(revision,grown,reason),reason.c_str());
+            require(restored.statuses()["deliver"]["state"].String()=="completed","same goal revision replayed delivery");
+            for(const auto * field:{"source_ref","day","recipient_after","goal"})
+            {auto forged=saved;forged["delivery_completions"]["deliver"].Struct().erase(field);require(!nullkiller3::CampaignState(forged).restoreReason().empty(),"invalid saved receipt restored");}
+            plan["policy"]["allow_helper_replacement"].Bool()=true;
+            nullkiller3::CampaignState replacement;require(replacement.accept(plan,world,reason),reason.c_str());
+            observed["confirmed_deliveries"][0]["source_ref"].String()="replacement";
+            require(replacement.review(observed,false)["deliver"]["state"].String()=="completed","policy-supported helper replacement rejected");
+            std::cout<<"Exact delivery negatives, dependency, floors and restore passed\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--returned-hero-newgame")
         {
             const auto untouched=nullkiller3::restoreOwnHeroReturns(nullkiller3::restoreNativeNamespace(JsonNode()),JsonNode());

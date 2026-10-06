@@ -49,3 +49,12 @@ target_include_directories(strategic-candidates-driver PRIVATE
     ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
     "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
 target_link_libraries(strategic-candidates-driver PRIVATE "${VCMI_LIBRARY}")
+
+# These consumers exercise the same separately compiled value-contract bodies
+# that the native Nullkiller2 target includes through the project overlay.
+foreach(target nullkiller3-campaign-driver nullkiller3-idle-driver strategic-candidates-driver)
+    target_sources(${target} PRIVATE
+        ../../engine/Nullkiller3/Forecasts.cpp
+        ../../engine/Nullkiller3/CampaignState.cpp
+        ../../engine/Nullkiller3/StrategicDecision.cpp)
+endforeach()
