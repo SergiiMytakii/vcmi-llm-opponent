@@ -106,6 +106,8 @@ if not marker.exists():
  assessments[0]['evidence_ids']=['old-lesson-only-evidence']
 else:
  pathlib.Path({str(finish)!r}).touch()
+ assert r['validation_feedback']['episode_ids']==[e['id'] for e in r['episodes']]
+ assert r['validation_feedback']['reason']
 answer={{'evaluations':evaluations,'assessments':assessments}}""")
         env={**self.env,**codex_fixture(self.folder,analyst)}
         result=subprocess.run([sys.executable,str(ROOT/'controller/analyze.py'),

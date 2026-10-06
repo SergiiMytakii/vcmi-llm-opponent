@@ -98,7 +98,7 @@ def analyst_lock(database):
         yield
 
 
-def analyze_once(database,*,timeout=60,model=MODEL,effort=REASONING_EFFORT,record_dir=None):
+def analyze_once(database,*,timeout=60,model=MODEL,effort=REASONING_EFFORT,record_dir=None,feedback=None):
     store=Experience(database,'learn')
     try:
         publish(database)  # Recover publication even if no pending episode remains.
@@ -113,6 +113,9 @@ def analyze_once(database,*,timeout=60,model=MODEL,effort=REASONING_EFFORT,recor
         if not context['episodes']:return {'status':'idle'}
         # No DB transaction is held while waiting for the model.
         payload={'analysis_version':1,'game':row['game'],**context}
+        episode_ids=[e['id'] for e in context['episodes']]
+        if feedback and feedback['episode_ids']==episode_ids:
+            payload['validation_feedback']=feedback
         answer,metadata=invoke_model(payload,analysis_schema(context),
             (ROOT/'analysis_instructions.txt').read_text(),timeout=timeout,model=model,effort=effort,
             decision_dir=record_dir,max_output_bytes=16384)
@@ -121,6 +124,8 @@ def analyze_once(database,*,timeout=60,model=MODEL,effort=REASONING_EFFORT,recor
             result=store.assess(row['game'],context,learning,evaluations=answer['evaluations'],lesson_details=details)
         except (ValueError,TypeError,KeyError,sqlite3.Error) as error:
             error.usage=metadata.get('usage')
+            if isinstance(error,ValueError):
+                error.analysis_feedback={'episode_ids':episode_ids,'reason':str(error)[:240]}
             raise
         with store.db:store.db.execute('INSERT INTO analysis_usage(usage,result) VALUES(?,?)',
             (encoded(metadata.get('usage')),encoded(result)))
@@ -162,6 +167,7 @@ def main():
         mine_turns=args.mine_turns,scouting_turns=args.scouting_turns) if args.journal else None
     calls=tokens=0
     previous=None
+    feedback=None
     try:
         with analyst_lock(args.database):
             if args.collect_only:
@@ -179,11 +185,13 @@ def main():
                     if calls>=args.max_calls or tokens>=args.max_tokens:
                         publish(args.database);result={'status':'budget_exhausted'}
                     else:
-                        result=analyze_once(args.database,timeout=args.timeout,model=args.model,effort=args.effort,record_dir=record)
+                        result=analyze_once(args.database,timeout=args.timeout,model=args.model,effort=args.effort,record_dir=record,feedback=feedback)
                         if result['status']=='assessed':
+                            feedback=None
                             calls+=1;usage=result.get('usage') or {};tokens+=usage.get('input_tokens',args.max_tokens)+usage.get('output_tokens',0)
                 except (OSError,ValueError,TypeError,KeyError,sqlite3.Error,TimeoutError,subprocess.SubprocessError) as error:
                     calls+=1;result={'status':'error','reason':str(error)}
+                    feedback=getattr(error,'analysis_feedback',None)
                     usage=getattr(error,'usage',None)
                     known=isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0
                         for k in ('input_tokens','output_tokens'))
