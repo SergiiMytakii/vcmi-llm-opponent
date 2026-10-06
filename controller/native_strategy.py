@@ -148,7 +148,7 @@ def reply_schema(request):
                                              'force_value':integer(0,1000000000)})),
                     'policy':_object({'max_loss_ratio':{'type':'number','minimum':0,'maximum':.5},
                                       'allow_route_repair':{'type':'boolean'}, 'allow_helper_replacement':{'type':'boolean'},
-                                      'critical_towns':array(owned_town)})})
+                                      'critical_towns':array(owned_town, high=12 if town_refs else 0)})})
     properties = {'protocol':{**integer(2,2),'enum':[2]},
                   'request_id':{'type':'string','enum':[request['request_id']]},
                   'identity':_object({key:{'type':'string' if isinstance(value,str) else 'integer', 'enum':[value],

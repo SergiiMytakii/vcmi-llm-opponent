@@ -305,6 +305,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     request["request_id"].String() = persisted["experience_id"].String()+":"+generation+":"
         +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
         +std::to_string(revision)+":"+std::to_string(sequence);
+    // Freshness compares full native facts; proposal screening is model-only.
+    const auto observationBeforeExchange = world;
     request["observation"] = strategicCandidateView(world,campaign.plan());
     // Retain must echo the exact accepted roles, including order. Expose the
     // same saved owner used by admission; rejected proposals never replace it.
@@ -365,7 +367,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     std::string reason = response.error;
     bool factsUnchanged = true;
     for(const auto * key : {"heroes","towns","resources","visible_objects","shipyards","frontiers","victory"})
-        factsUnchanged &= world[key] == request["observation"][key];
+        factsUnchanged &= world[key] == observationBeforeExchange[key];
     if(!stopping && factsUnchanged && ai.cc->isPlayerMakingTurn(ai.playerID)
         && request["identity"] == identity(persisted,generation,world,campaign.plan()["revision"].Integer())
         && response.error.empty())

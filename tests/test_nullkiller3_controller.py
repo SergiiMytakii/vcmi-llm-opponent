@@ -24,6 +24,16 @@ def strategic_request():
 
 
 class NativeStrategyControllerTest(unittest.TestCase):
+    def test_without_owned_towns_policy_requires_empty_critical_towns(self):
+        from controller.native_strategy import reply_schema
+        request=strategic_request()
+        request['observation']['towns']=[]
+        request['observation']['objects'][0]['owner']=1
+        schema=reply_schema(request)
+        policy=schema['properties']['plan']['anyOf'][1]['properties']['policy']['properties']
+        self.assertEqual(policy['critical_towns']['maxItems'],0,
+                         'No owned towns must not offer a dummy empty-string town reference')
+
     def test_post_capture_goals_use_owned_town_and_visible_enemy_with_distinct_predicates(self):
         from controller.native_strategy import validate_reply
         request=strategic_request()
