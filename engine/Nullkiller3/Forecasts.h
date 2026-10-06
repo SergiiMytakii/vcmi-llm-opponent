@@ -577,16 +577,29 @@ inline JsonNode forecastThreats(const JsonNode & world)
                     threat["neutral_screen"]=approach;
             threat["sighting_age_days"].Integer()=age;
             threat["last_observed_distance"].Integer()=distance;
-            // Private movement, spells, unseen terrain and intention preclude
-            // a factual enemy ETA. These are explicit scenario calculations.
+            // Historical sightings and unestablished/guarded connections are
+            // information to scout, not deadlines for diverting the main army.
+            const auto visible=std::any_of(world["visible_objects"].Vector().begin(),world["visible_objects"].Vector().end(),
+                [&](const auto & object) { return object["ref"]==enemy["ref"]; });
+            const auto & approach=threat["neutral_screen"];
+            const auto open=approach["status"].String()=="no_visible_neutral_barrier_on_known_land_connection";
+            threat["assessment"].String()=!visible || age>0 ? "historical_sighting"
+                : open ? "observed_open_approach"
+                : approach["status"].String()=="neutral_encounter_required_on_known_land_connections"
+                    ? "guarded_approach" : "unconfirmed_approach";
             threat["eta_status"].String()="unknown";
-            threat["earliest_possible_day"]=world["day"];
+            threat["earliest_possible_day"]=JsonNode();
             threat["latest_possible_day"]=JsonNode();
-            const auto advance=std::max<int64_t>(0,distance-40*age)/40;
-            threat["advance_scenario_day"].Integer()=world["day"].Integer()+advance;
-            threat["delay_scenario_day"].Integer()=world["day"].Integer()+advance+1;
+            threat["advance_scenario_day"]=JsonNode();
+            threat["delay_scenario_day"]=JsonNode();
+            if(visible && age==0 && open)
+            {
+                const auto advance=approach["known_land_steps"].Integer()/40;
+                threat["advance_scenario_day"].Integer()=world["day"].Integer()+advance;
+                threat["delay_scenario_day"].Integer()=world["day"].Integer()+advance+1;
+            }
             threat["redirect_scenario_day"]=JsonNode();
-            threat["assumptions"].String()="Advance/delay scenarios assume 40 land tiles per day without obstacles or spells. This is not a movement bound; special movement, hidden bonuses, route and intent remain unknown. Stale sightings widen reachability.";
+            threat["assumptions"].String()="Only a currently visible enemy with an established unguarded land connection receives an advance/delay scenario, using known route length and 40 tiles/day. This is not an ETA, movement bound or attack intent. Historical, guarded and unconfirmed approaches require new evidence, not preventive main-army holding. Fog, water and spells remain unknown.";
             result.Vector().push_back(threat);
         }
     }
@@ -598,19 +611,22 @@ inline JsonNode forecastThreats(const JsonNode & world)
 // a factual enemy ETA. No recruitment or future delivery is counted here.
 inline JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign)
 {
-    struct Front { const JsonNode * town; int64_t day, required; bool critical, bounded; JsonNode threats; };
+    struct Front { const JsonNode * town; int64_t day, required; bool critical, bounded; JsonNode threats, unconfirmed; };
     std::vector<Front> fronts;
     std::set<std::string> allocated;
     const auto today=world["day"].Integer();
     for(const auto & town:world["towns"].Vector())
     {
-        Front front{&town,today+7,0,world["towns"].Vector().size()==1,true,{}};
+        Front front{&town,today+7,0,world["towns"].Vector().size()==1,true,{},{}};
         const auto & critical=campaign.plan()["policy"]["critical_towns"].Vector();
         front.critical |= std::find(critical.begin(),critical.end(),town["ref"])!=critical.end();
         front.threats.Vector();
+        front.unconfirmed.Vector();
         for(const auto & threat:world["forecasts"]["threats"].Vector())
             if(threat["town_ref"]==town["ref"])
             {
+                if(!threat["advance_scenario_day"].isNumber())
+                { front.unconfirmed.Vector().push_back(threat);continue; }
                 front.day=std::min(front.day,threat["advance_scenario_day"].Integer());
                 front.bounded &= threat["army_interval"]["upper"].isNumber();
                 front.required+=threat["army_interval"]["upper"].Integer();
@@ -634,11 +650,13 @@ inline JsonNode forecastDefenses(const JsonNode & world, const CampaignState & c
         JsonNode estimate;
         estimate["town_ref"]=town["ref"];
         estimate["critical"].Bool()=front.critical;
-        estimate["scenario_deadline_day"].Integer()=front.day;
+        if(front.threats.Vector().empty()) estimate["scenario_deadline_day"]=JsonNode();
+        else estimate["scenario_deadline_day"].Integer()=front.day;
         estimate["garrison_value"]=town["defense_value"];
         estimate["allocated_hero_refs"].Vector();
         estimate["own_arrivals"].Vector();
         estimate["threats"]=front.threats;
+        estimate["unconfirmed_threats"]=front.unconfirmed;
         int64_t capacity=town["defense_value"].Integer();
         if(front.bounded) estimate["opposing_upper_sum"].Integer()=front.required;
         struct Candidate { const JsonNode * hero, * arrival; int64_t value; };

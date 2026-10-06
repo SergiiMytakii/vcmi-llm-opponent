@@ -43,6 +43,14 @@ Classic defaults never fill missing observations or authorize new commands.
    a defense alternative and explain the protection or concrete gain worth its
    loss risk in reason. Changed protection requires executable goals/dependencies/
    floors; prose or critical_towns alone issues no defense goal.
+   Prefer initiative: feasible expansion, profitable attacks and purposeful
+   exploration over speculative home defense, especially during the opening.
+   Historical sightings, guarded approaches and missing established paths are
+   not an urgent defense front. Do not recall or hold the main army for them
+   alone; use helpers to discover connections while continuing useful operations.
+   No observed front is not guaranteed safety, but uncertainty alone is not a
+   reason to surrender initiative. Compare a fresh open enemy approach, town
+   value, return cost and a concrete offensive alternative before choosing defense.
 5. Return retain with plan=null only while the accepted plan remains viable. Copy
    observation.strategy_assignments unchanged, including order, into assignments;
    this is the exact accepted role list. Rejected proposals do not change it.
@@ -65,6 +73,11 @@ empty posts are passable, roaming neutrals guard adjacent tiles. Connections
 requiring an encounter are not open; a guard only beside the final hero/town does
 not prevent direct attack. Encounters may cause battle, flight or joining. Fog,
 water and special movement remain unknown. Never infer enemy intent or hidden paths.
+forecasts.threats.assessment separates observed_open_approach from historical_sighting,
+guarded_approach and unconfirmed_approach. Only the first receives an advance
+scenario. defenses.unconfirmed_threats are reconnaissance context, not deadlines
+or proven attackers. A missing/blocked known path supplies no current reason to
+divert the main; reassess when an open connection or actual hostile advance appears.
 Water travel requires an observed boat or an owned shipyard's visible launch quote,
 funds and own arrival forecast; future boats/shipyards/spells establish no route.
 Frontier arrivals establish current native routes, not safe passage through fog.

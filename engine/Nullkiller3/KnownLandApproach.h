@@ -66,7 +66,8 @@ inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_
     result["status"].String()=unguarded[target]>=0 ? "no_visible_neutral_barrier_on_known_land_connection"
         : "neutral_encounter_required_on_known_land_connections";
     int64_t steps=0;std::set<std::string> guards;
-    for(size_t at=target;at!=source;at=all[at])
+    const auto & parents=unguarded[target]>=0 ? unguarded : all;
+    for(size_t at=target;at!=source;at=parents[at])
     { ++steps;guards.insert(tiles[at].neutralGuards.begin(),tiles[at].neutralGuards.end()); }
     result["known_land_steps"].Integer()=steps;
     // One example connection, not a claim that every listed guard is unavoidable.
