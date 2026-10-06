@@ -29,7 +29,7 @@ int main() {
                  '-I'+str(SOURCE),'-I'+str(SOURCE/'lib'),'-I'+str(SOURCE/'include'),'-I'+str(ROOT/'engine/Nullkiller3')]
             boost=next((ROOT/'.build/conan/p').glob('boost*/p/include'),None)
             if boost: cmd.append('-I'+str(boost))
-            compiled=subprocess.run(cmd+[str(cpp),str(LIBRARY),'-Wl,-rpath,'+str(LIBRARY.parent),'-o',str(binary)],capture_output=True,text=True)
+            compiled=subprocess.run(cmd+[str(cpp),str(ROOT/'engine/Nullkiller3/Forecasts.cpp'),str(ROOT/'engine/Nullkiller3/CampaignState.cpp'),str(LIBRARY),'-Wl,-rpath,'+str(LIBRARY.parent),'-o',str(binary)],capture_output=True,text=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr)
             result=subprocess.run([str(binary)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)

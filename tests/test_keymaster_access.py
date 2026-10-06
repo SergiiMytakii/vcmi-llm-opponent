@@ -27,7 +27,7 @@ std::string reason;
         with tempfile.TemporaryDirectory() as f:
             cpp=Path(f)/'proof.cpp';bin=Path(f)/'proof';cpp.write_text(code)
             includes=[SOURCE,SOURCE/'lib',SOURCE/'include',ROOT/'engine/Nullkiller3',next((ROOT/'.build/conan/p').glob('boost*/p/include'))]
-            cmd=[os.environ.get('CXX','c++'),'-std=c++20','-DVCMI_DLL=1','-DBOOST_ALL_DYN_LINK',*[f'-I{x}' for x in includes],str(cpp),str(LIBRARY),'-Wl,-rpath,'+str(LIBRARY.parent),'-o',str(bin)]
+            cmd=[os.environ.get('CXX','c++'),'-std=c++20','-DVCMI_DLL=1','-DBOOST_ALL_DYN_LINK',*[f'-I{x}' for x in includes],str(cpp),str(ROOT/'engine/Nullkiller3/CampaignState.cpp'),str(LIBRARY),'-Wl,-rpath,'+str(LIBRARY.parent),'-o',str(bin)]
             r=subprocess.run(cmd,capture_output=True,text=True);self.assertEqual(r.returncode,0,r.stderr)
             r=subprocess.run([str(bin)],capture_output=True,text=True);self.assertEqual(r.returncode,0,r.stderr)
     def test_tent_visit_is_executable_but_seeing_or_owning_key_is_not_visit_receipt(self):
