@@ -114,6 +114,7 @@ void NativeCampaign::observeOperationProgress()
         if(kind=="develop_town" || kind=="preserve_force" || kind=="defend_area"
             || world["goal_statuses"][goal["id"].String()]["state"].String()!="ready") continue;
         auto objective=operationIdentity(goal);
+        objective["risk"]=goal["risk"];
         for(const auto * field:{"max_loss_ratio","allow_route_repair","allow_helper_replacement"}) objective["policy"][field]=campaign.plan()["policy"][field];
         auto facts=operationOwnFacts(goal,world,campaign.deliverySource(goal,helperSources()));
         if(kind=="reinforce_hero")

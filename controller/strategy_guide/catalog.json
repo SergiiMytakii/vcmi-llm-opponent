@@ -56,6 +56,13 @@
       "applicability": "Choosing viewpoints, sites and passages; end-turn scouting exposure and reassessment after scout loss.",
       "file": "rules/exploration.md",
       "enabled": true
+    },
+    {
+      "id": "endgame",
+      "title": "Finish the game",
+      "applicability": "Choosing a concrete elimination operation, decisive attack or town denial instead of recurring local gains.",
+      "file": "rules/endgame.md",
+      "enabled": true
     }
   ]
 }

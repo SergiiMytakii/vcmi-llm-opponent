@@ -7,6 +7,8 @@
 #include "../../lib/mapping/CMapHeader.h"
 #include "../../lib/constants/StringConstants.h"
 #include "../../lib/texts/CompositeTranslator.h"
+#include "../../lib/StartInfo.h"
+#include "../../lib/CPlayerState.h"
 #include <set>
 
 namespace externalai
@@ -77,6 +79,47 @@ inline void observeStrategicRules(const CCallback & callback, PlayerColor player
             translator.install(header->texts);
             observation["victory"]["public_description"].String() = header->victoryMessage.toString(&translator);
         }
+        // Lobby roster and elimination status are public; enemy PlayerState is not.
+        observation["victory"]["participants"].Vector();
+        if(const auto * start=callback.getStartInfo())
+            for(const auto & entry : start->playerInfos)
+            {
+                const auto color=entry.first;
+                if(!color.isValidPlayer()) continue;
+                JsonNode item;
+                item["player"].Integer()=color.getNum();
+                item["hostile"].Bool()=callback.getPlayerRelations(playerID,color)==PlayerRelations::ENEMIES;
+                const auto status=callback.getPlayerStatus(color,false);
+                item["status"].String()=status==EPlayerStatus::INGAME ? "in_game"
+                    : status==EPlayerStatus::WINNER ? "winner" : status==EPlayerStatus::LOSER ? "eliminated" : "unknown";
+                observation["victory"]["participants"].Vector().push_back(item);
+            }
+        observation["victory"]["townless_defeat"]["status"].String()="unsupported_or_unknown";
+        if(header)
+            for(const auto & event : header->triggeredEvents)
+                if(event.effect.type==EventEffect::DEFEAT)
+                {
+                    // Only a standalone public rule is usable; a compound event
+                    // may have additional conditions whose hidden targets stay private.
+                    const auto rule=event.trigger.toJson([](const EventCondition & condition) {
+                        JsonNode result;
+                        if(condition.condition==EventCondition::DAYS_WITHOUT_TOWN)
+                            result["days_without_town"].Integer()=condition.value;
+                        return result;
+                    });
+                    if(rule.isStruct() && rule.Struct().size()==1 && rule["days_without_town"].isNumber())
+                    {
+                        auto & defeat=observation["victory"]["townless_defeat"];
+                        defeat["status"].String()="public_rule";
+                        defeat["own_elapsed_turns"]=JsonNode();
+                        defeat["turns"].Integer()=rule["days_without_town"].Integer();
+                        defeat["basis"].String()="Count advances at the townless player's turn end; gaining a town resets it. Enemy countdown and unseen towns are unknown.";
+                        if(const auto * own=callback.getPlayerState(playerID,false))
+                            if(own->daysWithoutCastle) defeat["own_elapsed_turns"].Integer()=*own->daysWithoutCastle;
+                        defeat["enemy_elapsed_turns"]=JsonNode();
+                    }
+                }
+        observation["victory"]["completion_basis"].String()="Main-hero defeat alone is not elimination. Remaining towns/heroes and retreat or rehire can preserve the opponent; unseen holdings and enemy intent remain unknown.";
         observation["enemy_players"].Vector();
         for(int color = 0; color < PlayerColor::PLAYER_LIMIT.getNum(); ++color)
             if(callback.getPlayerRelations(playerID, PlayerColor(color)) == PlayerRelations::ENEMIES)

@@ -28,6 +28,13 @@ class CampaignState
         for(const auto * name : names) if(!value.Struct().count(name)) return false;
         return true;
     }
+    static bool goalFields(const JsonNode & value, std::initializer_list<const char *> names)
+    {
+        if(!value.isStruct()) return false;
+        auto legacy=value;
+        legacy.Struct().erase("risk");
+        return fields(legacy,names);
+    }
     static bool label(const JsonNode & value)
     {
         return value.isString() && !value.String().empty() && value.String().size() <= 120;
@@ -73,7 +80,7 @@ class CampaignState
     }
     bool deliveryProved(const JsonNode & goal, const JsonNode & receipt) const
     {
-        return receipt.isStruct() && receipt["goal"] == goal && label(receipt["source_ref"])
+        return receipt.isStruct() && sameGoal(receipt["goal"],goal) && label(receipt["source_ref"])
             && integer(receipt["day"],1,goal["deadline_day"].Integer())
             && integer(receipt["recipient_after"],goal["complete_when"]["value"].Integer(),1000000000)
             && (receipt["source_ref"] == goal["target_ref"] || plan()["policy"]["allow_helper_replacement"].Bool());
@@ -84,21 +91,21 @@ class CampaignState
             return value.isVector() && value.Vector().size()==3
                 && integer(value[0],0,100000) && integer(value[1],0,100000) && integer(value[2],0,255);
         };
-        return receipt.isStruct() && receipt["goal"]==goal && integer(receipt["day"],1,goal["deadline_day"].Integer())
+        return receipt.isStruct() && sameGoal(receipt["goal"],goal) && integer(receipt["day"],1,goal["deadline_day"].Integer())
             && position(receipt["from"]) && position(receipt["to"]) && receipt["from"][2]!=receipt["to"][2];
     }
     static bool siteProved(const JsonNode & goal,const JsonNode & receipt)
     {
-        return fields(receipt,{"goal","day"}) && receipt["goal"]==goal && integer(receipt["day"],1,goal["deadline_day"].Integer());
+        return fields(receipt,{"goal","day"}) && sameGoal(receipt["goal"],goal) && integer(receipt["day"],1,goal["deadline_day"].Integer());
     }
     static bool interceptionProved(const JsonNode & goal,const JsonNode & receipt)
     {
-        return receipt.isStruct() && receipt["goal"]==goal && receipt["won"].isBool() && receipt["won"].Bool()
+        return receipt.isStruct() && sameGoal(receipt["goal"],goal) && receipt["won"].isBool() && receipt["won"].Bool()
             && integer(receipt["day"],1,goal["deadline_day"].Integer());
     }
     static bool helperHireProved(const JsonNode & goal,const JsonNode & receipt)
     {
-        return fields(receipt,{"goal","day","hero_ref","hero_type_id"}) && receipt["goal"]==goal
+        return fields(receipt,{"goal","day","hero_ref","hero_type_id"}) && sameGoal(receipt["goal"],goal)
             && integer(receipt["day"],1,goal["deadline_day"].Integer()) && label(receipt["hero_ref"])
             && integer(receipt["hero_type_id"],0,1000000)
             && goal["candidate_ref"].String()=="tavern:"+std::to_string(receipt["hero_type_id"].Integer());
@@ -180,6 +187,34 @@ class CampaignState
     }
 
 public:
+    static bool sameGoal(const JsonNode & left,const JsonNode & right)
+    {
+        auto a=left,b=right;
+        if(a.isStruct() && a["risk"].isNull()) a.Struct().erase("risk");
+        if(b.isStruct() && b["risk"].isNull()) b.Struct().erase("risk");
+        return a==b;
+    }
+    // A model risk grant belongs to exactly one named combat operation.
+    // Unnamed native work and legacy plans retain the ordinary policy ceiling.
+    double lossLimit(const JsonNode & goal) const
+    {
+        return goal["risk"].isStruct() ? goal["risk"]["max_loss_ratio"].Float()
+            : (plan().isNull() ? .2 : plan()["policy"]["max_loss_ratio"].Float());
+    }
+    double lossLimit(const std::string & goalID) const
+    {
+        if(!goalID.empty()) for(const auto & goal:plan()["goals"].Vector())
+            if(goal["id"].String()==goalID && holdsCommitment(goalID)) return lossLimit(goal);
+        return lossLimit(JsonNode());
+    }
+    bool allowsLoss(const JsonNode & goal,int64_t army,int64_t loss) const
+    {
+        return army>0 && loss>=0 && loss<army && loss<=army*lossLimit(goal);
+    }
+    bool allowsLoss(const std::string & goalID,int64_t army,int64_t loss) const
+    {
+        return army>0 && loss>=0 && loss<army && loss<=army*lossLimit(goalID);
+    }
     // Hiring names a current useful job, never a route for an unowned hero.
     static bool helperJobSupported(const JsonNode & goal,const JsonNode & world)
     {
@@ -356,13 +391,18 @@ public:
         for(const auto & goal : goals.Vector())
         {
             if(!(goal["kind"].String()=="hire_helper"
-                ? fields(goal,{"id","kind","actor_ref","target_ref","deadline_day","priority","building_id","min_army_value","depends_on","required_capabilities","complete_when","candidate_ref","helper_role","job_ref"})
+                ? goalFields(goal,{"id","kind","actor_ref","target_ref","deadline_day","priority","building_id","min_army_value","depends_on","required_capabilities","complete_when","candidate_ref","helper_role","job_ref"})
                 : goal["kind"].String()=="prepare_garrison"
-                ? fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when", "garrison_mode"})
-                : fields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when"}))
+                ? goalFields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when", "garrison_mode"})
+                : goalFields(goal, {"id", "kind", "actor_ref", "target_ref", "deadline_day", "priority", "building_id", "min_army_value", "depends_on", "required_capabilities", "complete_when"}))
                 || !label(goal["kind"]) || !label(goal["id"]) || !byID.emplace(goal["id"].String(), &goal).second
                 || !integer(goal["priority"], 1, 100) || !integer(goal["deadline_day"], day, day + proposal["horizon_days"].Integer())
                 || !integer(goal["min_army_value"], 0, 1000000000) || !integer(goal["building_id"], -1, 100000)) return reject("invalid_goal");
+            const auto & risk=goal["risk"];
+            if(!risk.isNull() && ((goal["kind"].String()!="capture_target" && goal["kind"].String()!="intercept_hero")
+                || !fields(risk,{"max_loss_ratio","reason"}) || !risk["max_loss_ratio"].isNumber()
+                || !std::isfinite(risk["max_loss_ratio"].Float()) || risk["max_loss_ratio"].Float()<0 || risk["max_loss_ratio"].Float()>1
+                || !risk["reason"].isString() || risk["reason"].String().empty() || risk["reason"].String().size()>640)) return reject("invalid_goal_risk");
             if(!goal["actor_ref"].isNull() && (!label(goal["actor_ref"]) || find(world, "heroes", goal["actor_ref"]).isNull())) return reject("executor_not_owned");
             if(!label(goal["target_ref"])) return reject("invalid_target");
             const auto & hero = find(world, "heroes", goal["actor_ref"]);
@@ -414,7 +454,7 @@ public:
                 bool confirmed=false;
                 for(const auto & receipt:world["confirmed_site_visits"].Vector()) confirmed |= siteProved(goal,receipt);
                 for(const auto & previous:plan()["goals"].Vector())
-                    confirmed |= previous==goal && state["statuses"][goal["id"].String()]["state"].String()=="completed"
+                    confirmed |= sameGoal(previous,goal) && state["statuses"][goal["id"].String()]["state"].String()=="completed"
                         && siteProved(goal,state["site_completions"][goal["id"].String()]);
                 if(!confirmed && (hero.isNull() || object.isNull() || !object["visible"].Bool()
                     || !object["visited"].isBool() || object["visited"].Bool()
@@ -572,7 +612,7 @@ public:
         // goal semantics. Changing a goal ID alone never confirms execution.
         for(const auto & goal : goals.Vector())
             for(const auto & old : plan()["goals"].Vector())
-                if(goal == old) accepted["statuses"][goal["id"].String()] = state["statuses"][goal["id"].String()];
+                if(sameGoal(goal,old)) accepted["statuses"][goal["id"].String()] = state["statuses"][goal["id"].String()];
         for(const auto & goal : goals.Vector())
             if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="reinforce_hero")
                 accepted["delivery_completions"][goal["id"].String()]=state["delivery_completions"][goal["id"].String()];
@@ -582,6 +622,17 @@ public:
         for(const auto & goal:goals.Vector())
             if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="visit_site")
                 accepted["site_completions"][goal["id"].String()]=state["site_completions"][goal["id"].String()];
+        // A consumed site can disappear from the fresh world. Preserve only
+        // already-proved carried receipts so strict save validation sees the
+        // same own facts that justified this revision.
+        for(const auto & goal:goals.Vector()) if(goal["kind"].String()=="visit_site")
+        {
+            const auto & receipt=static_cast<const JsonNode &>(accepted)["site_completions"][goal["id"].String()];
+            if(!siteProved(goal,receipt)) continue;
+            auto & confirmations=accepted["validation_world"]["confirmed_site_visits"].Vector();
+            if(std::none_of(confirmations.begin(),confirmations.end(),[&](const auto & existing) {return siteProved(goal,existing);}))
+                confirmations.push_back(receipt);
+        }
         for(const auto & goal:goals.Vector())
             if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="intercept_hero")
                 accepted["interception_completions"][goal["id"].String()]=state["interception_completions"][goal["id"].String()];
@@ -622,11 +673,12 @@ public:
                 const auto army=route["army_value"].Integer(),loss=route["army_loss_estimate"].Integer();
                 const auto floor=reservedForce(route["hero_ref"].String(),world);
                 option["retained_force_floor"].Integer()=floor;
-                option["allowed_loss_ratio"]=plan()["policy"]["max_loss_ratio"];
+                const auto riskGoal=route["hero_ref"]==goal["actor_ref"] ? goal : JsonNode();
+                option["allowed_loss_ratio"].Float()=lossLimit(riskGoal);
                 if(army>0) option["estimated_loss_percent"].Float()=100.0*loss/army;
-                option["allowed_loss_percent"].Float()=100.0*plan()["policy"]["max_loss_ratio"].Float();
+                option["allowed_loss_percent"].Float()=100.0*lossLimit(riskGoal);
                 if(army<goal["min_army_value"].Integer()) issue("starting_army_below_minimum");
-                if(loss>army*plan()["policy"]["max_loss_ratio"].Float()) issue("loss_exceeds_policy");
+                if(!allowsLoss(riskGoal,army,loss)) issue("loss_exceeds_policy");
                 if(loss>army || army-loss<floor) issue("retained_force_below_reserve");
                 const bool safe=option["issues"].Vector().empty();
                 option["meets_deadline"].Bool()=route["day"].Integer()<=goal["deadline_day"].Integer();

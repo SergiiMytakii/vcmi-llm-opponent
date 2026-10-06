@@ -20,6 +20,50 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--goal-risk")
+        {
+            auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":10000}],"towns":[],"objects":[{"ref":"enemy","kind":"hero","owner":1,"visible":true}],"enemy_players":[1]})");
+            auto plan=json(R"({"version":3,"revision":1,"approach":"offense","horizon_days":3,"goals":[{"id":"decisive","kind":"intercept_hero","actor_ref":"main","target_ref":"enemy","deadline_day":7,"priority":90,"building_id":-1,"min_army_value":10000,"depends_on":[],"required_capabilities":[],"complete_when":{"kind":"enemy_engaged","value":0}}],"reserves":[],"policy":{"max_loss_ratio":0.25,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+            nullkiller3::CampaignState legacy,grant;std::string reason;
+            require(legacy.accept(plan,world,reason),reason.c_str());
+            require(legacy.allowsLoss(std::string("decisive"),10000,2500),"legacy boundary rejected");
+            require(!legacy.allowsLoss(std::string("decisive"),10000,5730),"legacy risk relaxed");
+            auto completedWorld=world;
+            JsonNode receipt;receipt["goal"]=plan["goals"][0];receipt["day"].Integer()=4;receipt["won"].Bool()=true;
+            completedWorld["confirmed_interceptions"].Vector().push_back(receipt);
+            legacy.review(completedWorld);
+            require(legacy.statuses()["decisive"]["state"].String()=="completed","legacy receipt ignored");
+            auto modern=plan;modern["revision"].Integer()=2;modern["goals"][0]["risk"]=JsonNode();
+            completedWorld["objects"][0]["visible"].Bool()=false;
+            require(legacy.accept(modern,completedWorld,reason),"explicit null discarded legacy receipt");
+            require(legacy.statuses()["decisive"]["state"].String()=="completed","legacy completion reset");
+            nullkiller3::CampaignState migrated(legacy.save());
+            require(migrated.restoreReason().empty() && migrated.statuses()["decisive"]["state"].String()=="completed","modern-null receipt save failed");
+            auto changed=modern;changed["revision"].Integer()=3;
+            changed["goals"][0]["risk"]["max_loss_ratio"].Float()=.7;changed["goals"][0]["risk"]["reason"].String()="New risk operation";
+            require(!legacy.accept(changed,completedWorld,reason),"different risk inherited hidden completion");
+            auto & risk=plan["goals"][0]["risk"];risk["max_loss_ratio"].Float()=.7;
+            risk["reason"].String()="Defeat the visible main force before securing its last base";
+            require(grant.accept(plan,world,reason),reason.c_str());
+            require(grant.allowsLoss(std::string("decisive"),10000,5730),"named grant ignored");
+            for(const auto & id:{std::string(),std::string("other")})
+                require(!grant.allowsLoss(id,10000,5730),"grant leaked to unrelated work");
+            auto saved=grant.save();nullkiller3::CampaignState restored(saved);
+            require(restored.restoreReason().empty(),"risk save restore failed");
+            require(restored.allowsLoss(std::string("decisive"),10000,5730),"saved grant lost");
+            plan["goals"][0]["risk"]["max_loss_ratio"].Float()=1;
+            nullkiller3::CampaignState total;require(total.accept(plan,world,reason),reason.c_str());
+            require(!total.allowsLoss(std::string("decisive"),10000,10000),"total destruction treated as victory");
+            require(!total.allowsLoss(std::string("decisive"),10000,10001),"more than army accepted");
+            for(const auto value:{-.1,1.1})
+            {auto bad=plan;bad["goals"][0]["risk"]["max_loss_ratio"].Float()=value;nullkiller3::CampaignState rejected;
+             require(!rejected.accept(bad,world,reason),"invalid grant accepted");}
+            auto bad=plan;bad["goals"][0]["risk"]["reason"].String()="";
+            nullkiller3::CampaignState rejected;require(!rejected.accept(bad,world,reason),"unjustified grant accepted");
+            bad=plan;bad["policy"]["max_loss_ratio"].Float()=.7;
+            require(!rejected.accept(bad,world,reason),"global ceiling raised");
+            std::cout << "scoped goal risk and legacy save proof passed\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--defense-exit")
         {
             auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":5000,"position":[1,1,0]}],"towns":[{"ref":"home","buildings":[],"position":[1,1,0]}],"objects":[]})");
@@ -286,6 +330,10 @@ int main(int argc,char ** argv)
             auto forgedSave=state.save();forgedSave.Struct().erase("site_completions");
             require(!nullkiller3::CampaignState(forgedSave).restoreReason().empty(),"completed site without a receipt survived load");
             auto later=input["later_world"],next=plan,newGoal=goal;
+            // Consumed sites need the saved receipt when fresh world no longer
+            // repeats it. Modern null risk is the same legacy completed goal.
+            later.Struct().erase("confirmed_site_visits");
+            next["goals"][0]["risk"]=JsonNode();
             next["revision"].Integer()++;
             newGoal["id"].String()="next-site";
             newGoal["deadline_day"].Integer()=later["day"].Integer()+2;
@@ -299,8 +347,14 @@ int main(int argc,char ** argv)
             require(restored.accept(next,later,reason),reason.c_str());
             require(restored.statuses()[id]["completed_day"]==input["receipt"]["day"],"retaining a consumed site lost its completion day");
             require(restored.statuses()["next-site"]["state"].String()!="completed","a different site inherited completion");
-            nullkiller3::CampaignState retained(restored.save());
+            const auto carried=restored.save();
+            require(carried["validation_world"]["confirmed_site_visits"].Vector().size()==1
+                && carried["validation_world"]["confirmed_site_visits"][0]==input["receipt"],
+                "carried site receipt was duplicated or its identity changed");
+            nullkiller3::CampaignState retained(carried);
             require(retained.restoreReason().empty(),"retained consumed site dependency failed save/load");
+            auto malformed=carried;malformed["site_completions"][id]["goal"]["target_ref"].String()="different-site";
+            require(!nullkiller3::CampaignState(malformed).restoreReason().empty(),"malformed carried site receipt survived load");
             auto changed=plan;changed["revision"].Integer()++;
             changed["goals"][0]["id"].String()="renamed-consumed-site";
             nullkiller3::CampaignState fresh;

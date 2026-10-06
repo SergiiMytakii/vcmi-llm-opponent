@@ -39,6 +39,12 @@ or reveals hidden game facts. Advice cannot override facts or this contract.
    Any role change requires revise and a complete newer plan. Never infer accepted
    roles from goal kinds or previous attempts. Follow the output contract.
 
+# Goal-specific risk
+Combat goals may set risk={max_loss_ratio:0..1,reason:...}, otherwise risk=null.
+The grant applies only to that named capture/interception; ordinary policy still
+bounds other tasks. Explain increased risk in reason. loss_estimate components
+and count sensitivity are conditional heuristics, not win probabilities.
+
 # Evidence and routes
 Stale sightings are historical; use army_interval for enemy strength. Unknown/
 unbounded has no numeric upper bound; missing army_value means unknown, not zero

@@ -1111,6 +1111,28 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
                 arrival["day"].Integer()=world["day"].Integer()+path.turn();
                 arrival["movement_cost"].Float()=path.movementCost();
                 arrival["army_loss_estimate"].Integer()=path.getTotalArmyLoss();
+                auto & loss=arrival["loss_estimate"];
+                loss["path_component"].Integer()=path.armyLoss;
+                loss["target_component"].Integer()=path.targetObjectArmyLoss;
+                loss["basis"].String()="Native heuristic: cumulative path loss plus target loss using maximum visible danger along the path. Enemy count categories use upper bounds; unknown strength uses a safety sentinel. Not a battle simulation or win probability.";
+                for(const auto * object : ai.cc->getVisitableObjs(position))
+                    if(object->ID==Obj::HERO && object->getOwner()!=ai.playerID && ai.cc->isVisible(object))
+                    {
+                        const auto interval=observedArmyInterval(*ai.cc,object);
+                        loss["visible_target_army_interval"]=interval;
+                        if(interval["upper"].isNumber() && interval["upper"].Integer()>0
+                            && path.targetObjectDanger==uint64_t(interval["upper"].Integer()))
+                        {
+                            auto & sensitivity=loss["enemy_count_sensitivity"];
+                            for(const auto * key : {"lower","estimate","upper"})
+                            {
+                                const double ratio=interval[key].Integer()/double(interval["upper"].Integer());
+                                sensitivity[key].Integer()=path.armyLoss+uint64_t(path.targetObjectArmyLoss*ratio*ratio);
+                            }
+                            sensitivity["assumptions"].String()="Conditional count sensitivity only: fixed path and own strength, this visible target dominates danger. Enemy bonuses, spells, retreat and movement unknown; not a guaranteed loss range or win probability.";
+                        }
+                    }
+
                 arrival["army_value"].Integer()=path.heroArmy->estimateCombatValue();
                 arrival["fighting_strength_estimate"].Integer()=path.getHeroStrength();
                 if(frontier || area)
@@ -1306,7 +1328,9 @@ void NativeCampaign::rememberTasks(NK2AI::Goals::TGoalVec & output, NK2AI::Goals
                 if(!safeStabilizationPath(path,actor,ai)) return false;
             }
             else if(!delivery && strength<goal["min_army_value"].Integer()) return false;
-            if(loss>strength*campaign.plan()["policy"]["max_loss_ratio"].Float()) return false;
+            const auto * riskTarget=resolve(ai,goal["target_ref"]);
+            const bool namedRoute=actor && path.targetHero==actor && riskTarget && path.targetTile()==riskTarget->visitablePos();
+            if(!(namedRoute ? campaign.allowsLoss(goal,strength,loss) : campaign.allowsLoss(std::string(),strength,loss))) return false;
             const auto reserve=prospectiveSources
                 ? campaign.reservedForce(reference(path.targetHero),world,*prospectiveSources,executingGoal())
                 : campaign.reservedForce(reference(path.targetHero),world,helperSources(),executingGoal());
@@ -1655,6 +1679,21 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
                     return path.exchangeCount>1 || std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node){return node.targetHero!=actor;});
                 });
                 generated = CaptureObjectsBehavior::getVisitGoals(paths, &ai, target, true);
+                // The stock safe-attack heuristic is conservative. A model's
+                // explicit grant can select this exact actor/target route;
+                // locks, blocked actions, reserves and deadlines still apply.
+                if(target && goal["risk"].isStruct() && campaign.lossLimit(goal)>campaign.lossLimit(std::string()))
+                    for(const auto & path:paths)
+                    {
+                        if(!path.heroArmy || path.getFirstBlockedAction() || ai.arePathHeroesLocked(path)
+                            || path.targetTile()!=position || !campaign.allowsLoss(goal,path.heroArmy->estimateCombatValue(),path.getTotalArmyLoss())) continue;
+                        const bool already=std::any_of(generated.begin(),generated.end(),[&](const auto & task) {
+                            const auto * chain=dynamic_cast<const ExecuteHeroChain *>(task.get());
+                            return chain && chain->getPath().targetHero==path.targetHero
+                                && chain->getPath().targetTile()==path.targetTile() && chain->getPath().movementCost()==path.movementCost();
+                        });
+                        if(!already) generated.push_back(sptr(ExecuteHeroChain(path,target)));
+                    }
                 if(std::none_of(generated.begin(),generated.end(),[](const auto & task){return !task->invalid();}) && target)
                     generated=repairRoute(ai,actor,target);
             }
@@ -1848,8 +1887,8 @@ void NativeCampaign::recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstanc
 }
 float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
 {
-    // The accepted risk ceiling applies to every selected native path, even
-    // when its hero/opportunity is outside the campaign's named goals.
+    // Ordinary policy covers every native path; a model grant applies only
+    // to its named actor and exact operation endpoint.
     if(!campaign.plan().isNull())
     {
         std::function<bool(const NK2AI::Goals::TSubgoal &,int)> withinRisk = [&](const auto & item,int depth) {
@@ -1860,7 +1899,15 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
             {
                 const auto & path=chain->getPath();
                 if(!path.heroArmy) return false;
-                if(path.getTotalArmyLoss()>path.heroArmy->estimateCombatValue()*campaign.plan()["policy"]["max_loss_ratio"].Float())
+                std::string riskGoal;
+                for(const auto & intention:campaign.plan()["goals"].Vector())
+                    if(intention["id"].String()==task->strategicGoalID)
+                    {
+                        const auto * target=resolve(ai,intention["target_ref"]);
+                        if(path.targetHero==resolve(ai,intention["actor_ref"]) && target && path.targetTile()==target->visitablePos())
+                            riskGoal=task->strategicGoalID;
+                    }
+                if(!campaign.allowsLoss(riskGoal,path.heroArmy->estimateCombatValue(),path.getTotalArmyLoss()))
                     return false;
             }
             return true;
@@ -2125,6 +2172,7 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
     {
         std::lock_guard lock(executionMutex);
         spendingGoal=goalID;
+        acceptedLossRatio=campaign.lossLimit(goalID);
         emergencyTown=goal ? goal->strategicEmergencyTown : "";
         emergencyCost=goal ? goal->strategicEmergencyCost : TResources();
         emergencyFunds=ai.cc->getResourceAmount();
@@ -2249,6 +2297,7 @@ void NativeCampaign::endExecution(NK2AI::Nullkiller & ai,const std::string & ack
     {
         std::lock_guard lock(executionMutex);
         spendingGoal.clear();
+        acceptedLossRatio=campaign.lossLimit(std::string());
         emergencyTown.clear();emergencyCost=TResources();emergencyFunds=TResources();
     }
     persist(ai);

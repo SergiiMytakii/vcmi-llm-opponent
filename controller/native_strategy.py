@@ -64,12 +64,20 @@ def validate_request(request):
     if not references(request) or not evidence(request): raise ValueError('no supported strategic evidence')
 
 
+def same_goal(left, right):
+    """Absent legacy risk and explicit null have identical goal semantics."""
+    def normalized(goal):
+        if not isinstance(goal,dict):return goal
+        return {key:value for key,value in goal.items() if key!='risk' or value is not None}
+    return normalized(left)==normalized(right)
+
+
 def completed_interceptions(request):
     world=request['observation']
     return [goal for goal in (request.get('campaign') or {}).get('goals',[])
             if goal['kind']=='intercept_hero'
             and world.get('goal_statuses',{}).get(goal['id'],{}).get('state')=='completed'
-            and any(receipt.get('goal')==goal and receipt.get('won') is True
+            and any(same_goal(receipt.get('goal'),goal) and receipt.get('won') is True
                     and type(receipt.get('day')) is int and 1<=receipt['day']<=goal['deadline_day']
                     for receipt in world.get('confirmed_interceptions',[]))]
 
@@ -97,7 +105,10 @@ def reply_schema(request):
                     'target_ref': target, 'deadline_day': integer(day, day+7), 'priority': integer(1,100),
                     'building_id': integer(-1,100000), 'min_army_value': integer(0,1000000000),
                     'depends_on': array(label), 'required_capabilities': array({'type':'string','enum':world['capabilities']},0,8),
-                    'complete_when': predicate})
+                    'complete_when': predicate,
+                    'risk': {'anyOf':[{'type':'null'},_object({
+                        'max_loss_ratio':{'type':'number','minimum':0,'maximum':1},
+                        'reason':text})]}})
     # The schema constrains completion semantics before the model answers;
     # native feasibility still authoritatively validates the fresh world.
     variants = []
@@ -130,6 +141,7 @@ def reply_schema(request):
         variant = copy.deepcopy(goal)
         props = variant['properties']
         props['kind'] = {'type':'string','enum':[kind]}
+        if kind not in ('capture_target','intercept_hero'): props['risk']={'type':'null'}
         props['target_ref'] = refs_schema(targets[kind])
         props['actor_ref'] = {'type':'null'} if kind in ('develop_town','hire_helper') else refs_schema(heroes)
         props['building_id'] = {**integer(-1,100000),'enum':supported_buildings if kind=='develop_town' else [-1]}
@@ -203,7 +215,13 @@ def validate_reply(request, reply, wire=False):
         elif isinstance(value,list):
             for item in value:byte_limits(item)
     byte_limits(byte_schema)
-    _validate_shape(reply, byte_schema)
+    shape_reply = copy.deepcopy(reply)
+    # Old saved/fixture plans omitted risk. New model responses explicitly choose
+    # null or a grant; checking a legacy plan must not mutate its identity.
+    if isinstance(shape_reply.get('plan'),dict) and isinstance(shape_reply['plan'].get('goals'),list):
+        for goal in shape_reply['plan']['goals']:
+            if isinstance(goal,dict):goal.setdefault('risk',None)
+    _validate_shape(shape_reply, byte_schema)
     exposed = any(front.get('town_ref') in {t['ref'] for t in request['observation']['towns']}
                   and front.get('threats') and front.get('status') in
                   ('insufficient_current_force','unbounded_opposition')
@@ -230,7 +248,7 @@ def validate_reply(request, reply, wire=False):
         kind, predicate = g['kind'], g['complete_when']
         if kind=='hire_helper':
             if reply['decision']=='retain' and any(
-                    receipt.get('goal')==g and g['candidate_ref']=='tavern:'+str(receipt.get('hero_type_id'))
+                    same_goal(receipt.get('goal'),g) and g['candidate_ref']=='tavern:'+str(receipt.get('hero_type_id'))
                     and type(receipt.get('day')) is int
                     and 1<=receipt['day']<=g['deadline_day']
                     and (request['observation'].get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'
@@ -264,7 +282,7 @@ def validate_reply(request, reply, wire=False):
             target=by_ref.get(g['target_ref'],{})
             if not (target.get('kind')=='hero' and target.get('visible') is True
                     and target.get('owner') in request['observation'].get('enemy_players',[])):
-                if g not in completed_interceptions(request):raise ValueError('unconfirmed hidden interception')
+                if not any(same_goal(g,old) for old in completed_interceptions(request)):raise ValueError('unconfirmed hidden interception')
         if kind=='develop_town' and predicate['value'] != g['building_id']:raise ValueError('building predicate does not prove goal')
         if kind=='reinforce_hero' and (g['actor_ref']==g['target_ref'] or predicate['value']<g['min_army_value']):
             raise ValueError('invalid reinforcement predicate or participants')
