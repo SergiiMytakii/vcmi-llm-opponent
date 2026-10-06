@@ -78,6 +78,15 @@ class CampaignState
             && integer(receipt["recipient_after"],goal["complete_when"]["value"].Integer(),1000000000)
             && (receipt["source_ref"] == goal["target_ref"] || plan()["policy"]["allow_helper_replacement"].Bool());
     }
+    static bool passageProved(const JsonNode & goal,const JsonNode & receipt)
+    {
+        auto position=[](const JsonNode & value) {
+            return value.isVector() && value.Vector().size()==3
+                && integer(value[0],0,100000) && integer(value[1],0,100000) && integer(value[2],0,255);
+        };
+        return receipt.isStruct() && receipt["goal"]==goal && integer(receipt["day"],1,goal["deadline_day"].Integer())
+            && position(receipt["from"]) && position(receipt["to"]) && receipt["from"][2]!=receipt["to"][2];
+    }
     bool finished(const JsonNode & goal, const JsonNode & world) const
     {
         const auto & predicate = goal["complete_when"];
@@ -96,6 +105,12 @@ class CampaignState
         if(kind == "reserve_at_least") return contains(world["confirmed_resource_pickups"], goal["target_ref"])
             && world["resources"][6].Integer() >= predicate["value"].Integer();
         if(kind == "frontier_observed") return contains(world["observed_frontiers"], goal["target_ref"]);
+        if(kind == "passage_explored")
+        {
+            if(world["confirmed_passage_explorations"].isVector()) for(const auto & receipt:world["confirmed_passage_explorations"].Vector())
+                if(passageProved(goal,receipt)) return true;
+            return false;
+        }
         if(kind == "force_preserved_until")
             return world["day"].Integer() >= predicate["value"].Integer() && !hero.isNull()
                 && hero["army_value"].Integer() >= goal["min_army_value"].Integer();
@@ -157,6 +172,8 @@ public:
         }
         if(!sourceWorld["confirmed_deliveries"].isNull() && !sourceWorld["confirmed_deliveries"].isVector()) return;
         if(!saved["delivery_completions"].isNull() && !saved["delivery_completions"].isStruct()) return;
+        if(!sourceWorld["confirmed_passage_explorations"].isNull() && !sourceWorld["confirmed_passage_explorations"].isVector()) return;
+        if(!saved["passage_completions"].isNull() && !saved["passage_completions"].isStruct()) return;
         for(const auto * list : {"heroes", "towns", "objects"})
         {
             if(!sourceWorld[list].isVector()) return;
@@ -200,9 +217,15 @@ public:
             if(!status.isStruct() || !label(status["state"]) || !states.count(status["state"].String())
                 || !label(status["reason"])) return;
             if(status["state"].String() == "completed"
-                && !integer(status["completed_day"], saved["accepted_day"].Integer(), 2147483647)) return;
+                && !integer(status["completed_day"], goal["kind"].String()=="explore_passage" ? 1 : saved["accepted_day"].Integer(), 2147483647)) return;
             if(status["state"].String() == "completed" && goal["kind"].String()=="reinforce_hero"
                 && !validated.deliveryProved(goal,saved["delivery_completions"][goal["id"].String()])) return;
+            if(status["state"].String()=="completed" && goal["kind"].String()=="explore_passage")
+            {
+                const auto & receipt=saved["passage_completions"][goal["id"].String()];
+                if(!passageProved(goal,receipt)
+                    || !integer(status["completed_day"],receipt["day"].Integer(),goal["deadline_day"].Integer())) return;
+            }
             if(status["reason"].String()=="force_floor_breached" || status["failure_reason"].String()=="force_floor_breached")
             {
                 if(goal["kind"].String()!="preserve_force" || status["state"].String()!="blocked"
@@ -279,6 +302,11 @@ public:
             {
                 if(hero.isNull() || !contains(world["frontiers"], goal["target_ref"])) return reject("unknown_frontier");
             }
+            else if(kind == "explore_passage")
+            {
+                if(hero.isNull() || object.isNull() || object["kind"].String()!="subterranean_gate"
+                    || !object["visible"].Bool()) return reject("unknown_visible_passage");
+            }
             else if(kind == "preserve_force")
             {
                 if(hero.isNull() || town.isNull()) return reject("invalid_preservation_target");
@@ -297,6 +325,7 @@ public:
                 || (kind == "reinforce_hero" && completion == "army_at_least" && predicate["value"].Integer() >= goal["min_army_value"].Integer())
                 || (kind == "preserve_force" && completion == "force_preserved_until" && predicate["value"].Integer() >= day && predicate["value"].Integer() <= goal["deadline_day"].Integer())
                 || (kind == "scout_frontier" && completion == "frontier_observed" && predicate["value"].Integer() == 0)
+                || (kind == "explore_passage" && completion == "passage_explored" && predicate["value"].Integer() == 0)
                 || (kind == "defend_area" && completion == "held_until" && predicate["value"].Integer() >= day && predicate["value"].Integer() <= goal["deadline_day"].Integer());
             if(!valid) return reject("predicate_does_not_prove_goal");
         }
@@ -376,6 +405,9 @@ public:
         for(const auto & goal : goals.Vector())
             if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="reinforce_hero")
                 accepted["delivery_completions"][goal["id"].String()]=state["delivery_completions"][goal["id"].String()];
+        for(const auto & goal : goals.Vector())
+            if(accepted["statuses"][goal["id"].String()]["state"].String()=="completed" && goal["kind"].String()=="explore_passage")
+                accepted["passage_completions"][goal["id"].String()]=state["passage_completions"][goal["id"].String()];
         state = accepted;
         review(world);
         reason.clear();
@@ -390,7 +422,7 @@ public:
         feedback["target_ref"]=goal["target_ref"];feedback["deadline_day"]=goal["deadline_day"];
         feedback["supported"].Bool()=false;feedback["assigned_routes"].Vector();feedback["safe_options"].Vector();
         const auto & kind=goal["kind"].String();
-        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier")
+        if(kind!="capture_target" && kind!="secure_resource" && kind!="scout_frontier" && kind!="explore_passage")
         { feedback["supported"].Bool()=true;return feedback; }
         const auto & entries=kind=="scout_frontier" ? world["frontier_options"] : world["forecasts"]["routes"];
         for(const auto & entry:entries.Vector())
@@ -535,6 +567,9 @@ public:
                 status["state"].String() = "completed";
                 status["reason"].String() = "observed_completion_predicate";
                 status["completed_day"] = world["day"];
+                if(goal["kind"].String()=="explore_passage")
+                    for(const auto & receipt:world["confirmed_passage_explorations"].Vector()) if(passageProved(goal,receipt))
+                        state["passage_completions"][id]=receipt;
                 if(goal["kind"].String()=="reinforce_hero")
                     for(const auto & receipt:world["confirmed_deliveries"].Vector()) if(deliveryProved(goal,receipt))
                         state["delivery_completions"][id]=receipt;

@@ -257,3 +257,17 @@ the same conditions; these verdicts assess the existing lesson, not a rewrite.
 Use revise only for an explicit replacement with a different, more precise rule.
 Use lesson_id=null for a new rule. Never attach new wording or conditions to an
 existing lesson under support: that invalidates the entire strategic reply.
+
+# Visible subterranean passages
+When ordinary frontiers lack routes, consider explore_passage to a currently visible
+subterranean_gate. Assign an owned scout and use its offered own_arrival to the
+entrance, with the usual deadline, force minimum, reserve and loss limits.
+Use building_id=-1, required_capabilities=["land"], and complete_when={"kind":"passage_explored","value":0}.
+The engine executes an ordinary visit and transition; completion requires a receipt
+for this exact goal and actor crossing levels. Seeing or reaching the entrance alone
+is insufficient. Unknown exit position, exit danger and onward routes are unknown;
+entry forecasts prove only the approach. Choose a scout/army whose exposure is
+justified, not a critical defender or the main army by default. A passage offers
+information; do not assume a needed key, enemy town or safe route lies beyond it.
+Global teleport/spell planning remains unsupported. Do not invent another teleporter
+type as a subterranean gate. After exploration, use newly observed frontiers/targets.

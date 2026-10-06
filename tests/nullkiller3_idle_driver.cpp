@@ -1,5 +1,6 @@
 #include "Global.h"
 #include "StrategicDecision.h"
+#include "NativePersistence.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -188,6 +189,70 @@ void blockedScoutingReview()
     require(nullkiller3::mainArmyIdle(campaign,stationed)["reason"].String()=="waiting_delivery"
         && nullkiller3::idleArmySignals(campaign,stationed,true).empty(),"supported reinforcement wait requested idle correction");
 }
+void passageExploration()
+{
+    auto world=json(R"({"day":34,"player":1,"resources":[0,0,0,0,0,0,0],"capabilities":["land"],"heroes":[{"ref":"scout","army_value":4206}],"towns":[],"objects":[{"ref":"entry","kind":"subterranean_gate","owner":-1,"visible":true,"position":[6,5,0]}],"forecasts":{"routes":[{"target_ref":"entry","own_arrivals":[{"hero_ref":"scout","day":34,"army_value":4206,"army_loss_estimate":0}]}]}})");
+    auto plan=json(R"({"version":3,"revision":1,"approach":"scouting","horizon_days":3,"goals":[{"id":"passage","kind":"explore_passage","actor_ref":"scout","target_ref":"entry","deadline_day":36,"priority":80,"building_id":-1,"min_army_value":4000,"depends_on":[],"required_capabilities":["land"],"complete_when":{"kind":"passage_explored","value":0}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+    nullkiller3::CampaignState campaign;std::string reason;
+    require(campaign.accept(plan,world,reason),reason.c_str());
+    require(campaign.routeFeedback(plan["goals"][0],world)["supported"].Bool(),"safe entry route rejected");
+    require(campaign.review(world)["passage"]["state"].String()!="completed","visible gate alone completed exploration");
+    JsonNode receipt;receipt["goal"]=plan["goals"][0];receipt["day"].Integer()=34;
+    receipt["from"]=world["objects"][0]["position"];receipt["to"]=receipt["from"];
+    world["confirmed_passage_explorations"].Vector().push_back(receipt);
+    require(campaign.review(world)["passage"]["state"].String()!="completed","visit without transition completed exploration");
+    world["confirmed_passage_explorations"][0]["to"][2].Integer()=1;
+    auto wrong=world;wrong["confirmed_passage_explorations"][0]["goal"]["actor_ref"].String()="other";
+    require(campaign.review(wrong)["passage"]["state"].String()!="completed","another actor's transition completed exploration");
+    nullkiller3::CampaignState restored(campaign.save());
+    require(restored.review(world)["passage"]["state"].String()=="completed","confirmed transition lost across campaign restore");
+    auto completed=restored.save();
+    nullkiller3::CampaignState durable(completed);
+    require(durable.review(wrong)["passage"]["state"].String()=="completed","completed passage lost its saved receipt");
+    for(const int day:{34,35})
+    {
+        nullkiller3::CampaignState revised(completed);auto later=world;later["day"].Integer()=day;
+        auto next=plan;next["revision"].Integer()=2;
+        require(revised.accept(next,later,reason),reason.c_str());
+        nullkiller3::CampaignState loaded(revised.save());
+        require(loaded.restoreReason().empty(),"retained completed passage rejected on revision/load");
+        require(loaded.review(later)["passage"]["completed_day"].Integer()==34,"retained passage rewrote historical completion day");
+    }
+    completed["passage_completions"]["passage"]["to"][2].Integer()=0;
+    nullkiller3::CampaignState forged(completed);
+    require(!forged.restoreReason().empty(),"saved completion without a transition receipt was trusted");
+    for(const auto & field:{"passage_completions","validation_world"})
+    {
+        auto malformed=restored.save();
+        if(std::string(field)=="validation_world") malformed[field]["confirmed_passage_explorations"].String()="invalid";
+        else malformed[field].String()="invalid";
+        nullkiller3::CampaignState refused(malformed);
+        require(!refused.restoreReason().empty(),"malformed passage container accepted on restore");
+    }
+    JsonNode savedNamespace;savedNamespace["object_ids"].Struct();savedNamespace["native_campaign"]=restored.save();
+    savedNamespace["request_arbiter"]["spent"].Integer()=7;
+    savedNamespace["passage_receipts"]["passage"]=world["confirmed_passage_explorations"][0];
+    require(nullkiller3::restoreNativeNamespace(savedNamespace)["passage_receipts"]==savedNamespace["passage_receipts"],"valid crossing receipt discarded on namespace restore");
+    auto malformed=savedNamespace;malformed["passage_receipts"].String()="invalid";
+    auto refused=nullkiller3::restoreNativeNamespace(malformed);
+    require(refused["passage_receipts"].isNull() && refused["native_campaign"].isNull()
+        && refused["request_arbiter"]==savedNamespace["request_arbiter"],"malformed passage namespace retained intent or refunded budget");
+    malformed=savedNamespace;malformed["object_ids"].String()="invalid";
+    require(nullkiller3::restoreNativeNamespace(malformed)["passage_receipts"].isNull(),"old crossing receipt survived an alias namespace reset");
+    auto weak=world;weak["forecasts"]["routes"][0]["own_arrivals"][0]["army_value"].Integer()=3000;
+    require(!campaign.routeFeedback(plan["goals"][0],weak)["supported"].Bool(),"passage entry ignored army minimum");
+    auto late=world;late["forecasts"]["routes"][0]["own_arrivals"][0]["day"].Integer()=37;
+    require(!campaign.routeFeedback(plan["goals"][0],late)["supported"].Bool(),"passage entry ignored deadline");
+    for(const auto & kind:{"other","monolith"})
+    {
+        auto invalid=world;invalid["objects"][0]["kind"].String()=kind;
+        nullkiller3::CampaignState rejected;
+        require(!rejected.accept(plan,invalid,reason),"non-subterranean object admitted as passage");
+    }
+    auto hidden=world;hidden["objects"][0]["visible"].Bool()=false;
+    nullkiller3::CampaignState rejected;
+    require(!rejected.accept(plan,hidden,reason),"remembered hidden gate admitted as visible exploration target");
+}
 int main(int argc,char ** argv)
 {
     try {
@@ -204,7 +269,7 @@ int main(int argc,char ** argv)
             std::cout<<result.toCompactString()<<"\n";return 0;
         }
         require(argc==1,"expected request, reply and prior accepted request paths or no arguments");
-        lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n";
+        passageExploration();lastCreatureDelivery();wholeCreatureDelivery();reservedPackingDelivery();blockedScoutingReview();std::cout<<"Blocked scouting corrected; repeat suppressed; frontier constraints exposed\n";
     }
     catch(const std::exception & error) { std::cerr<<error.what()<<"\n";return 1; }
 }

@@ -59,6 +59,7 @@ std::string objectKind(const CGObjectInstance * object)
     case Obj::HERO: return "hero";
     case Obj::MINE: return "mine";
     case Obj::RESOURCE: return "resource";
+    case Obj::SUBTERRANEAN_GATE: return "subterranean_gate";
     case Obj::MONSTER: return "monster";
     case Obj::GARRISON:
     case Obj::GARRISON2: return "garrison";
@@ -233,6 +234,13 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
     {
         if(object && object->ID == Obj::RESOURCE) resourceVisits[actor] = object->id.getNum();
         else resourceVisits.erase(actor);
+        passageVisits.erase(actor);
+        if(object && object->ID==Obj::SUBTERRANEAN_GATE && actor==activePassageActor
+            && object->id.getNum()==activePassageEntry && !activePassageGoal.isNull())
+        {
+            JsonNode receipt;receipt["goal"]=activePassageGoal;receipt["day"].Integer()=activePassageDay;
+            receipt["from"]=coordinate(object->visitablePos());passageVisits[actor]=receipt;
+        }
     }
     else
     {
@@ -244,7 +252,24 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
             if(!object) completedResourceVisits.push_back(found->second);
             resourceVisits.erase(found);
         }
+        const auto passage=passageVisits.find(actor);
+        if(passage!=passageVisits.end())
+        {
+            if(passage->second["from"][2].Integer()!=hero->visitablePos().z)
+            {
+                auto receipt=passage->second;receipt["to"]=coordinate(hero->visitablePos());
+                completedPassageVisits.push_back(receipt);
+            }
+            passageVisits.erase(passage);
+        }
     }
+}
+void NativeCampaign::applyPassageObservations()
+{
+    std::lock_guard lock(visitMutex);
+    for(const auto & receipt:completedPassageVisits)
+        persisted["passage_receipts"][receipt["goal"]["id"].String()]=receipt;
+    completedPassageVisits.clear();
 }
 void NativeCampaign::battleResult(JsonNode ownResult)
 {
@@ -407,9 +432,17 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         }
         completedResourceVisits.clear();
     }
+    applyPassageObservations();
     world["confirmed_resource_pickups"].Vector();
     for(const auto & [ref, day] : persisted["confirmed_resource_pickups"].Struct())
         world["confirmed_resource_pickups"].Vector().emplace_back(ref);
+    world["confirmed_passage_explorations"].Vector();
+    auto & passageReceipts=persisted["passage_receipts"].Struct();
+    std::erase_if(passageReceipts,[&](const auto & item) {
+        return std::find(campaign.plan()["goals"].Vector().begin(),campaign.plan()["goals"].Vector().end(),item.second["goal"])
+            ==campaign.plan()["goals"].Vector().end();
+    });
+    for(const auto & [id,receipt]:passageReceipts) world["confirmed_passage_explorations"].Vector().push_back(receipt);
     world["confirmed_deliveries"].Vector();
     auto & receipts=persisted["delivery_receipts"].Struct();
     std::erase_if(receipts,[&](const auto & item) {
@@ -425,6 +458,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     for(const auto * cap : {"teleport", "fly", "water_walk", "town_portal", "dimension_door"})
         world["unsupported_capabilities"].Vector().emplace_back(cap);
     world["movement_support"]["water"].String()="Current visible boats, known water tiles and legal embark/disembark. New sailing boats require an owned visible shipyard with all potential launch tiles visible, a current placement quote and available funds under the active goal. Summon/scuttle boat, airships, whirlpools and unobserved routes are unsupported.";
+    world["movement_support"]["passages"].String()="explore_passage visits a currently visible subterranean_gate through a permitted route to its entrance. Ordinary engine visit/query may reveal an unknown exit. Entry arrival/loss forecasts do not estimate the exit, its danger or onward travel; these remain unknown until observed. Global teleport planning remains unsupported.";
     // These complete own lists, and visible object sorting, make aliases
     // independent of gaps and insertions in global hidden object IDs.
     world["heroes"].Vector();
@@ -706,11 +740,11 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     for(const auto & object:world["visible_objects"].Vector())
     {
         const auto & kind=object["kind"].String();
-        if(kind!="town" && kind!="mine" && kind!="resource") continue;
+        if(kind!="town" && kind!="mine" && kind!="resource" && kind!="subterranean_gate") continue;
         const auto & pos=object["position"];
         JsonNode route;
         route["target_ref"]=object["ref"];
-        route["own_arrivals"]=arrivals(pos,false);
+        route["own_arrivals"]=arrivals(pos,kind=="subterranean_gate");
         forecasts["routes"].Vector().push_back(route);
     }
     // Own hero destinations are known even when a garrisoned hero is absent
@@ -728,7 +762,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     world["goal_feedback"].Vector();
     for(const auto & goal:campaign.plan()["goals"].Vector())
     {
-        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier") continue;
+        if(goal["kind"].String()!="capture_target" && goal["kind"].String()!="secure_resource" && goal["kind"].String()!="scout_frontier" && goal["kind"].String()!="explore_passage") continue;
         auto feedback=campaign.routeFeedback(goal,world);
         feedback["status"]=world["goal_statuses"][goal["id"].String()];
         world["goal_feedback"].Vector().push_back(feedback);
@@ -742,7 +776,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
         world["offensive_preparation"]["recent_losses"].Vector().push_back(item);
     }
     world["main_army_idle"]=mainArmyIdle(campaign,world);
-    forecasts["route_assumptions"].String()="All visible town/mine/resource targets, complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
+    forecasts["route_assumptions"].String()="All visible town/mine/resource targets and subterranean gate entrances (exit risk unknown), complete own hero positions and known frontiers, current permitted land/boat paths and movement, including presently funded owned shipyard quotes. Frontier arrivals require a single hero without an army exchange. No hidden target, future shipyard, boat spell, enemy intention or battle win probability. Empty arrivals mean unknown/unestablished, not absent.";
     traceCampaign();
 }
 void NativeCampaign::traceCampaign() const
@@ -766,6 +800,9 @@ void NativeCampaign::traceCampaign() const
 }
 void NativeCampaign::persist(NK2AI::Nullkiller & ai)
 {
+    // Publish confirmed crossings before any ordinary save can observe an
+    // acknowledged task with its pending intent already removed.
+    applyPassageObservations();
     applyBattleObservations();
     applyForceObservations();
     persisted["native_campaign"] = campaign.save();
@@ -1069,7 +1106,11 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
             if(actor && position.isValid())
             {
                 auto paths = ai.pathfinder->getPathInfo(position, false);
-                std::erase_if(paths, [&](const AIPath & path) { return path.targetHero != actor; });
+                std::erase_if(paths, [&](const AIPath & path) {
+                    if(path.targetHero!=actor) return true;
+                    if(kind!="explore_passage") return false;
+                    return path.exchangeCount>1 || std::any_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node){return node.targetHero!=actor;});
+                });
                 generated = CaptureObjectsBehavior::getVisitGoals(paths, &ai, target, true);
                 if(std::none_of(generated.begin(),generated.end(),[](const auto & task){return !task->invalid();}) && target)
                     generated=repairRoute(ai,actor,target);
@@ -1444,6 +1485,23 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
         emergencyFunds=ai.cc->getResourceAmount();
         resourceLedger.begin(resourceValues(emergencyFunds));resourceLedgerActive=true;
     }
+    {
+        std::lock_guard lock(visitMutex);
+        activePassageGoal=JsonNode();activePassageActor=activePassageEntry=-1;activePassageDay=0;
+        passageVisits.clear();
+        for(const auto & item:campaign.plan()["goals"].Vector())
+            if(item["id"].String()==goalID && item["kind"].String()=="explore_passage")
+            {
+                const auto * actor=dynamic_cast<const CGHeroInstance *>(resolve(ai,item["actor_ref"]));
+                const auto * entry=resolve(ai,item["target_ref"]);
+                if(actor && actor->getOwner()==ai.playerID && entry && entry->ID==Obj::SUBTERRANEAN_GATE
+                    && ai.cc->isVisible(entry->visitablePos()))
+                {
+                    activePassageGoal=item;activePassageActor=actor->id.getNum();activePassageEntry=entry->id.getNum();
+                    activePassageDay=ai.cc->getCalendar().getCurrentDay();
+                }
+            }
+    }
     replanAfterCombat=false;
     executionActive=true;executionStarted=std::chrono::steady_clock::now();
     JsonNode pending;
@@ -1516,6 +1574,11 @@ void NativeCampaign::endExecution(NK2AI::Nullkiller & ai,const std::string & ack
         logAi->info("NK3_EXECUTION %s",trace.toCompactString());
         persisted.Struct().erase("pending_native_task");
     }
+    {
+        std::lock_guard lock(visitMutex);
+        activePassageGoal=JsonNode();activePassageActor=activePassageEntry=-1;activePassageDay=0;
+        passageVisits.clear();
+    }
     executionActive=false;
     {
         std::lock_guard lock(executionMutex);
@@ -1542,7 +1605,7 @@ std::string NativeCampaign::role(const CGHeroInstance * hero) const
             }
     for(const auto & goal : campaign.plan()["goals"].Vector())
         if(obligations.count(goal["id"].String()) && goal["actor_ref"].isString() && goal["actor_ref"].String() == ref)
-            return goal["kind"].String() == "scout_frontier" || goal["kind"].String() == "preserve_force" ? "scout" : "main";
+            return goal["kind"].String() == "scout_frontier" || goal["kind"].String() == "preserve_force" || goal["kind"].String() == "explore_passage" ? "scout" : "main";
     if(!obligations.empty()) return "scout";
     return "";
 }

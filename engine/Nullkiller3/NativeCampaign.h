@@ -48,8 +48,15 @@ class NativeCampaign
     std::mutex visitMutex;
     std::map<int, int> resourceVisits;
     std::vector<int> completedResourceVisits;
+    // Execution context is copied on the planner thread; callbacks use only
+    // these mutex-protected values, never mutable campaign/persisted JSON.
+    JsonNode activePassageGoal;
+    int activePassageActor=-1, activePassageEntry=-1, activePassageDay=0;
+    std::map<int, JsonNode> passageVisits;
+    std::vector<JsonNode> completedPassageVisits;
     std::vector<JsonNode> completedBattles;
     void applyBattleObservations();
+    void applyPassageObservations();
     std::atomic<int64_t> acceptedRevision{0};
     std::atomic<double> acceptedLossRatio{1};
     std::atomic<bool> replanAfterCombat{false};

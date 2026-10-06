@@ -18,6 +18,20 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
            reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan,
            usage=dict(input_tokens=0,output_tokens=0,known=True))
 mode=os.environ.get('NK3_PROBE_MODE','valid')
+if mode=='passage':
+    own=r['observation']
+    entries=[o for o in own['objects'] if o.get('kind')=='subterranean_gate' and o.get('visible') is True]
+    choices=[h for h in own['heroes'] if 1000<=h['army_value']<=10000]
+    actor=min(choices,key=lambda h:h['army_value'])
+    entry=next(o for o in entries if o['position'][2]==actor['position'][2])
+    goal.update(id='passage',kind='explore_passage',actor_ref=actor['ref'],target_ref=entry['ref'],building_id=-1,
+                deadline_day=own['day']+3,min_army_value=actor['army_value'],required_capabilities=['land'],
+                complete_when=dict(kind='passage_explored',value=0))
+    reply['assignments']=[dict(hero_ref=actor['ref'],role='scout')]
+    reply['reconsider_when']=[dict(goal_id='passage',kind='deadline_missed')]
+    reply['evidence_refs']=['hero:'+actor['ref']]
+    if r.get('campaign') and any(g['kind']=='explore_passage' for g in r['campaign']['goals']):
+        reply.update(decision='retain',plan=None,assignments=own['strategy_assignments'])
 if mode=='retain_seed':
     goals=r['campaign']['goals']
     reply.update(decision='retain',plan=None,assignments=[],
