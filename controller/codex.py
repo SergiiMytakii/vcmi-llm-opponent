@@ -172,23 +172,31 @@ def choose(request):
     if guide:
         guide_info.update(bundle_sha256=guide.bundle_hash,catalog=guide.catalog,file_hashes=guide.hashes)
         instructions += guide.instructions()
+    from game_rules import GameRules, DEFAULT_ROOT as RULES_ROOT
+    rules_mode = os.environ.get('VCMI_GAME_RULES_MODE','on')
+    if rules_mode not in ('on','off'):raise ValueError('invalid game rules mode')
+    game_rules = GameRules(os.environ.get('VCMI_GAME_RULES',str(RULES_ROOT))) if rules_mode=='on' else None
+    rules_info = {'mode':rules_mode,'requested_ids':[],'returned_files':[]}
+    if game_rules:
+        rules_info.update(bundle_sha256=game_rules.bundle_hash,catalog=game_rules.catalog,file_hashes=game_rules.hashes)
+        instructions += game_rules.instructions()
     folder = Path(decision_dir) / 'model-call-1' if decision_dir else None
     if folder:folder.mkdir()
     metadata={}
     try:
         answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,deadline=deadline,
-            knowledge=knowledge,guide=guide,guide_info=guide_info,decision_dir=folder)
+            knowledge=knowledge,guide=guide,guide_info=guide_info,game_rules=game_rules,rules_info=rules_info,decision_dir=folder)
         answer=validate_reply(request,answer)
     except BaseException as error:
         if not hasattr(error,'usage'):error.usage=metadata.get('usage')
-        error.diagnostics={'strategy_guide':guide_info,'references':references}
+        error.diagnostics={'strategy_guide':guide_info,'game_rules':rules_info,'references':references}
         raise
-    metadata.update(references=references,strategy_guide=guide_info,
+    metadata.update(references=references,strategy_guide=guide_info,game_rules=rules_info,
         model_calls=[{'number':1,'status':'completed','usage':metadata.get('usage')}])
     return answer,metadata
 
 
-def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,guide=None,guide_info=None,decision_dir=None,max_output_bytes=8192,deadline=None):
+def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,guide=None,guide_info=None,game_rules=None,rules_info=None,decision_dir=None,max_output_bytes=8192,deadline=None):
     """Return a validated reply and diagnostics; failures belong to caller fallback."""
     started = time.monotonic()
     deadline = min(started + timeout, deadline) if deadline is not None else started + timeout
@@ -248,14 +256,14 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 'mcp_servers.nk3_knowledge.startup_timeout_sec':2,
                 'mcp_servers.nk3_knowledge.tool_timeout_sec':2,
                 'mcp_servers.nk3_knowledge.default_tools_approval_mode':'approve'})
-        guide_audit=workspace/'guide-calls.jsonl'
-        if guide is not None:
-            config.update({'mcp_servers.nk3_strategy_guide.command':os.sys.executable,
-                'mcp_servers.nk3_strategy_guide.args':[str(ROOT/'strategy_guide_server.py'),str(guide.root),str(guide_audit),guide.bundle_hash],
-                'mcp_servers.nk3_strategy_guide.enabled_tools':['read_strategy_guide'],
-                'mcp_servers.nk3_strategy_guide.startup_timeout_sec':2,
-                'mcp_servers.nk3_strategy_guide.tool_timeout_sec':2,
-                'mcp_servers.nk3_strategy_guide.default_tools_approval_mode':'approve'})
+        reference_tools = [('strategy_guide',guide,guide_info),('game_rules',game_rules,rules_info)]
+        for kind,bundle,_ in reference_tools:
+            if bundle is None:continue
+            key='mcp_servers.nk3_'+kind+'.'
+            config.update({key+'command':os.sys.executable,
+                key+'args':[str(ROOT/'strategy_guide_server.py'),str(bundle.root),str(workspace/(kind+'-calls.jsonl')),bundle.bundle_hash,kind],
+                key+'enabled_tools':['read_'+kind],key+'startup_timeout_sec':2,
+                key+'tool_timeout_sec':2,key+'default_tools_approval_mode':'approve'})
         command = [executable, 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
                    '--skip-git-repo-check', '--json', '--color', 'never', '-s', 'read-only',
                    '-m', model, '-C', folder, '--output-schema', str(workspace / 'schema.json'),
@@ -304,14 +312,16 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 observe_events()
                 timing['model_process_seconds'] = round(time.monotonic()-model_started,3)
                 timing['process_returncode'] = child.returncode
-                if guide_audit.exists():
-                    audits=[json.loads(line) for line in guide_audit.read_text().splitlines()]
-                    if guide_info is not None:
-                        guide_info['calls']=audits
-                        guide_info['requested_ids']=list(dict.fromkeys(i for c in audits for i in c['ids']))
-                        guide_info['returned_files']=[f for c in audits for f in c['files']]
+                for kind,_,info in reference_tools:
+                    audit=workspace/(kind+'-calls.jsonl')
+                    if not audit.exists():continue
+                    audits=[json.loads(line) for line in audit.read_text().splitlines()]
+                    if info is not None:
+                        info['calls']=audits
+                        info['requested_ids']=list(dict.fromkeys(i for c in audits for i in c['ids']))
+                        info['returned_files']=[f for c in audits for f in c['files']]
                     if decision_dir:
-                        (Path(decision_dir)/'strategy-guide-calls.jsonl').write_bytes(guide_audit.read_bytes())
+                        (Path(decision_dir)/(kind.replace('_','-')+'-calls.jsonl')).write_bytes(audit.read_bytes())
                 if decision_dir:
                     (Path(decision_dir) / 'codex-timing.json').write_text(compact_json(timing),encoding='utf-8')
                     (Path(decision_dir) / 'codex-request.json').write_text(model_input, encoding='utf-8')
@@ -338,8 +348,8 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 if item and item.get('type') not in ('agent_message','reasoning'):
                     allowed = (knowledge is not None and item.get('server')=='nk3_knowledge'
                                and item.get('tool') in ('search_knowledge','read_lesson')) or (
-                               guide is not None and item.get('server')=='nk3_strategy_guide'
-                               and item.get('tool')=='read_strategy_guide')
+                               any(bundle is not None and item.get('server')=='nk3_'+kind
+                                   and item.get('tool')=='read_'+kind for kind,bundle,_ in reference_tools))
                     if not (item.get('type')=='mcp_tool_call' and allowed):
                         raise ValueError('unexpected Codex item: ' + str(item.get('type')))
                 if event.get('type') == 'turn.completed':

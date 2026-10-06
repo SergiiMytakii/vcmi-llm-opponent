@@ -19,8 +19,9 @@ config={v.split('=',1)[0]:json.loads(v.split('=',1)[1]) for v in a if '=' in v}
 i=pathlib.Path(config['model_instructions_file']).read_text()
 p=pathlib.Path(os.environ['CAPTURE']);n=len(list(p.glob('call-*.json')))+1
 (p/f'call-{n}.json').write_text(json.dumps({'request':r,'schema':json.loads(pathlib.Path(a[a.index('--output-schema')+1]).read_text()),'instructions':i}))
-if os.environ.get('GUIDE_TEST_MODE') in ('consult','consult_timeout'):
- key='mcp_servers.nk3_strategy_guide.'
+for namespace,tool,mode,ids_default in [('strategy_guide','read_strategy_guide','GUIDE','["opening","defense"]'),('game_rules','read_game_rules','RULES','["day_and_week","town_economy"]')]:
+ if os.environ.get(mode+'_TEST_MODE') not in ('consult','consult_timeout'):continue
+ key='mcp_servers.nk3_'+namespace+'.'
  command=[config[key+'command']]+config[key+'args']
  child=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
  def call(method,params):
@@ -28,14 +29,15 @@ if os.environ.get('GUIDE_TEST_MODE') in ('consult','consult_timeout'):
   return json.loads(child.stdout.readline())
  call('initialize',{'protocolVersion':'2024-11-05'})
  tools=call('tools/list',{})
- result=call('tools/call',{'name':'read_strategy_guide','arguments':{'ids':json.loads(os.environ.get('GUIDE_TEST_IDS','["opening","defense"]'))}})
- if os.environ.get('GUIDE_TEST_MODE')=='consult_timeout':
+ (p/(namespace+'-tools.json')).write_text(json.dumps(tools))
+ result=call('tools/call',{'name':tool,'arguments':{'ids':json.loads(os.environ.get(mode+'_TEST_IDS',ids_default))}})
+ if os.environ.get(mode+'_TEST_MODE')=='consult_timeout':
   import time
   (p/'model-pid').write_text(str(os.getpid()));(p/'tool-pid').write_text(str(child.pid));time.sleep(10)
  child.stdin.close();child.wait(timeout=2)
- (p/'tool-result.json').write_text(json.dumps(result))
+ (p/('tool-result.json' if namespace=='strategy_guide' else 'rules-result.json')).write_text(json.dumps(result))
  if 'error' in result:sys.exit(4)
- print(json.dumps({'type':'item.completed','item':{'type':'mcp_tool_call','server':'nk3_strategy_guide','tool':'read_strategy_guide'}}))
+ print(json.dumps({'type':'item.completed','item':{'type':'mcp_tool_call','server':'nk3_'+namespace,'tool':tool}}))
 pathlib.Path(a[a.index('-o')+1]).write_text(os.environ['FINAL_REPLY'])
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':120,'output_tokens':40}}))
 '''

@@ -1,5 +1,10 @@
 # Strategy guide
 
+This bundle compares strategic choices. [Game Rules](../game_rules/README.md)
+explains mechanics through a separate catalog and `read_game_rules` tool.
+Keep tactical recommendations here and mechanical explanations in Game Rules;
+the mandatory executor contract remains in Native Instructions.
+
 Edit a card → validate the complete bundle → prepare a new run:
 
 ```sh

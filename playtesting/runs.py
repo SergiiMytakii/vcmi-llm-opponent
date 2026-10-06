@@ -150,14 +150,17 @@ def prepare(config_path, out):
     if any(name not in ("prompt", "knowledge") or not path.is_file() for name, path in refs.items()):
         raise ValueError("references supports existing prompt and knowledge files")
     from controller.strategy_guide import StrategyGuide, DEFAULT_ROOT
-    guide_config = config.get('strategy_guide', {'mode':'on'})
-    if (not isinstance(guide_config,dict) or not set(guide_config) <= {'mode','path'}
-            or guide_config.get('mode') not in ('on','off')
-            or ('path' in guide_config and not isinstance(guide_config['path'],str))):
-        raise ValueError('strategy_guide requires mode on/off and an optional path')
-    guide = (StrategyGuide(absolute(guide_config.get('path',str(DEFAULT_ROOT)),base))
-             if guide_config['mode']=='on' else None)
-    for name in ('strategy_guide.py','strategy_guide_server.py'):
+    from controller.game_rules import GameRules, DEFAULT_ROOT as RULES_ROOT
+    reference_bundles = {}
+    for kind,loader,default_root in (('strategy_guide',StrategyGuide,DEFAULT_ROOT),('game_rules',GameRules,RULES_ROOT)):
+        settings = config.get(kind, {'mode':'on'})
+        if (not isinstance(settings,dict) or not set(settings) <= {'mode','path'}
+                or settings.get('mode') not in ('on','off')
+                or ('path' in settings and not isinstance(settings['path'],str))):
+            raise ValueError(f'{kind} requires mode on/off and an optional path')
+        bundle = loader(absolute(settings.get('path',str(default_root)),base)) if settings['mode']=='on' else None
+        reference_bundles[kind] = (settings['mode'],bundle)
+    for name in ('strategy_guide.py','strategy_guide_server.py','game_rules.py'):
         sources[str(ROOT/'controller'/name)] = digest(ROOT/'controller'/name)
     out = Path(out).resolve()
     if out == profile or out.is_relative_to(profile) or profile.is_relative_to(out):
@@ -169,14 +172,16 @@ def prepare(config_path, out):
         (out / "decisions").mkdir()
         (out / "episodes").mkdir()
         (out / "evidence").mkdir()
-        guide_snapshot = {'mode':guide_config['mode']}
-        if guide:
-            guide_root = out / 'strategy-guide'
-            for name,raw in guide.files.items():
-                dest = guide_root / name
+        reference_snapshots = {}
+        for kind,(mode,bundle) in reference_bundles.items():
+            reference_snapshots[kind] = {'mode':mode}
+            if bundle is None:continue
+            directory = kind.replace('_','-')
+            for name,raw in bundle.files.items():
+                dest = out / directory / name
                 dest.parent.mkdir(parents=True,exist_ok=True)
                 dest.write_bytes(raw)
-            guide_snapshot.update(path='strategy-guide',files=guide.hashes,bundle_sha256=guide.bundle_hash)
+            reference_snapshots[kind].update(path=directory,files=bundle.hashes,bundle_sha256=bundle.bundle_hash)
         references = {}
         for name, path in refs.items():
             dest = out / "references" / (name + ".md")
@@ -205,7 +210,7 @@ def prepare(config_path, out):
             "engine": str(engine), "engine_sha256": digest(engine),
             "engine_sources": engine_sources,
             "controller": controller, "controller_sources": sources, "references": references,
-            "experience":experience, "strategy_guide":guide_snapshot,
+            "experience":experience, **reference_snapshots,
             "map_sha256": digest(out / "profile" / DATA / resource),
             "save_sha256": digest(out / "profile" / DATA / save_resource) if save_resource else None,
             "profile_sha256": snapshot(out / "profile"),
@@ -230,17 +235,20 @@ def verify(run, check_profile=False):
     for ref in manifest["references"].values():
         if digest(run / ref["path"]) != ref["sha256"]:
             raise ValueError("reference snapshot changed since prepare")
-    guide_info = manifest.get('strategy_guide')
-    if guide_info and guide_info['mode']=='on':
-        from controller.strategy_guide import StrategyGuide
-        root = run / guide_info['path']
+    from controller.strategy_guide import StrategyGuide
+    from controller.game_rules import GameRules
+    for kind,loader in (('strategy_guide',StrategyGuide),('game_rules',GameRules)):
+        info = manifest.get(kind)
+        if not info or info['mode']!='on':continue
+        root = run / info['path']
+        label = kind.replace('_',' ')
         if root.is_symlink() or any(p.is_symlink() for p in root.rglob('*')):
-            raise ValueError('strategy guide snapshot symlink changed since prepare')
-        if snapshot(root) != guide_info['files']:
-            raise ValueError('strategy guide snapshot changed since prepare')
-        guide = StrategyGuide(root)
-        if guide.bundle_hash != guide_info['bundle_sha256']:
-            raise ValueError('strategy guide bundle changed since prepare')
+            raise ValueError(f'{label} snapshot symlink changed since prepare')
+        if snapshot(root) != info['files']:
+            raise ValueError(f'{label} snapshot changed since prepare')
+        bundle = loader(root)
+        if bundle.bundle_hash != info['bundle_sha256']:
+            raise ValueError(f'{label} bundle changed since prepare')
     baseline = manifest.get('experience',{}).get('baseline')
     if baseline and digest(run / baseline['path']) != baseline['sha256']:
         raise ValueError('experience baseline changed since prepare')

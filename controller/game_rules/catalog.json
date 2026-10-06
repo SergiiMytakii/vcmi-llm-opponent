@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "cards": [
+    {
+      "id": "day_and_week",
+      "title": "Day, week and movement",
+      "applicability": "Day/week, slowest-creature movement, roads/terrain, boats and weekly recruitment stock.",
+      "file": "rules/day_and_week.md",
+      "enabled": true
+    },
+    {
+      "id": "town_economy",
+      "title": "Town economy and recruitment",
+      "applicability": "Building prerequisites, income, dwellings, shared stock, recruitment and upgrades.",
+      "file": "rules/town_economy.md",
+      "enabled": true
+    },
+    {
+      "id": "hero_army",
+      "title": "Heroes, stacks and garrisons",
+      "applicability": "Army slots, matching creatures, town/hero army aliases and actual troop delivery.",
+      "file": "rules/hero_army.md",
+      "enabled": true
+    },
+    {
+      "id": "combat_strength",
+      "title": "Combat strength and losses",
+      "applicability": "Damage, Attack/Defense, morale/luck, AI estimates, siege and cumulative casualties.",
+      "file": "rules/combat_strength.md",
+      "enabled": true
+    },
+    {
+      "id": "mana_magic",
+      "title": "Mana and magic readiness",
+      "applicability": "Spellbook, Wisdom, Knowledge versus Power, regeneration, guild recovery and supported spells.",
+      "file": "rules/mana_magic.md",
+      "enabled": true
+    },
+    {
+      "id": "ownership_victory",
+      "title": "Ownership, defeat and victory",
+      "applicability": "Town capture, player elimination, townless defeat and public victory conditions.",
+      "file": "rules/ownership_victory.md",
+      "enabled": true
+    }
+  ]
+}
