@@ -75,6 +75,9 @@ Future troops, unknown post-delivery forecasts and missing routes cannot make an
 operation immediately ready.
 
 # Town preparation and interception contract
+When campaign_exhausted is supplied while your main is still in an owned town,
+compare town_choices and revise with the next supported operation or funded
+defense BEFORE departure. Retaining a completed hold supplies no active goal.
 Use prepare_garrison at the owned town: actor is the departing hero;
 complete_when.garrison_at_least is the separate stationary defense required,
 min_army_value is the main force that must remain AFTER detachment. Native

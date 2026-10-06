@@ -185,9 +185,17 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         if(world["day"].Integer() >= saved["accepted_day"].Integer()+campaign.plan()["horizon_days"].Integer())
             result.push_back({"horizon",std::to_string(campaign.plan()["revision"].Integer()),true,true,actionable,false});
     }
-    // Completion dates survive saves. Even a plan accepted on an earlier day
-    // waits until the next own turn after its last observed completion.
-    if(exhausted && completedDay<world["day"].Integer())
+    // Reconsider a stationed commander before an unassigned native task can
+    // leave the town. Other completed operations retain next-turn batching.
+    bool stationedCommander=false;
+    if(exhausted) for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector())
+        if(assignment["role"].String()=="main" || assignment["role"].String()=="defender")
+            for(const auto & hero:world["heroes"].Vector())
+                if(hero["ref"]==assignment["hero_ref"] && hero["movement"].Integer()>100
+                    && hero["position"].isVector())
+                    for(const auto & town:world["towns"].Vector())
+                        stationedCommander |= hero["position"]==town["position"];
+    if(exhausted && (completedDay<world["day"].Integer() || stationedCommander))
         result.push_back({"campaign_exhausted",std::to_string(campaign.plan()["revision"].Integer())+":"+std::to_string(world["day"].Integer()),true,true,actionable,false});
     const auto repairFacts=repairQuestionFacts(campaign.plan(),persisted["goal_blockers"],world["goal_statuses"]);
     if(!repairFacts.empty()) result.push_back({"repair_exhausted",repairFacts,true,true,actionable,false});
