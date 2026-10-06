@@ -45,7 +45,7 @@ def preflight(engine, profile, codex):
         env.pop(key, None)
     env.update(VCMI_PROFILE_DIR=str(profile), VCMI_EXTERNAL_AI_EXECUTABLE=sys.executable,
                VCMI_EXTERNAL_AI_SCRIPT=str(ROOT / 'controller/main.py'), VCMI_CODEX_EXECUTABLE=str(codex),
-               VCMI_EXPERIENCE_MODE='learn')
+               VCMI_EXPERIENCE_MODE='learn', VCMI_NK3_MODE='model')
     # Help exits before VCMI initializes directories; an installed/older game
     # must be rejected here, without ever opening its normal profile.
     result = subprocess.run([str(engine), '--help'], cwd=engine.parent, env=env,
