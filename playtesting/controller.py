@@ -13,6 +13,7 @@ from .runs import load, now, verify, write_json
 
 INPUT_LIMIT = 512 * 1024
 OUTPUT_LIMIT = 8192
+STRATEGIC_OUTPUT_LIMIT = 32 * 1024 + 1024  # Course reply plus usage/framing, matching native NK3.
 STDERR_LIMIT = 64 * 1024
 
 
@@ -79,6 +80,7 @@ def exchange(run, raw, engine_owned=False, postgame=False):
     child = None
     own_group = os.name != "nt" and (not engine_owned or postgame)
     output = b""
+    output_limit = OUTPUT_LIMIT
     if postgame:result['purpose']='postgame_reflection'
     try:
         verify(run)
@@ -88,6 +90,7 @@ def exchange(run, raw, engine_owned=False, postgame=False):
         if isinstance(request,dict) and request.get('protocol') == 2:
             from controller.native_strategy import validate_request as validate_native
             validate_native(request)
+            output_limit = STRATEGIC_OUTPUT_LIMIT
         elif (not isinstance(request, dict) or type(request.get("protocol")) is not int or request["protocol"] != 1
                 or not isinstance(request.get("request_id"), str)
                 or not isinstance(request.get("observation"), dict)
@@ -122,7 +125,7 @@ def exchange(run, raw, engine_owned=False, postgame=False):
                                      cwd=directory, env=env, start_new_session=own_group)
             deadline = started + manifest["decision_timeout_seconds"]
             while True:
-                if (directory / "stdout.bin").stat().st_size > OUTPUT_LIMIT:
+                if (directory / "stdout.bin").stat().st_size > output_limit:
                     result["status"] = "output_limit"
                     break
                 if (directory / "stderr.log").stat().st_size > STDERR_LIMIT:
@@ -144,7 +147,7 @@ def exchange(run, raw, engine_owned=False, postgame=False):
             elif own_group:
                 kill_controller(child, own_group)
             result["returncode"] = child.returncode
-        for filename, limit in (("stdout.bin", OUTPUT_LIMIT), ("stderr.log", STDERR_LIMIT)):
+        for filename, limit in (("stdout.bin", output_limit), ("stderr.log", STDERR_LIMIT)):
             path = directory / filename
             with path.open("r+b") as stream:
                 stream.truncate(min(path.stat().st_size, limit))

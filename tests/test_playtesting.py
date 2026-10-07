@@ -421,6 +421,37 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         self.assertEqual((directory / "stderr.log").read_text(), "debug\n")
         self.assertEqual(json.loads((directory / "result.json").read_text())["status"], "invalid_reply")
 
+    def test_strategic_course_above_legacy_limit_reaches_native_reply_channel(self):
+        from test_nullkiller3_controller import strategic_request
+        from test_strategy_guide import final_reply
+        request=strategic_request();reply=final_reply(request)
+        selected=reply['strategy_update']['selected'];text='Ж'*160
+        selected['assumptions']=[dict(text=text,evidence_refs=['observation:day'],uncertainty=text) for _ in range(8)]
+        selected['objective']=selected['selection_reason']=text
+        reply['usage']=dict(input_tokens=1000000000,output_tokens=1000000000,known=True)
+        payload=(json.dumps(reply,ensure_ascii=False,separators=(',',':'))+'\n').encode()
+        self.assertGreater(len(payload),8192)
+        script=self.root/'large-course.py'
+        script.write_text('import sys; sys.stdin.buffer.read(); sys.stdout.buffer.write('+repr(payload)+')')
+        self.settings['controller']=[sys.executable,str(script)]
+        self.prepare();result=self.hook(request)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),reply)
+        record=json.loads(next((self.run_dir/'decisions').glob('*/result.json')).read_text())
+        self.assertEqual(record['status'],'reply_valid')
+
+    def test_strategic_output_limit_rejects_one_byte_more_and_bounds_evidence(self):
+        from test_nullkiller3_controller import strategic_request
+        script=self.root/'oversized-course.py'
+        script.write_text("import sys; sys.stdin.read(); sys.stdout.write('x'*33793)")
+        self.settings['controller']=[sys.executable,str(script)]
+        self.prepare();result=self.hook(strategic_request())
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(result.stdout,'')
+        directory=next((self.run_dir/'decisions').iterdir())
+        self.assertEqual(json.loads((directory/'result.json').read_text())['status'],'output_limit')
+        self.assertEqual((directory/'stdout.bin').stat().st_size,33792)
+
     def test_output_limits_fail_closed_and_keep_bounded_evidence(self):
         self.settings["controller"] = [sys.executable, "-c", "print('x'*9000)"]
         self.prepare()
