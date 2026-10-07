@@ -4,12 +4,30 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ControllerTest(unittest.TestCase):
+    def test_direct_launch_records_each_request_and_reply_by_default(self):
+        request={"protocol":1,"request_id":"recorded","observation":{},
+                 "actions":[{"id":"finish","kind":"end_turn"}]}
+        with tempfile.TemporaryDirectory() as folder:
+            env={**os.environ,"VCMI_PROFILE_DIR":folder,"VCMI_CODEX_EXECUTABLE":"/missing/codex"}
+            env.pop('VCMI_PLAYTEST_DECISION_DIR',None)
+            for _ in range(2):
+                result=subprocess.run([sys.executable,str(ROOT/'controller/main.py')],
+                    input=json.dumps(request),text=True,capture_output=True,env=env,timeout=5)
+                self.assertEqual(result.returncode,0,result.stderr)
+            records=list((Path(folder)/'logs/decisions').iterdir())
+            self.assertEqual(len(records),2)
+            for record in records:
+                self.assertEqual(json.loads((record/'request.json').read_text()),request)
+                self.assertEqual(json.loads((record/'reply.json').read_text())['action_id'],'finish')
+                self.assertEqual(json.loads((record/'explanation.json').read_text())['provider'],'fallback')
+
     def test_utf8_protocol_is_independent_of_process_locale(self):
         request = {"protocol": 1, "request_id": "ход-1", "observation": {}, "actions": [
             {"id": "конец", "kind": "end_turn"}]}

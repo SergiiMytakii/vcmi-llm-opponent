@@ -161,7 +161,6 @@ def run_game(run):
         try:learning.start(env)
         except (OSError,ValueError,subprocess.SubprocessError) as error:
             result['analysis_error']=str(error)
-            env.pop('VCMI_NK3_LEARNING_JOURNAL',None)
         command = prefix + args
         write_json(run / "command.json", command)
         manifest["status"] = "running"

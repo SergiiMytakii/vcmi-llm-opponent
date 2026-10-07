@@ -21,16 +21,16 @@ class LearningRuntime:
         self.journal=self.directory/'turns.jsonl'
 
     def start(self,env):
+        self.directory.mkdir(parents=True,exist_ok=True)
+        env['VCMI_NK3_LEARNING_JOURNAL']=str(self.journal)
         experience=self.manifest.get('experience',{})
         if experience.get('mode')!='learn':return
-        self.directory.mkdir(parents=True,exist_ok=True)
         finish=self.directory/'FINISH'
         if finish.exists():finish.unlink()
         database=experience['database']
         publish_knowledge(database)
         players=','.join(str(i) for i,color in enumerate(('red','blue','tan','green','orange','purple','teal','pink'))
             if self.manifest.get('players',{}).get(color)=='Nullkiller3')
-        env['VCMI_NK3_LEARNING_JOURNAL']=str(self.journal)
         command=[sys.executable,str(ROOT/'controller/analyze.py'),'--database',database,
             '--journal',str(self.journal),'--players',players,
             '--stop-file',str(self.run/'STOP'),'--finish-file',str(self.directory/'FINISH'),

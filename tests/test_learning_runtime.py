@@ -19,6 +19,23 @@ from playtesting.learning import LearningRuntime
 
 
 class LearningRuntimeTest(unittest.TestCase):
+    def test_turn_recording_is_enabled_even_without_learning(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runtime=LearningRuntime(folder,{'experience':{'mode':'off'}})
+            env={}
+            runtime.start(env)
+            self.assertEqual(env.get('VCMI_NK3_LEARNING_JOURNAL'),str(Path(folder)/'learning/turns.jsonl'))
+            self.assertTrue(runtime.directory.is_dir())
+            self.assertIsNone(runtime.child)
+
+    def test_turn_recording_survives_analyst_setup_failure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runtime=LearningRuntime(folder,{'experience':{'mode':'learn','database':'unused'}})
+            env={}
+            with patch('playtesting.learning.publish_knowledge',side_effect=OSError('unavailable')):
+                with self.assertRaises(OSError):runtime.start(env)
+            self.assertEqual(env.get('VCMI_NK3_LEARNING_JOURNAL'),str(runtime.journal))
+
     def test_only_one_analyst_can_own_a_database(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'experience.sqlite3'
