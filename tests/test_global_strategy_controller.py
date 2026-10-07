@@ -36,6 +36,26 @@ class GlobalStrategyControllerTest(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),reply)
 
+    def test_model_schema_rejects_inconsistent_milestone_roles(self):
+        from controller.native_strategy import reply_schema
+        from controller.strategy import _validate_shape
+        request=strategic_request();schema=reply_schema(request)["properties"]["strategy_update"]["properties"]["selected"]["anyOf"][1]["properties"]["milestones"]["items"]["properties"]["complete_when"]
+        cases=[dict(kind='army_at_least',target_ref='object:0',actor_ref='object:0',value=5000),
+               dict(kind='army_at_least',target_ref=None,actor_ref=None,value=5000),
+               dict(kind='building_present',target_ref='object:1',actor_ref='object:0',value=0),
+               dict(kind='site_visited',target_ref='object:1',actor_ref=None,value=0),
+               dict(kind='passage_explored',target_ref='object:1',actor_ref='object:0',value=1)]
+        for predicate in cases:
+            answer=final_reply(request)
+            answer['strategy_update']['selected']['milestones'][0]['complete_when']=predicate
+            with self.subTest(predicate=predicate),self.assertRaises(ValueError):
+                _validate_shape(predicate,schema)
+        answer=final_reply(request)
+        answer['strategy_update']['selected']['milestones'][0]['complete_when']=dict(
+            kind='army_at_least',target_ref=None,actor_ref='object:0',value=5000)
+        _validate_shape(answer["strategy_update"]["selected"]["milestones"][0]["complete_when"],schema)
+        validate_reply(request,answer)
+
     def installed(self):
         request=strategic_request()
         selected=final_reply(request)['strategy_update']['selected']

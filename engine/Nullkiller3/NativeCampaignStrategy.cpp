@@ -453,8 +453,9 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     action["installed_revision"]=campaign.plan()["revision"];
     action["strategy_update"]=attemptedReply["strategy_update"]["decision"];
     action["strategy_change_reason"]=attemptedReply["strategy_update"]["change_reason"];
-    action["strategy_revision"]=persisted["strategic_intent"]["revision"];
-    action["strategy_objective"]=persisted["strategic_intent"]["objective"];
+    const auto & installedIntent=static_cast<const JsonNode &>(persisted)["strategic_intent"];
+    action["strategy_revision"]=installedIntent["revision"];
+    action["strategy_objective"]=installedIntent["objective"];
     action["operation_focus"]=accepted ? attemptedReply["operation_focus"] : JsonNode();
     action["proposed_goals"].Vector();
     if(attemptedReply["plan"]["goals"].isVector())

@@ -128,6 +128,35 @@ class NativeStrategicExchangeTest(unittest.TestCase):
         self.assertEqual(echoed['decision'],'retain')
 
 
+    def test_rejected_initial_reply_keeps_absent_course_null_in_next_request(self):
+        config=json.loads(Path(os.environ['VCMI_NK3_STRATEGY_CONFIG']).read_text())
+        output=Path(tempfile.mkdtemp(prefix='nk3-null-course-',dir=ROOT/'.build/playtests'))
+        print('\nNK3 null-course evidence:',output,flush=True)
+        script=output/'no-answer.py';script.write_text('import sys; sys.stdin.read(); sys.exit(75)')
+        config.update(players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='model',references={},
+            controller=[sys.executable,str(script)],controller_sources=[str(script)],
+            purpose='integration',case_id='nk3-null-course',headless=True,max_seconds=12,
+            decision_timeout_seconds=2,experience_mode='off',review_interval_days=0)
+        config.pop('save_resource',None)
+        path=output/'config.json';path.write_text(json.dumps(config));run=output/'run'
+        subprocess.run([sys.executable,str(CLI),'prepare','--config',str(path),'--out',str(run)],check=True,capture_output=True)
+        with (output/'driver.log').open('w') as log:
+            child=subprocess.Popen([sys.executable,str(CLI),'run','--run',str(run)],
+                env={**os.environ,'VCMI_AI_OPEN_MAP':'1'},stdout=log,stderr=subprocess.STDOUT)
+            try:
+                deadline=time.monotonic()+17
+                while child.poll() is None and time.monotonic()<deadline:
+                    files=list((run/'decisions').glob('*/result.json'))
+                    if len(files)>=2 and all(json.loads(p.read_text()).get('status')!='started' for p in files):break
+                    time.sleep(.05)
+            finally:
+                (run/'STOP').touch(exist_ok=True);child.wait(timeout=15)
+        launch=json.loads((run/'launch.json').read_text())
+        self.assertTrue(launch['cleanup_complete']);self.assertTrue(launch['protected_files_unchanged'])
+        requests=[json.loads(p.read_text()) for p in (run/'decisions').glob('*/request.json')]
+        self.assertGreaterEqual(len(requests),2,'native proof did not reach a later permitted request')
+        for request in requests:self.assertIsNone(request['strategic_intent'])
+
     def test_strategy_goal_and_invalid_reply_fallback_through_recorder(self):
         config=json.loads(Path(os.environ['VCMI_NK3_STRATEGY_CONFIG']).read_text())
         output=Path(tempfile.mkdtemp(prefix='nk3-strategy-',dir=ROOT/'.build/playtests'))

@@ -129,20 +129,34 @@ def selected_schema(request, current=False):
     text = {'type':'string','minLength':1,'maxLength':160}
     label = {'type':'string','minLength':1,'maxLength':30}
     refs = sorted(strategic_objects(request))
-    target = {'type':['string','null'],'enum':[None,*refs]}
+    target = {'type':'string','enum':refs}
     actors = sorted(h['ref'] for h in request['observation']['heroes'])
-    actor = {'type':['string','null'],'enum':[None,*actors]}
+    actor = {'type':'string','enum':actors}
     # Saved courses may contain historical targets/actors no longer in this view.
     if current:
-        target = actor = {'type':['string','null'],'minLength':1,'maxLength':40}
+        target = actor = {'type':'string','minLength':1,'maxLength':40}
+    predicates = []
+    if refs or current:
+        predicates.extend([
+            _object({'kind':{'type':'string','enum':['target_owned']},'target_ref':target,
+                'actor_ref':{'type':'null'},'value':{**integer(0,7),
+                    **({} if current else {'enum':[request['observation']['player']]})}}),
+            _object({'kind':{'type':'string','enum':['building_present']},'target_ref':target,
+                'actor_ref':{'type':'null'},'value':integer(0,100000)})])
+    if actors or current:
+        predicates.append(_object({'kind':{'type':'string','enum':['army_at_least']},
+            'target_ref':{'type':'null'},'actor_ref':actor,'value':integer(1,1000000000)}))
+        if refs or current:
+            predicates.append(_object({'kind':{'type':'string','enum':['site_visited','passage_explored']},
+                'target_ref':target,'actor_ref':actor,'value':{**integer(0,0),'enum':[0]}}))
+    if not predicates:raise ValueError('no supported strategic milestone predicate')
     return _object({'objective':text,'selection_reason':text,
         'assumptions':array(_object({'text':text,
             'evidence_refs':array({'type':'string','minLength':1,'maxLength':40,
                                  **({} if current else {'enum':evidence(request)})},1,8),
             'uncertainty':text}),0,8),
         'milestones':array(_object({'id':label,'description':text,'depends_on':array(label,0,5),
-            'complete_when':_object({'kind':{'type':'string','enum':list(INTENT_PREDICATES)},
-                'target_ref':target,'actor_ref':actor,'value':integer(0,1000000000)})}),3,6),
+            'complete_when':{'anyOf':predicates}}),3,6),
         'reconsider_when':array(_object({'kind':{'type':'string','enum':list(INTENT_REASONS)},
             'milestone_id':label,'reason':text}),1,12)})
 
