@@ -1,4 +1,5 @@
 """Guide access through the controller's actual stdin and CLI process boundary."""
+from fixtures.strategic_intent import with_intent
 import json
 import os
 from pathlib import Path
@@ -43,7 +44,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':120,'output_to
 '''
 
 def final_reply(request):
-    return dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
+    return with_intent(request,dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
         reason='Develop income',evidence_refs=['town:object:1'],victory_method='Fund conquest',assignments=[],
         alternatives=[dict(approach='economy',benefit='Income',cost='Resources',uncertainty='Threats'),
                       dict(approach='offense',benefit='Pressure',cost='Army',uncertainty='Routes')],
@@ -52,7 +53,7 @@ def final_reply(request):
             goals=[dict(id='guild',kind='develop_town',actor_ref=None,target_ref='object:1',deadline_day=3,
                 priority=80,building_id=0,min_army_value=0,depends_on=[],required_capabilities=['build'],
                 complete_when=dict(kind='building_present',value=0))],reserves=[],
-            policy=dict(max_loss_ratio=.2,allow_route_repair=True,allow_helper_replacement=True,critical_towns=['object:1'])))
+            policy=dict(max_loss_ratio=.2,allow_route_repair=True,allow_helper_replacement=True,critical_towns=['object:1']))))
 
 class StrategyGuideTest(unittest.TestCase):
     def setUp(self):
@@ -91,6 +92,16 @@ class StrategyGuideTest(unittest.TestCase):
         result=self.exchange();self.assertNotEqual(result.returncode,0)
         self.assertIn('error',json.loads((self.folder/'tool-result.json').read_text()))
         self.assertEqual(result.stdout,'')
+
+    def test_global_course_advice_is_loaded_on_demand_in_the_same_call(self):
+        self.env.update(GUIDE_TEST_MODE='consult',GUIDE_TEST_IDS='["global_strategy"]')
+        result=self.exchange();self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(len(list(self.folder.glob('call-*.json'))),1)
+        sections=json.loads(json.loads((self.folder/'tool-result.json').read_text())['result']['content'][0]['text'])
+        self.assertEqual([s['id'] for s in sections],['global_strategy'])
+        self.assertEqual(sections[0]['text'],(ROOT/'controller/strategy_guide/rules/global_strategy.md').read_text())
+        call=json.loads((self.folder/'call-1.json').read_text())
+        self.assertNotIn('production-led expansion',call['instructions'])
 
     def test_off_mode_uses_one_normal_decision_without_catalog(self):
         self.env['VCMI_STRATEGY_GUIDE_MODE']='off'

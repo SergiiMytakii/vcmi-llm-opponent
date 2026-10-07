@@ -81,6 +81,22 @@ class ProcessExchangeTest(unittest.TestCase):
         self.assertIn("reply too large", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_strategic_reply_limit_includes_wire_usage_and_stays_bounded(self):
+        for size in (8193, 32769, 33792, 33793):
+            with self.subTest(size=size):
+                result = subprocess.run(
+                    [str(DRIVER), "2000", sys.executable, "-c",
+                     f"import sys; sys.stdin.read(); sys.stdout.write('x' * {size})"],
+                    input="request", text=True, capture_output=True, timeout=5,
+                    env={**os.environ, "EXCHANGE_REPLY_BYTES": "33792"})
+                if size <= 33792:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(len(result.stdout.encode()), size)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("reply too large", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
     def test_nonzero_exit_does_not_return_partial_reply(self):
         result = self.exchange("import sys; print('partial'); sys.exit(7)")
         self.assertNotEqual(result.returncode, 0)

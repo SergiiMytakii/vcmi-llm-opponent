@@ -1,4 +1,5 @@
 """Keep one legal handoff intent and the named source army pledge."""
+from strategic_intent import with_intent
 import copy,json,os,sys,time
 from pathlib import Path
 r=json.load(sys.stdin);world=r['observation'];hero=world['heroes'][0];town=world['towns'][0];helper=world['heroes'][1]
@@ -38,4 +39,4 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
                dict(approach='offense',benefit='Supply the main force',cost='Change the source pledge',uncertainty='Future threats')],
  reconsider_when=[dict(goal_id=delivery,kind='route_not_established')],plan=plan if renumber or release or not r.get('campaign') else None,
  usage=dict(input_tokens=0,output_tokens=0,known=True))
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

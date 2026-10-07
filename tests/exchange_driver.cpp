@@ -22,7 +22,9 @@ static int run(const std::vector<std::string> & argv)
 			std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
 			cancelled = true;
 		});
-	auto reply = externalai::exchange(argv[2], arguments, input, timeout, cancelled);
+	const auto * limit = std::getenv("EXCHANGE_REPLY_BYTES");
+	auto reply = externalai::exchange(argv[2], arguments, input, timeout, cancelled,
+		limit ? std::stoull(limit) : 8192);
 	if(cancellation.joinable())
 		cancellation.join();
 	if(!reply.error.empty())

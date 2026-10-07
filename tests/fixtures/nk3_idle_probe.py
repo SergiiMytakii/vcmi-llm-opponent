@@ -1,4 +1,5 @@
 """Return an unexecutable scout, then correct it through the real request boundary."""
+from strategic_intent import with_intent
 import json
 import sys
 
@@ -37,4 +38,4 @@ reply = dict(protocol=2, request_id=request['request_id'], identity=request['ide
                            dict(approach='expansion', benefit='Resources', cost='Movement', uncertainty='Future threats')],
              reconsider_when=[dict(goal_id=goal['id'], kind='route_not_established')], plan=plan,
              usage=dict(input_tokens=100, output_tokens=100, known=True))
-print(json.dumps(reply))
+print(json.dumps(with_intent(request,reply)))

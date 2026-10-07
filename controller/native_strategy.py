@@ -11,6 +11,8 @@ KINDS = ('hire_helper', 'develop_town', 'secure_resource', 'prepare_garrison', '
          'defend_area', 'scout_frontier', 'scout_area', 'visit_site', 'preserve_force', 'explore_passage')
 APPROACHES = ('economy', 'expansion', 'offense', 'defense', 'scouting')
 ROLES = ('main', 'defender', 'scout', 'collector', 'reinforcement')
+INTENT_PREDICATES = ('target_owned', 'building_present', 'army_at_least', 'site_visited', 'passage_explored')
+INTENT_REASONS = ('target_lost', 'actor_lost', 'base_threat', 'route_blocked', 'no_progress', 'milestone_completed')
 
 
 def integer(low, high):
@@ -26,6 +28,18 @@ def references(request):
     return {item['ref'] for key in ('heroes', 'towns', 'objects', 'scouting_options') for item in world.get(key, [])} | set(world.get('frontiers', []))
 
 
+def strategic_objects(request):
+    world = request['observation']
+    overview = world.get('map_overview', {})
+    result = {}
+    for key in ('heroes','towns','objects','visible_objects'):
+        for item in world.get(key, []):
+            if isinstance(item,dict) and 'ref' in item:result.setdefault(item['ref'],item)
+    for item in overview.get('objects', []):
+        if isinstance(item,dict) and 'ref' in item:result.setdefault(item['ref'],item)
+    return result
+
+
 def evidence(request):
     refs = campaign_evidence({**request, 'actions': []})
     if 'goal_feedback' in request['observation']:
@@ -36,6 +50,10 @@ def evidence(request):
         refs.append('observation:scouting_options')
     if 'main_army_idle' in request['observation']:
         refs.append('observation:main_army_idle')
+    if 'map_overview' in request['observation']:
+        refs.append('observation:map_overview')
+        refs.extend('target:' + ref for ref in strategic_objects(request))
+    refs.extend(request.get('evidence_refs', []))
     return sorted(set(refs))
 
 
@@ -61,6 +79,16 @@ def validate_request(request):
         raise ValueError('invalid strategic budget')
     if not isinstance(request.get('memory'), dict) or not isinstance(request.get('signals'), list) or not request['signals']:
         raise ValueError('missing strategic evidence')
+    if 'strategic_intent' not in request or request['strategic_intent'] is not None and not isinstance(request['strategic_intent'], dict):
+        raise ValueError('missing strategic intent')
+    if request['strategic_intent'] is not None:
+        intent = request['strategic_intent']
+        if type(intent.get('version')) is not int or intent['version'] != 1 or type(intent.get('revision')) is not int or not 1 <= intent['revision'] <= 2147483647:
+            raise ValueError('invalid strategic intent revision')
+        if type(intent.get('adopted_day')) is not int or not 1 <= intent['adopted_day'] <= world['day']:
+            raise ValueError('invalid strategic intent adoption')
+        selected = {key:intent[key] for key in ('objective','selection_reason','assumptions','milestones','reconsider_when') if key in intent}
+        validate_selected(request, selected, current=True)
     if not references(request) or not evidence(request): raise ValueError('no supported strategic evidence')
 
 
@@ -91,14 +119,89 @@ def visit_site_available(site):
     if site.get('visible') is not True or site.get('visited') is not False:
         return False
     kind=site.get('kind')
-    return (kind in ('scholar','treasure_chest','obelisk')
+    return (kind in ('scholar','treasure_chest','obelisk','artifact')
             or kind=='keymaster_tent' and site.get('key_owned') is False
             or kind in ('border_guard','border_gate') and site.get('key_owned') is True
                and bool(site.get('eligible_hero_refs')))
 
 
+def selected_schema(request, current=False):
+    text = {'type':'string','minLength':1,'maxLength':160}
+    label = {'type':'string','minLength':1,'maxLength':30}
+    refs = sorted(strategic_objects(request))
+    target = {'type':['string','null'],'enum':[None,*refs]}
+    actors = sorted(h['ref'] for h in request['observation']['heroes'])
+    actor = {'type':['string','null'],'enum':[None,*actors]}
+    # Saved courses may contain historical targets/actors no longer in this view.
+    if current:
+        target = actor = {'type':['string','null'],'minLength':1,'maxLength':40}
+    return _object({'objective':text,'selection_reason':text,
+        'assumptions':array(_object({'text':text,
+            'evidence_refs':array({'type':'string','minLength':1,'maxLength':40,
+                                 **({} if current else {'enum':evidence(request)})},1,8),
+            'uncertainty':text}),0,8),
+        'milestones':array(_object({'id':label,'description':text,'depends_on':array(label,0,5),
+            'complete_when':_object({'kind':{'type':'string','enum':list(INTENT_PREDICATES)},
+                'target_ref':target,'actor_ref':actor,'value':integer(0,1000000000)})}),3,6),
+        'reconsider_when':array(_object({'kind':{'type':'string','enum':list(INTENT_REASONS)},
+            'milestone_id':label,'reason':text}),1,12)})
+
+
+def validate_selected(request, selected, current=False):
+    schema = selected_schema(request,current)
+    seen = set()
+    def byte_limits(value):
+        if isinstance(value,dict):
+            if id(value) in seen:return
+            seen.add(id(value))
+            if 'maxLength' in value:value['maxLength']*=4
+            for item in value.values():byte_limits(item)
+        elif isinstance(value,list):
+            for item in value:byte_limits(item)
+    byte_limits(schema)
+    _validate_shape(selected,schema)
+    milestones = {m['id']:m for m in selected['milestones']}
+    if len(milestones) != len(selected['milestones']):raise ValueError('duplicate strategic milestone')
+    def visit(name, stack):
+        if name not in milestones or name in stack:raise ValueError('missing or cyclic milestone dependency')
+        dependencies=milestones[name]['depends_on']
+        if len(set(dependencies)) != len(dependencies):raise ValueError('duplicate milestone dependency')
+        for dep in dependencies:visit(dep,stack|{name})
+    for name in milestones:visit(name,set())
+    objects = strategic_objects(request)
+    towns = {t['ref'] for t in request['observation']['towns']}
+    heroes = {h['ref'] for h in request['observation']['heroes']}
+    for milestone in milestones.values():
+        p = milestone['complete_when'];kind=p['kind'];target=p['target_ref'];actor=p['actor_ref'];value=p['value']
+        if not current and target is not None and objects.get(target,{}).get('visible') is False:
+            raise ValueError('strategic target is not currently visible')
+        if kind=='army_at_least':
+            if target is not None or actor is None or value<1 or not current and actor not in heroes:
+                raise ValueError('invalid strategic army predicate')
+        elif kind in ('target_owned','building_present'):
+            if actor is not None or target is None:raise ValueError('invalid strategic ownership predicate')
+            if kind=='target_owned' and (value>7 or not current and value != request['observation']['player']):
+                raise ValueError('invalid strategic target owner')
+            if kind=='building_present' and value>100000:raise ValueError('invalid strategic building')
+            if not current:
+                kinds=('town','mine') if kind=='target_owned' else ('town',)
+                if target not in towns and objects.get(target,{}).get('kind') not in kinds:
+                    raise ValueError('unsupported strategic ownership target')
+        else:
+            if target is None or actor is None or value != 0:raise ValueError('invalid strategic action predicate')
+            if not current:
+                kind_expected=('subterranean_gate',) if kind=='passage_explored' else ('scholar','treasure_chest','obelisk','artifact','keymaster_tent','border_guard','border_gate')
+                if actor not in heroes or objects.get(target,{}).get('kind') not in kind_expected:
+                    raise ValueError('unsupported strategic action target')
+    if any(c['milestone_id'] not in milestones for c in selected['reconsider_when']):
+        raise ValueError('unknown strategic reconsideration milestone')
+    return milestones
+
+
 def reply_schema(request):
     world = request['observation']
+    intent = request.get('strategic_intent')
+    intent_revision = intent['revision'] if intent else 0
     day = world['day']
     text = {'type': 'string', 'minLength': 1, 'maxLength': 160}
     heroes = sorted(h['ref'] for h in world['heroes'])
@@ -197,7 +300,14 @@ def reply_schema(request):
                   'alternatives':array(_object({'approach':approach,'benefit':text,'cost':text,'uncertainty':text}),2,3),
                   'reconsider_when':array(_object({'goal_id':label,'kind':{'type':'string','enum':
                                               ['executor_lost','deadline_missed','route_not_established']}}),1),
-                  'plan':{'anyOf':[{'type':'null'},plan]}}
+                  'plan':{'anyOf':[{'type':'null'},plan]},
+                  'strategy_update':_object({'decision':{'type':'string','enum':['keep','revise'] if intent else ['revise']},
+                      'base_revision':{**integer(0,2147483647),'enum':[intent_revision]},
+                      'selected':{'anyOf':[{'type':'null'},selected_schema(request)]},
+                      'change_reason':{'anyOf':[{'type':'null'},text]}}),
+                  'operation_focus':_object({'revision':{**integer(1,2147483647),
+                      'enum':[intent_revision,intent_revision+1] if intent else [1]},
+                      'bindings':array(_object({'goal_id':label,'milestone_id':label}),0,16)})}
     if needs_defense_exit(request):
         properties['defense_exit']={'anyOf':[{'type':'null'},_object({
             'waiting_for':text,'expected_gain':text,'next_step':text})]}
@@ -218,8 +328,11 @@ def validate_reply(request, reply, wire=False):
     # JSON Schema lengths count Unicode characters. The native value contract
     # caps UTF-8 bytes; four bytes per character is its conservative bound.
     byte_schema = copy.deepcopy(schema)
+    seen = set()
     def byte_limits(value):
         if isinstance(value,dict):
+            if id(value) in seen:return
+            seen.add(id(value))
             if value.get('type')=='string' and 'maxLength' in value:value['maxLength']*=4
             for item in value.values():byte_limits(item)
         elif isinstance(value,list):
@@ -242,6 +355,27 @@ def validate_reply(request, reply, wire=False):
     if reply['decision'] == 'retain':
         if reply['plan'] is not None or not plan: raise ValueError('retain requires a current campaign')
     elif not plan: raise ValueError('revise requires a complete campaign')
+    update=reply['strategy_update'];current=request.get('strategic_intent')
+    base=current['revision'] if current else 0
+    if update['base_revision'] != base:raise ValueError('stale strategic intent revision')
+    if update['decision']=='keep':
+        if current is None or update['selected'] is not None or update['change_reason'] is not None:
+            raise ValueError('keep requires an unchanged accepted strategic intent')
+        milestones={m['id']:m for m in current['milestones']}
+        intent_revision=base
+    else:
+        if update['selected'] is None or update['change_reason'] is None:
+            raise ValueError('revise requires a selected course and change reason')
+        milestones=validate_selected(request,update['selected'])
+        intent_revision=base+1
+    focus=reply['operation_focus']
+    if focus['revision'] != intent_revision:raise ValueError('stale operation focus revision')
+    goal_ids={g['id'] for g in plan['goals']}
+    bound=set()
+    for binding in focus['bindings']:
+        if binding['goal_id'] not in goal_ids or binding['milestone_id'] not in milestones or binding['goal_id'] in bound:
+            raise ValueError('invalid strategic operation binding')
+        bound.add(binding['goal_id'])
     if needs_defense_exit(request) and any(g['kind'] in ('defend_area','preserve_force') for g in plan['goals']):
         if reply.get('defense_exit') is None:
             raise ValueError('repeated_hold_requires_wait_gain_and_next_step')
@@ -337,7 +471,7 @@ def validate_reply(request, reply, wire=False):
     if any(c['goal_id'] not in goals for c in reply['reconsider_when']): raise ValueError('unknown reconsideration goal')
     if len({json.dumps(a,sort_keys=True,ensure_ascii=False) for a in reply['alternatives']}) != len(reply['alternatives']):
         raise ValueError('strategic alternatives must differ in content')
-    if len(json.dumps(reply,ensure_ascii=False,separators=(',',':')).encode('utf-8')) > 7600:
+    if len(json.dumps(reply,ensure_ascii=False,separators=(',',':')).encode('utf-8')) > 32768:
         raise ValueError('strategy exceeds native reply budget')
     if wire: reply['usage'] = usage
     return reply

@@ -2,6 +2,7 @@
 
 #include "json/JsonNode.h"
 #include "ObservedPassages.h"
+#include "StrategicIntent.h"
 #include <charconv>
 #include <set>
 
@@ -56,11 +57,34 @@ inline bool validExecutionSnapshot(const JsonNode & snapshot)
     }
     return true;
 }
+inline bool validSavedArtifactEvent(const JsonNode & event)
+{
+    return validArtifactVisitEvidence(event) && event.toCompactString().size()<=32768
+        && savedInteger(event["day"],1,2147483647) && savedInteger(event["target_id"],0,1000000000)
+        && savedPosition(event["position"]) && event["goal"]["id"].isString() && !event["goal"]["id"].String().empty()
+        && event["goal"]["id"].String().size()<=120 && event["goal"]["actor_ref"].isString()
+        && event["goal"]["actor_ref"].String().size()<=160 && event["goal"]["target_ref"].isString()
+        && !event["goal"]["target_ref"].String().empty() && event["goal"]["target_ref"].String().size()<=160;
+}
 inline bool validPendingTask(const JsonNode & task)
 {
     if(task.isNull()) return true;
     if(!task.isStruct() || !savedInteger(task["version"],1,1) || !validExecutionSnapshot(task["before"]) || !task["action"].isStruct()) return false;
     const auto & action=task["action"];
+    const auto & operative=action["goal"];
+    if(!operative.isNull() && (!operative.isStruct() || operative.toCompactString().size()>8192
+        || operative["id"]!=action["goal_id"] || !intentText(operative["kind"],120)
+        || !intentText(operative["target_ref"],160) || (!operative["actor_ref"].isNull() && !intentText(operative["actor_ref"],160))
+        || !savedInteger(operative["deadline_day"],1,2147483647) || !operative["complete_when"].isStruct())) return false;
+    if(!action["campaign_revision"].isNull() && !savedInteger(action["campaign_revision"],operative.isNull() ? 0 : 1,2147483647)) return false;
+    const auto & artifact=action["artifact_visit"];
+    if(!artifact.isNull())
+    {
+        if(!validSavedArtifactEvent(artifact) || artifact["goal"]["id"]!=action["goal_id"] || (!operative.isNull() && artifact["goal"]!=operative)) return false;
+        bool owned=false;
+        for(const auto & hero:task["before"]["heroes"].Vector()) owned |= hero["ref"]==artifact["goal"]["actor_ref"];
+        if(!owned) return false;
+    }
     const auto & emergency=action["emergency"];
     if(!emergency.isNull())
     {
@@ -92,7 +116,24 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         return result; // Unknown consumed budget cannot become fresh allowance.
     }
     JsonNode result=saved;
-    bool invalid=!validNativeAliases(saved["object_ids"]) || !validPendingTask(saved["pending_native_task"])
+    if(!validSavedStrategicIntent(saved["strategic_intent"]))
+    {
+        result.Struct().erase("strategic_intent");
+        if(result["strategy_metadata"].isStruct()) result["strategy_metadata"].Struct().erase("operation_focus");
+    }
+    // An invalid optional pickup proof cannot discard an otherwise valid
+    // pending native command or rerun it. Drop only that untrusted proof.
+    if(!saved["pending_native_task"]["action"]["artifact_visit"].isNull()
+        && !validPendingTask(result["pending_native_task"]))
+        result["pending_native_task"]["action"].Struct().erase("artifact_visit");
+    if(saved["site_receipts"].isStruct())
+        std::erase_if(result["site_receipts"].Struct(),[](const auto & entry) {
+            const auto & receipt=entry.second;const auto & proof=receipt["artifact_visit"];
+            return !proof.isNull() && (!validSavedArtifactEvent(proof) || !artifactVisitConfirmed(proof)
+                || proof["goal"]!=receipt["goal"] || proof["day"]!=receipt["day"]);
+        });
+    const JsonNode & checkedResult=result;
+    bool invalid=!validNativeAliases(saved["object_ids"]) || !validPendingTask(result["pending_native_task"])
         || !validObservedPassages(saved["observed_passages"]);
     const auto & checkpoint=saved["checkpoint_baseline"];
     if(!checkpoint.isNull())
@@ -144,7 +185,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         }
     }
     for(const auto * field:{"local_repairs","delivery_receipts","passage_receipts","site_receipts","helper_hire_receipts","goal_blockers"})
-        if(saved[field].isStruct()) for(const auto & [id,item]:saved[field].Struct())
+        if(checkedResult[field].isStruct()) for(const auto & [id,item]:checkedResult[field].Struct())
         {
             invalid |= !item.isStruct();
             if(!item.isStruct()) continue;
@@ -156,7 +197,10 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
                     || (!item["route_turns"].isNull() && !savedInteger(item["route_turns"],0,2147483647));
             if(std::string(field)=="delivery_receipts") invalid |= !item["goal"].isStruct();
             if(std::string(field)=="site_receipts")
-                invalid |= item.Struct().size()!=2 || !item["goal"].isStruct() || !savedInteger(item["day"],1,2147483647);
+                invalid |= (item.Struct().size()!=2 && (item.Struct().size()!=3 || !item.Struct().count("artifact_visit"))) || !item["goal"].isStruct() || !savedInteger(item["day"],1,2147483647)
+                    || (!item["artifact_visit"].isNull() && (!validSavedArtifactEvent(item["artifact_visit"])
+                        || !artifactVisitConfirmed(item["artifact_visit"]) || item["artifact_visit"]["goal"]!=item["goal"]
+                        || item["artifact_visit"]["day"]!=item["day"]));
             if(std::string(field)=="helper_hire_receipts")
                 invalid |= item.Struct().size()!=4 || !item["goal"].isStruct() || item["goal"]["kind"].String()!="hire_helper"
                     || !savedInteger(item["day"],1,2147483647) || !item["hero_ref"].isString() || item["hero_ref"].String().empty()
@@ -216,9 +260,21 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         }
     }
     if(invalid)
-        for(const auto * field:{"object_ids","memory","native_campaign","strategy_metadata","local_repairs",
+        for(const auto * field:{"object_ids","memory","native_campaign","strategic_intent","strategy_metadata","local_repairs",
                                "delivery_receipts","passage_receipts","site_receipts","helper_hire_receipts","observed_passages","goal_blockers","frontier_positions","confirmed_border_visits","confirmed_resource_pickups","pending_native_task","building_progress","operation_progress","checkpoint_baseline"})
             result.Struct().erase(field);
+    // A discarded installed course is a new native fact. Reopen just its
+    // initialization question; consumed budget and every other baseline survive.
+    // A null course after timeout/rejection keeps its addressed baseline.
+    if(!saved["strategic_intent"].isNull() && static_cast<const JsonNode &>(result)["strategic_intent"].isNull()
+        && saved["request_arbiter"]["addressed"].isStruct())
+        result["request_arbiter"]["addressed"].Struct().erase("initial_strategy");
+    if(result["strategy_metadata"].isStruct())
+    {
+        const std::set<std::string> kept{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus"};
+        std::erase_if(result["strategy_metadata"].Struct(),[&](const auto & item) { return !kept.count(item.first); });
+        if(result["strategic_intent"].isNull()) result["strategy_metadata"].Struct().erase("operation_focus");
+    }
     if(result["strategy_metadata"].isStruct())
         for(auto & assignment:result["strategy_metadata"]["assignments"].Vector())
             assignment.Struct().erase("goal_ids");

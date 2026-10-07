@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from codex_fixture import codex_fixture
+from fixtures.strategic_intent import with_intent
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,7 +20,7 @@ def strategic_request():
                                  towns=[dict(id=1,ref='object:1',buildings=[],building_options=[dict(id=0,supported=True)])],
                                  objects=[dict(id=1,ref='object:1',kind='town',owner=0,visible=True)],
                                  frontiers=['tile:frontier'],capabilities=['land','build','transfer']),
-                memory=dict(known_objects=[dict(ref='object:1')]),campaign=None,
+                strategic_intent=None,memory=dict(known_objects=[dict(ref='object:1')]),campaign=None,
                 signals=[dict(question='opening',facts='no_campaign')],budget=dict(wait_ms=70000,tokens=12000))
 
 
@@ -52,7 +53,7 @@ class NativeStrategyControllerTest(unittest.TestCase):
                         complete_when=dict(kind=completion,value=value))],reserves=[],
                     policy=dict(max_loss_ratio=.25,allow_route_repair=True,allow_helper_replacement=True,critical_towns=[])))
             if kind=='prepare_garrison':reply['plan']['goals'][0]['garrison_mode']='recruit_then_detach'
-            return reply
+            return with_intent(request,reply)
         validate_reply(request,answer('prepare_garrison','object:1','garrison_at_least',1000))
         validate_reply(request,answer('intercept_hero','object:2','enemy_engaged',0))
         for bad in [answer('prepare_garrison','object:0','garrison_at_least',1000),
@@ -93,6 +94,8 @@ answer=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decisio
  alternatives=[dict(approach='economy',benefit='Income',cost='Building resources',uncertainty='Threats unknown'),
                dict(approach='offense',benefit='Earlier pressure',cost='Army resources',uncertainty='Enemy location unknown')],
  reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan)
+from strategic_intent import with_intent
+answer=with_intent(r,answer)
 mode=os.environ['NK3_STUB_MODE']
 if mode in ('risk_protect','risk_accept'):
  answer['alternatives'][1]=dict(approach='defense',benefit='Preserve town income and recruits',cost='Divert the current operation',uncertainty='Enemy arrival unknown')

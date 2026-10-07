@@ -9,6 +9,13 @@
       "enabled": true
     },
     {
+      "id": "global_strategy",
+      "title": "Global strategy",
+      "applicability": "Initial saved course or material reconsideration: victory directions, milestones and transition cost.",
+      "file": "rules/global_strategy.md",
+      "enabled": true
+    },
+    {
       "id": "development",
       "title": "Development",
       "applicability": "Balancing income payback, construction chains, weekly growth, army production and delivery.",

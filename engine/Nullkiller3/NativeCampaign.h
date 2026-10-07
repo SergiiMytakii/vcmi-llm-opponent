@@ -56,6 +56,7 @@ class NativeCampaign
     std::map<int, JsonNode> passageVisits;
     std::vector<JsonNode> completedPassageVisits;
     JsonNode activeSiteGoal;
+    JsonNode activeArtifactVisit; // Mutex-protected exact pickup evidence; no engine pointer survives save.
     int activeSiteActor=-1,activeSiteObject=-1,activeSiteDay=0;
     std::map<int,JsonNode> siteVisits;
     std::vector<JsonNode> endedSiteVisits;
@@ -84,6 +85,7 @@ class NativeCampaign
     void traceCampaign() const;
     void observeBuildingProgress();
     void observeOperationProgress();
+    void observeIntentProgress();
     void recordCheckpointBaseline();
     std::vector<StrategicSignal> strategicSignals(NK2AI::Nullkiller & ai,bool includeIdle);
 

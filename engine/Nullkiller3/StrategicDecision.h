@@ -1,5 +1,6 @@
 #pragma once
 #include "CampaignState.h"
+#include "StrategicIntent.h"
 #include "RequestArbiter.h"
 #include "Forecasts.h"
 #include "OffensivePreparation.h"
@@ -87,5 +88,6 @@ std::string repairQuestionFacts(const JsonNode & plan, const JsonNode & blockers
 // Only this value contract can install model policy. The caller supplies a
 // fresh world and matching identity after reacquiring the game-state lock.
 bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
-    const JsonNode & freshWorld, const CampaignState & current, CampaignState & candidate, std::string & reason);
+    const JsonNode & freshWorld, const CampaignState & current, CampaignState & candidate, std::string & reason,
+    JsonNode * nextIntentOut=nullptr, const JsonNode * currentIntent=nullptr);
 }

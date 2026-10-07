@@ -1,6 +1,7 @@
 #include "Global.h"
 #include "StrategicDecision.h"
 #include "NativePersistence.h"
+#include "strategic_intent_fixture.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -74,9 +75,10 @@ void reservedPackingDelivery()
     world["forecasts"]["army_pools"]=logistics["army_pools"];
     require(nullkiller3::reinforcementSources(JsonNode("main"),world).Vector().empty(),
         "full recipient was offered incompatible reserved donor stacks");
-    const auto request=json(R"({"request_id":"packing","identity":{"day":19},"evidence_refs":["observation:heroes"]})");
+    auto request=json(R"({"request_id":"packing","identity":{"day":19},"evidence_refs":["observation:heroes"]})");
     auto reply=json(R"({"protocol":2,"request_id":"packing","identity":{"day":19},"decision":"revise","reason":"Reinforce the main","evidence_refs":["observation:heroes"],"victory_method":"Capture hostile towns","assignments":[{"hero_ref":"main","role":"main"},{"hero_ref":"courier","role":"reinforcement"}],"alternatives":[{"approach":"economy","benefit":"Income","cost":"Gold","uncertainty":"Stock"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guards"}],"reconsider_when":[{"goal_id":"deliver","kind":"executor_lost"}],"plan":null,"usage":{"input_tokens":10,"output_tokens":10,"known":true}})");
     reply["plan"]=plan;
+    initialCourseFixture(request,reply,world);
     nullkiller3::CampaignState initial,candidate;
     require(!nullkiller3::validateStrategicDecision(reply,request,world,initial,candidate,reason)
         && reason=="reinforcement_source_has_no_compatible_stack:deliver",

@@ -89,6 +89,7 @@ def bounded_history(request):
 
     references(request.get('actions',[]))
     references(request.get('campaign',{}))
+    references(request.get('strategic_intent',{}))
     references(memory.get('plan', {}))
     references(memory.get('campaign', {}))
     references(memory.get('campaign_review', {}))

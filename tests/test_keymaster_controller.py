@@ -1,4 +1,5 @@
 """Caller reply validation includes key collection and unlocked border visits."""
+from fixtures.strategic_intent import with_intent
 import copy
 import unittest
 from test_nullkiller3_controller import strategic_request
@@ -6,7 +7,7 @@ from controller.native_strategy import validate_reply
 
 class KeymasterControllerTest(unittest.TestCase):
     def reply(self,request):
-        return dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
+        return with_intent(request,dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
           reason='Unlock a known route with the player key',evidence_refs=['observation:day'],victory_method='Find conquest routes',
           assignments=[dict(hero_ref='object:0',role='scout')],
           alternatives=[dict(approach='scouting',benefit='Open route',cost='Movement',uncertainty='Exit'),dict(approach='economy',benefit='Income',cost='Delay',uncertainty='Route')],
@@ -14,7 +15,7 @@ class KeymasterControllerTest(unittest.TestCase):
           plan=dict(version=3,revision=1,approach='scouting',horizon_days=3,
             goals=[dict(id='access',kind='visit_site',actor_ref='object:0',target_ref='key-site',deadline_day=3,priority=90,
               building_id=-1,min_army_value=5000,depends_on=[],required_capabilities=['land'],complete_when=dict(kind='site_visited',value=0))],
-            reserves=[],policy=dict(max_loss_ratio=.1,allow_route_repair=True,allow_helper_replacement=False,critical_towns=[])))
+            reserves=[],policy=dict(max_loss_ratio=.1,allow_route_repair=True,allow_helper_replacement=False,critical_towns=[]))))
     def test_tent_and_matching_unlocked_borders_are_supported(self):
         for kind in ('keymaster_tent','border_guard','border_gate'):
             r=strategic_request();site=dict(ref='key-site',kind=kind,owner=-1,visible=True,visited=False,key_color=2,

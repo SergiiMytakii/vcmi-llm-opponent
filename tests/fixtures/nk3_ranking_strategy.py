@@ -1,4 +1,5 @@
 """Fixed strategic contract for native route selection, without a model."""
+from strategic_intent import with_intent
 import json
 import sys
 
@@ -16,7 +17,7 @@ assignment=dict(hero_ref=hero['ref'],role='main')
 if request.get('campaign'):
     goal=request['campaign']['goals'][0]
     assignment['hero_ref']=goal['actor_ref']
-json.dump(dict(protocol=2,request_id=request['request_id'],identity=request['identity'],
+json.dump(with_intent(request,dict(protocol=2,request_id=request['request_id'],identity=request['identity'],
                decision='retain' if request.get('campaign') else 'revise',reason='Fixed native ranking operation',
                evidence_refs=['hero:'+hero['ref']],victory_method='Capture a visible income source',
                assignments=[assignment],alternatives=[
@@ -24,4 +25,4 @@ json.dump(dict(protocol=2,request_id=request['request_id'],identity=request['ide
                    dict(approach='economy',benefit='Build income',cost='Gold',uncertainty='Later fronts unknown')],
                reconsider_when=[dict(goal_id='capture',kind='deadline_missed')],
                plan=None if request.get('campaign') else plan,
-               usage=dict(known=True,input_tokens=0,output_tokens=0)),sys.stdout)
+               usage=dict(known=True,input_tokens=0,output_tokens=0))),sys.stdout)

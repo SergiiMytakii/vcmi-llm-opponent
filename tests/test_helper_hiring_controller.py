@@ -1,4 +1,5 @@
 """Model decisions bind helper hires to offered candidates and useful jobs."""
+from fixtures.strategic_intent import with_intent
 import copy
 import unittest
 from test_nullkiller3_controller import strategic_request
@@ -6,14 +7,14 @@ from controller.native_strategy import validate_reply
 
 
 def reply(request,goal):
-    return dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
+    return with_intent(request,dict(protocol=2,request_id=request['request_id'],identity=request['identity'],decision='revise',
         reason='Hire a scout for the offered frontier',evidence_refs=['town:object:1'],victory_method='Expand safely',
         assignments=[dict(hero_ref='object:0',role='main')],
         alternatives=[dict(approach='scouting',benefit='Separate exploration',cost='Hiring expense',uncertainty='Post-hire routes unknown'),
                       dict(approach='defense',benefit='Keep base protected',cost='Delay expansion',uncertainty='Enemy intent unknown')],
         reconsider_when=[dict(goal_id=goal['id'],kind='deadline_missed')],
         plan=dict(version=3,revision=1,approach='scouting',horizon_days=3,goals=[goal],reserves=[],
-            policy=dict(max_loss_ratio=.25,allow_route_repair=True,allow_helper_replacement=True,critical_towns=[])))
+            policy=dict(max_loss_ratio=.25,allow_route_repair=True,allow_helper_replacement=True,critical_towns=[]))))
 
 
 class HelperHiringControllerTest(unittest.TestCase):

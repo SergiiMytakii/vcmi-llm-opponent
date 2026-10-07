@@ -33,7 +33,9 @@ class TownChoicesTest(unittest.TestCase):
         enemy.update(x=6 if mode=='near' else 11,y=12 if mode=='near' else 11);enemy['options']['army']=[dict(type='core:pikeman',amount=1)]
         with zipfile.ZipFile(fixture/'Library/Application Support/vcmi/Maps/TownChoices.vmap','w') as archive:
             for name,value in world.items():archive.writestr(name,json.dumps(value))
+        shutil.copy2(ROOT/'tests/fixtures/strategic_intent.py',out/'strategic_intent.py')
         controller=out/'controller.py';controller.write_text('''import json,sys
+from strategic_intent import with_intent
 r=json.load(sys.stdin);w=r['observation'];h=w['heroes'][0]['ref'];t=w['towns'][0]['ref'];mode='''+repr(mode)+'''
 if r.get('campaign') and not (mode=='reconsider' and r['campaign']['goals'][0]['kind']=='defend_area'):
  decision='retain';plan=None
@@ -48,7 +50,7 @@ else:
   mine=next(o['ref'] for o in w['objects'] if o['kind']=='mine' and o['visible'])
   plan['goals'].append({'id':'followup','kind':'capture_target','actor_ref':h,'target_ref':mine,'deadline_day':w['day']+2,'priority':80,'building_id':-1,'min_army_value':5000,'depends_on':['operation'],'required_capabilities':['land'],'complete_when':{'kind':'target_owned','value':w['player']}})
  decision='revise'
-print(json.dumps({'protocol':2,'request_id':r['request_id'],'identity':r['identity'],'decision':decision,'reason':'Controlled native integration operation','evidence_refs':['observation:day'],'victory_method':'Validate the supported owned operation','assignments':[{'hero_ref':h,'role':'main'}],'alternatives':[{'approach':'offense','benefit':'Operate','cost':'Movement','uncertainty':'Enemy intent unknown'},{'approach':'defense','benefit':'Hold','cost':'Delay','uncertainty':'Enemy route unknown'}],'reconsider_when':[{'goal_id':'operation','kind':'deadline_missed'}],'plan':plan,'usage':{'input_tokens':0,'output_tokens':0,'known':True}}))
+print(json.dumps(with_intent(r,{'protocol':2,'request_id':r['request_id'],'identity':r['identity'],'decision':decision,'reason':'Controlled native integration operation','evidence_refs':['observation:day'],'victory_method':'Validate the supported owned operation','assignments':[{'hero_ref':h,'role':'main'}],'alternatives':[{'approach':'offense','benefit':'Operate','cost':'Movement','uncertainty':'Enemy intent unknown'},{'approach':'defense','benefit':'Hold','cost':'Delay','uncertainty':'Enemy route unknown'}],'reconsider_when':[{'goal_id':'operation','kind':'deadline_missed'}],'plan':plan,'usage':{'input_tokens':0,'output_tokens':0,'known':True}})))
 ''')
         config.update(profile_template=str(fixture),map_resource='Maps/TownChoices.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='model',references={},purpose='integration',case_id='town-choice-'+mode,headless=True,max_seconds=20,review_interval_days=2 if mode=='reconsider' else 1,experience_mode='off',controller=[sys.executable,str(controller)],controller_sources=[str(controller)])
         config.pop('save_resource',None)

@@ -1,6 +1,7 @@
 #pragma once
 #include "json/JsonNode.h"
 #include "KeymasterAccess.h"
+#include "StrategicMapOverview.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -26,7 +27,7 @@ inline int64_t candidateDistance(const JsonNode & a,const JsonNode & b)
     const auto level=a[2]==b[2] ? 0 : 100000;
     return level+std::max(std::abs(a[0].Integer()-b[0].Integer()),std::abs(a[1].Integer()-b[1].Integer()));
 }
-inline std::set<std::string> requiredCandidateRefs(const JsonNode & world,const JsonNode & plan)
+inline std::set<std::string> requiredCandidateRefs(const JsonNode & world,const JsonNode & plan,const JsonNode & intent=JsonNode())
 {
     std::set<std::string> result;
     for(const auto & goal:plan["goals"].Vector())
@@ -35,6 +36,8 @@ inline std::set<std::string> requiredCandidateRefs(const JsonNode & world,const 
     }
     for(const auto * key:{"towns","heroes"}) for(const auto & item:world[key].Vector()) result.insert(item["ref"].String());
     for(const auto & ref:plan["policy"]["critical_towns"].Vector()) result.insert(ref.String());
+    const auto milestoneRefs=strategicIntentCandidateRefs(intent);
+    result.insert(milestoneRefs.begin(),milestoneRefs.end());
     return result;
 }
 // At most three distinct operational extremes per hero: fastest, least loss,
@@ -60,7 +63,7 @@ inline JsonNode representativeCandidateRoutes(const JsonNode & routes)
 }
 
 inline JsonNode generateScoutCandidates(const JsonNode & world,const JsonNode & plan,
-    const ScoutCoverage & coverage,const CandidateRoutes & quote)
+    const ScoutCoverage & coverage,const CandidateRoutes & quote,const JsonNode & intent=JsonNode())
 {
     JsonNode result;result["frontiers"].Vector();result["scouting"].Vector();
     std::map<std::string,JsonNode> selected;
@@ -145,7 +148,7 @@ inline JsonNode generateScoutCandidates(const JsonNode & world,const JsonNode & 
     for(auto & [ref,option]:selected)
     {
         JsonNode frontier=option;frontier["own_arrivals"]=quote(option["position"],true,false);
-        if(!requiredCandidateRefs(world,plan).count(ref)) frontier["own_arrivals"]=representativeCandidateRoutes(frontier["own_arrivals"]);
+        if(!requiredCandidateRefs(world,plan,intent).count(ref)) frontier["own_arrivals"]=representativeCandidateRoutes(frontier["own_arrivals"]);
         result["frontiers"].Vector().push_back(frontier);
         if(!option["own_arrivals"].Vector().empty()) result["scouting"].Vector().push_back(option);
     }
@@ -154,9 +157,9 @@ inline JsonNode generateScoutCandidates(const JsonNode & world,const JsonNode & 
     return result;
 }
 
-inline JsonNode generateTargetCandidates(const JsonNode & world,const JsonNode & plan,const CandidateRoutes & quote)
+inline JsonNode generateTargetCandidates(const JsonNode & world,const JsonNode & plan,const CandidateRoutes & quote,const JsonNode & intent=JsonNode())
 {
-    const auto required=requiredCandidateRefs(world,plan);
+    const auto required=requiredCandidateRefs(world,plan,intent);
     std::map<std::string,std::vector<JsonNode>> groups;
     std::map<std::string,JsonNode> chosen;
     auto kindGroup=[&](const JsonNode & object) {
@@ -224,9 +227,9 @@ inline JsonNode generateTargetCandidates(const JsonNode & world,const JsonNode &
 }
 // The engine retains its complete observation. Only the model-facing copy is
 // bounded; candidates are not a statement that unlisted objects do not exist.
-inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & plan)
+inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & plan,const JsonNode & intent=JsonNode())
 {
-    auto selected=requiredCandidateRefs(world,plan);
+    auto selected=requiredCandidateRefs(world,plan,intent);
     for(const auto & route:world["forecasts"]["routes"].Vector()) selected.insert(route["target_ref"].String());
     JsonNode view=world;
     view["objects"].Vector().clear();

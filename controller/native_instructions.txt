@@ -277,3 +277,26 @@ differ in content even with the same approach. Use short complete sentences, at
 most 160 characters per explanation field; never truncate mid-word. Output no game
 commands, executable code, hidden facts or private reasoning. Refusal/invalid plans
 leave useful native play in control.
+
+# Saved global course
+Read strategic_intent and native progress every time. For an initial course or
+material reconsideration, consult global_strategy within the existing 1-3-card
+Guide allowance; compare 2-3 admissible victory courses in alternatives and keep
+only the selected course. On ordinary keep, compare immediate operations instead.
+A null course requires strategy_update.decision=revise. keep uses the current
+base_revision with selected/change_reason=null; revise supplies selected and a
+nonempty change_reason.
+Operational retain/revise is independent. The engine assigns revision/adopted_day;
+changing an operation or victory_method never replaces the saved objective.
+Follow the supplied schema: 3-6 unique acyclic milestones; target_owned uses own
+player value, building_present a building ID, army_at_least an owned hero/positive
+AI value. These describe state, not a particular purchase or transfer. site_visited
+and passage_explored use the assigned own actor and value=0; they require native
+acknowledged action. Artifact pickup additionally requires own inventory gain;
+disappearance or arrival alone proves no completion. Native progress is authoritative.
+operation_focus names the retained/new course revision and binds actual operative
+goal IDs to milestone IDs. Explain support tasks in reason; their unrelated effects
+cannot complete a milestone. Use only supplied review-condition kinds and evidence.
+Overview omissions and missing routes remain unknown. A distant milestone may be
+conditional; operative movement still needs native admission. Urgent defense stays
+with the existing native owner. Hidden rewards and quest exchanges are unsupported.

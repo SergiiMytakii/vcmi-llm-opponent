@@ -14,6 +14,7 @@ def codex_fixture(folder, source, expand_context=True):
         raise RuntimeError('Build tests/ with CMake and set FAKE_CODEX_DRIVER to fake-codex-driver' + suffix)
     cli = folder / ('codex fixture Зов' + suffix)
     shutil.copy2(driver, cli)
+    shutil.copy2(ROOT/'tests/fixtures/strategic_intent.py', folder/'strategic_intent.py')
     script = folder / 'codex fixture Зов.py'
     if expand_context:
         # Existing scripted models operate on logical game facts. Interpret the

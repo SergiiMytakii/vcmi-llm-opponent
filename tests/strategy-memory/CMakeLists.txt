@@ -59,3 +59,14 @@ foreach(target nullkiller3-campaign-driver nullkiller3-idle-driver strategic-can
         ../../engine/Nullkiller3/CampaignState.cpp
         ../../engine/Nullkiller3/StrategicDecision.cpp)
 endforeach()
+
+# Header-only strategic course/progress and restore contract. This standalone
+# driver reuses the prepared JSON library; it never builds or starts the game.
+add_executable(strategic-intent-driver ../strategic_intent_driver.cpp)
+target_compile_features(strategic-intent-driver PRIVATE cxx_std_20)
+target_compile_definitions(strategic-intent-driver PRIVATE VCMI_DLL=1 BOOST_ALL_DYN_LINK)
+target_include_directories(strategic-intent-driver PRIVATE
+    ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
+    "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
+target_link_libraries(strategic-intent-driver PRIVATE "${VCMI_LIBRARY}")
+add_test(NAME strategic-intent COMMAND strategic-intent-driver)

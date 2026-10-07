@@ -4,6 +4,7 @@ VCMI_NATIVE_ROUTE_YIELD_CONFIG supplies the compatible engine, copied profile/sa
 and ordinary tester limits. This never launches or changes the user's live game.
 """
 import json
+import shutil
 import os
 from pathlib import Path
 import subprocess
@@ -23,13 +24,15 @@ class NativeRouteYieldTest(unittest.TestCase):
             config[key]=str((config_path.parent/config[key]).resolve())
         with tempfile.TemporaryDirectory(prefix='route-yield-',dir=ROOT/'.build') as folder:
             folder=Path(folder);controller=folder/'retain.py'
+            shutil.copy2(ROOT/'tests/fixtures/strategic_intent.py',folder/'strategic_intent.py')
             controller.write_text("""import json,sys,os
 from pathlib import Path
+from strategic_intent import with_intent
 r=json.load(sys.stdin)
 run=Path(os.environ['VCMI_PLAYTEST_RUN']);first=run/'probe-first-day'
 if not first.exists():first.write_text(str(r['observation']['day']))
 if r['observation']['day']>int(first.read_text()):(run/'STOP').touch()
-print(json.dumps(dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision='retain',reason='Preserve saved plan for isolated transport proof',evidence_refs=['observation:offensive_preparation'],victory_method='Transport proof only',assignments=r['observation']['strategy_assignments'],alternatives=[dict(approach='economy',benefit='Preserve plan',cost='Waiting',uncertainty='Route under test'),dict(approach='defense',benefit='Compare protection',cost='Diversion',uncertainty='Unknown opponent')],reconsider_when=[dict(goal_id=r['campaign']['goals'][0]['id'],kind='deadline_missed')],plan=None,usage=dict(input_tokens=0,output_tokens=0,known=True))))
+print(json.dumps(with_intent(r,dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision='retain',reason='Preserve saved plan for isolated transport proof',evidence_refs=['observation:offensive_preparation'],victory_method='Transport proof only',assignments=r['observation']['strategy_assignments'],alternatives=[dict(approach='economy',benefit='Preserve plan',cost='Waiting',uncertainty='Route under test'),dict(approach='defense',benefit='Compare protection',cost='Diversion',uncertainty='Unknown opponent')],reconsider_when=[dict(goal_id=r['campaign']['goals'][0]['id'],kind='deadline_missed')],plan=None,usage=dict(input_tokens=0,output_tokens=0,known=True)))))
 """)
             config.update(controller=[sys.executable,str(controller)],controller_sources=[str(controller)],
                           engine_sources=[],references={},purpose='integration',headless=True,

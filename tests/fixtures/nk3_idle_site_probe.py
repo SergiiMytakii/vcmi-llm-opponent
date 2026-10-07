@@ -1,4 +1,5 @@
 """A completed main visit must not wait for a different hero's hold to end."""
+from strategic_intent import with_intent
 import json
 import sys
 
@@ -22,7 +23,7 @@ if not any(g['id']=='main-site' for g in r['campaign']['goals']):
     if route['hero_ref']==main and route['army_loss_estimate']==0 and route['day']<=w['day']+2:
      choices.append((route['movement_cost'],site['ref']))
  if not choices:
-  print(json.dumps(reply));sys.exit(0)
+  print(json.dumps(with_intent(r,reply)));sys.exit(0)
  _,target=min(choices)
  defender=max((h for h in w['heroes'] if h['ref']!=main),key=lambda h:h['army_value'])
  goals=[dict(id='main-site',kind='visit_site',actor_ref=main,target_ref=target,
@@ -36,4 +37,4 @@ if not any(g['id']=='main-site' for g in r['campaign']['goals']):
    goals=goals,reserves=[],policy=dict(max_loss_ratio=.2,allow_route_repair=True,
     allow_helper_replacement=True,critical_towns=[t['ref'] for t in w['towns']])),
   reconsider_when=[dict(goal_id=g['id'],kind='deadline_missed') for g in goals])
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

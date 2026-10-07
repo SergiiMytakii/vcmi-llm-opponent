@@ -40,7 +40,8 @@ struct ResumeInJob : boost::process::extend::handler
 #endif
 
 Reply exchange(const std::string & executable, const std::vector<std::string> & arguments,
-	const std::string & input, std::chrono::milliseconds timeout, const std::atomic<bool> & cancelled)
+	const std::string & input, std::chrono::milliseconds timeout, const std::atomic<bool> & cancelled,
+	std::size_t maxReplyBytes)
 {
 	namespace bp = boost::process;
 	namespace asio = boost::asio;
@@ -87,7 +88,7 @@ Reply exchange(const std::string & executable, const std::vector<std::string> & 
 		{
 			sink.async_read_some(asio::buffer(buffer), [&](const boost::system::error_code & error, std::size_t count)
 			{
-				if(reply.output.size() + count > 8192)
+				if(reply.output.size() + count > maxReplyBytes)
 				{
 					reply.error = "reply too large";
 					stop();

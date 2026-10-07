@@ -1,4 +1,5 @@
 """Issue one own capture intention across observed water; no engine commands."""
+from strategic_intent import with_intent
 import json
 import sys
 
@@ -21,4 +22,4 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
                   dict(approach='economy',benefit='Develop home',cost='Building cost',uncertainty='Future income unknown')],
     reconsider_when=[dict(goal_id=goal['id'],kind='deadline_missed')],plan=None if goals else plan,
     usage=dict(input_tokens=0,output_tokens=0,known=True))
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

@@ -31,7 +31,7 @@ def permitted_request(value):
         if isinstance(action.get('request_id'),str):
             action['request_id']=re.sub(r'^'+uuid+':'+uuid+':',
                                         'game:generation:',action['request_id'],count=1)
-    return {key:value[key] for key in ('observation','memory','campaign','signals')}
+    return {key:value[key] for key in ('observation','memory','campaign','signals','strategic_intent')}
 
 
 @unittest.skipUnless(sys.platform=='darwin' and os.environ.get('VCMI_NK3_STRATEGY_CONFIG'),

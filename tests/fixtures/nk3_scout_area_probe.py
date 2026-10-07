@@ -1,4 +1,5 @@
 """Choose an offered safe observation area through the public strategy contract."""
+from strategic_intent import with_intent
 import json
 import os
 import sys
@@ -29,4 +30,4 @@ if choices and not existing:
    goals=[goal],reserves=[],policy=dict(max_loss_ratio=.2,allow_route_repair=True,
     allow_helper_replacement=True,critical_towns=[t['ref'] for t in world['towns']])),
   reconsider_when=[dict(goal_id='observe-area',kind='deadline_missed')])
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

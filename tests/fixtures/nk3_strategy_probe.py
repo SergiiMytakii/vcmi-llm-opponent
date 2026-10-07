@@ -1,4 +1,5 @@
 """Deterministic strategic controller for the real engine boundary."""
+from strategic_intent import with_intent
 import json
 import os
 import sys
@@ -235,4 +236,4 @@ if mode=='invalid':plan['goals'][0]['required_capabilities']=['fly']
 if mode in ('timeout','slow'):
     import time
     time.sleep(30 if mode=='slow' else 5)
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

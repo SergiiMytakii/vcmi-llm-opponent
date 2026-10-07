@@ -13,7 +13,7 @@ int main()
     try
     {
         const auto input=parse(std::string(std::istreambuf_iterator<char>(std::cin),{}));
-        const auto & world=input["world"];const auto & plan=input["plan"];
+        const auto & world=input["world"];const auto & plan=input["plan"];const auto & intent=input["intent"];
         int64_t calls=0;
         auto quote=[&](const JsonNode & pos,bool frontier,bool area) {
             ++calls;
@@ -31,14 +31,24 @@ int main()
             return result;
         };
         JsonNode result;
-        result["scouts"]=nullkiller3::generateScoutCandidates(world,plan,coverage,quote);
-        result["targets"]=nullkiller3::generateTargetCandidates(world,plan,quote);
+        result["scouts"]=nullkiller3::generateScoutCandidates(world,plan,coverage,quote,intent);
+        result["targets"]=nullkiller3::generateTargetCandidates(world,plan,quote,intent);
         auto generated=world;
         generated["frontier_options"]=result["scouts"]["frontiers"];
         generated["scouting_options"]=result["scouts"]["scouting"];
         generated["forecasts"]["routes"]=result["targets"]["routes"];
-        result["view"]=nullkiller3::strategicCandidateView(generated,plan);
+        result["view"]=nullkiller3::strategicCandidateView(generated,plan,intent);
         result["memory"]=nullkiller3::strategicCandidateMemory(input["memory"],result["view"]);
+        result["overview"]=nullkiller3::strategicMapOverview(world,intent,!input["compact"].Bool());
+        auto request=input["request"];
+        if(request.isStruct())
+        {
+            result["request_fits"].Bool()=nullkiller3::boundStrategicRequest(request,input["max_bytes"].isNumber() ? input["max_bytes"].Integer() : 512*1024);
+            result["bounded_request"]=request;
+            result["request_bytes"].Integer()=nullkiller3::strategicRequestBytes(request);
+        }
+        for(const auto & fixture:input["income_cases"].Vector())
+            result["effective_incomes"].Vector().emplace_back(nullkiller3::effectiveAIIncome(fixture["base"].Integer(),fixture["bonus"].Integer(),fixture["day_of_week"].Integer(),fixture["days_in_week"].Integer(),fixture["cap"].Integer()));
         result["quote_calls"].Integer()=calls;
         std::cout<<result.toCompactString()<<'\n';return 0;
     }

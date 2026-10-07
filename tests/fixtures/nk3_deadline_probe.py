@@ -1,4 +1,5 @@
 """A legal delivery intent whose known source cannot be reached today."""
+from strategic_intent import with_intent
 import json
 import os
 import sys
@@ -23,4 +24,4 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
                   dict(approach='economy',benefit='Develop locally',cost='Build cost',uncertainty='Future income')],
     reconsider_when=[dict(goal_id='supply',kind='deadline_missed')],plan=None if r.get('campaign') else plan,
     usage=dict(input_tokens=0,output_tokens=0,known=True))
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

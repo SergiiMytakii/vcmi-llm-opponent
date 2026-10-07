@@ -1,4 +1,5 @@
 """Choose a visible scholar through the same public campaign reply contract."""
+from strategic_intent import with_intent
 import json
 import os
 import sys
@@ -30,4 +31,4 @@ if choices and not any(g['id']=='learn-site' for g in r['campaign']['goals']):
    goals=[goal],reserves=[],policy=dict(max_loss_ratio=.2,allow_route_repair=True,
     allow_helper_replacement=True,critical_towns=[t['ref'] for t in w['towns']])),
   reconsider_when=[dict(goal_id='learn-site',kind='deadline_missed')])
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

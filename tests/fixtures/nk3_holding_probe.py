@@ -1,4 +1,5 @@
 """One stationed defender and one independent scout through the strategy contract."""
+from strategic_intent import with_intent
 import json
 import sys
 
@@ -28,4 +29,4 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
                   dict(approach='scouting',benefit='Reveal routes',cost='Scout movement',uncertainty='Unseen terrain')],
     reconsider_when=[dict(goal_id=g['id'],kind='deadline_missed') for g in plan['goals']],
     plan=None if r.get('campaign') else plan,usage=dict(input_tokens=0,output_tokens=0,known=True))
-print(json.dumps(reply))
+print(json.dumps(with_intent(r,reply)))

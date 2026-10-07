@@ -292,7 +292,8 @@ std::string repairQuestionFacts(const JsonNode & plan, const JsonNode & blockers
 }
 
 bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
-    const JsonNode & freshWorld, const CampaignState & current, CampaignState & candidate, std::string & reason)
+    const JsonNode & freshWorld, const CampaignState & current, CampaignState & candidate, std::string & reason,
+    JsonNode * nextIntentOut, const JsonNode * currentIntent)
 {
     auto reject = [&](const char * why) { reason = why; return false; };
     auto shape = [](const JsonNode & value, std::initializer_list<const char *> fields) {
@@ -322,7 +323,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
             return reject("invalid_defense_exit");
     }
     if(!shape(replyShape, {"protocol", "request_id", "identity", "decision", "reason", "evidence_refs", "victory_method",
-        "assignments", "alternatives", "reconsider_when", "plan", "usage"})
+        "assignments", "alternatives", "reconsider_when", "plan", "usage", "strategy_update", "operation_focus"})
         || !number(reply["protocol"], 2, 2) || reply["request_id"] != request["request_id"]
         || reply["identity"] != request["identity"] || !text(reply["decision"]) || !text(reply["reason"],640)
         || !text(reply["victory_method"],640)) return reject("invalid_or_stale_strategic_identity");
@@ -445,6 +446,9 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
         if(known && !matching)
         { reason="reinforcement_source_has_no_compatible_stack:"+id;return false; }
     }
+    JsonNode nextIntent;
+    if(!validateStrategicIntentUpdate(reply,request,freshWorld,trial.plan(),currentIntent ? *currentIntent : request["strategic_intent"],nextIntent,reason)) return false;
+    if(nextIntentOut) *nextIntentOut=nextIntent;
     candidate = trial;
     reason.clear();
     return true;

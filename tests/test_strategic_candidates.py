@@ -125,5 +125,113 @@ class StrategicCandidatesTest(unittest.TestCase):
         self.assertLessEqual(len(large['scouts']['scouting']),6)
         self.assertLess(len(json.dumps(large['view'])),20000)
 
+    def add_objects(self,data,count=12):
+        for i in range(count):
+            item={'ref':f'mine-{i}','kind':'mine','owner':0,'position':[i+1,2,0],
+                  'visible':True,'production_per_day':2,'resource_type':'wood'}
+            data['world']['visible_objects'].append(item)
+            data['world']['objects'].append(item)
+            data['world']['forecasts']['routes'].append({'target_ref':item['ref'],'own_arrivals':[
+                {'hero_ref':'hero','day':11,'movement_cost':1,'army_value':10000,'army_loss_estimate':0}]})
+        data['world']['map_size']=[144,144,2]
+
+    def test_initial_overview_includes_far_visible_target_beyond_route_quota(self):
+        data=self.fixture(0);self.add_objects(data)
+        result=self.call(data)
+        self.assertNotIn('mine-11',{o['ref'] for o in result['view']['objects']})
+        self.assertIn('mine-11',{o['ref'] for o in result['overview']['objects']})
+        self.assertTrue(result['overview']['coverage']['complete'])
+        self.assertEqual(result['overview']['map_size'],[144,144,2])
+
+    def test_milestone_pins_target_and_actor_without_creating_hidden_objects(self):
+        data=self.fixture(0);self.add_objects(data)
+        data['intent']={'milestones':[{'id':'capture','complete_when':{'kind':'target_owned',
+            'target_ref':'mine-11','actor_ref':'hero'}}],'progress':{}}
+        result=self.call(data)
+        self.assertIn('mine-11',{o['ref'] for o in result['view']['objects']})
+        data['world']['visible_objects']=[o for o in data['world']['visible_objects'] if o['ref']!='mine-11']
+        data['world']['objects']=[o for o in data['world']['objects'] if o['ref']!='mine-11']
+        result=self.call(data)
+        self.assertNotIn('mine-11',{o['ref'] for o in result['overview']['objects']})
+        self.assertNotIn('mine-11',{o['ref'] for o in result['view']['objects']})
+
+    def test_compact_overview_keeps_completed_milestone_current_state(self):
+        data=self.fixture(0);self.add_objects(data)
+        data['compact']=True
+        data['intent']={'milestones':[{'id':'capture','complete_when':{'kind':'target_owned','target_ref':'mine-11'}}],
+                        'progress':{'capture':{'state':'completed'}}}
+        result=self.call(data)
+        self.assertIn('mine-11',{o['ref'] for o in result['overview']['objects']})
+        self.assertNotIn('mine-11',{o['ref'] for o in result['view']['objects']})
+        self.assertLess(len(result['overview']['objects']),result['overview']['coverage']['known_objects'])
+
+    def test_last_seen_object_keeps_observation_age_and_is_not_currently_visible(self):
+        data=self.fixture(0);self.add_objects(data)
+        data['world']['visible_objects']=[]
+        for object in data['world']['objects']:
+            object.update(stale=True,last_seen_day=3,not_seen_at_last_position=True)
+        result=self.call(data)['overview']
+        stale=next(o for o in result['objects'] if o['ref']=='mine-11')
+        self.assertFalse(stale['visible'])
+        self.assertTrue(stale['stale'])
+        self.assertEqual(stale['last_seen_day'],3)
+        self.assertTrue(stale['not_seen_at_last_position'])
+
+    def test_overview_cap_is_deterministic_and_reports_omission(self):
+        data=self.fixture(0);self.add_objects(data,500)
+        reverse=copy.deepcopy(data)
+        reverse['world']['visible_objects'].reverse();reverse['world']['objects'].reverse()
+        result=self.call(data)['overview']
+        self.assertEqual(result,self.call(reverse)['overview'])
+        self.assertLessEqual(len(result['objects']),384)
+        self.assertFalse(result['coverage']['complete'])
+        self.assertEqual(result['coverage']['shown_objects']+result['coverage']['omitted_objects'],502)
+        self.assertIn('home',{o['ref'] for o in result['objects']})
+
+    def test_whole_request_cap_preserves_intent_and_cleans_removed_evidence(self):
+        data=self.fixture(0)
+        intent={'objective':'retain course','milestones':[]}
+        data['request']={'observation':{'map_overview':{'objects':[
+            {'ref':'kept','kind':'town','effects':'small'},
+            {'ref':'removed','kind':'artifact','effects':' \" большой текст '*10000}],
+            'coverage':{'known_objects':2}}},'strategic_intent':intent,
+            'evidence_refs':['target:kept','target:removed']}
+        data['max_bytes']=1000
+        result=self.call(data)
+        self.assertTrue(result['request_fits'])
+        self.assertLessEqual(result['request_bytes'],1000)
+        self.assertEqual(result['bounded_request']['strategic_intent'],intent)
+        self.assertEqual(result['bounded_request']['evidence_refs'],['target:kept'])
+        self.assertEqual(result['bounded_request']['observation']['map_overview']['coverage']['omitted_objects'],1)
+        data['request']['strategic_intent']['objective']='x'*2000
+        result=self.call(data)
+        self.assertFalse(result['request_fits'])
+        self.assertEqual(result['bounded_request']['strategic_intent'],data['request']['strategic_intent'])
+
+    def test_default_wire_cap_counts_utf8_and_escaping_in_entire_request(self):
+        data=self.fixture(0)
+        data['request']={'strategic_intent':{'objective':'a'*200000},'observation':{'map_overview':{
+            'objects':[{'ref':'first','effects':'\\" текст '*20000},
+                       {'ref':'last','effects':'\\" текст '*20000}],
+            'coverage':{'known_objects':2}}},'evidence_refs':['target:first','target:last']}
+        result=self.call(data)
+        self.assertTrue(result['request_fits'])
+        self.assertLessEqual(result['request_bytes'],512*1024)
+        self.assertEqual(len(result['bounded_request']['observation']['map_overview']['objects']),1)
+        expected=json.dumps(result['bounded_request'],ensure_ascii=False,separators=(',',':')).encode('utf-8')
+        self.assertEqual(result['request_bytes'],len(expected))
+
+    def test_ai_bonus_matches_native_integer_distribution_custom_week_and_cap(self):
+        data=self.fixture(0)
+        cases=[{'base':3,'bonus':50,'day_of_week':day,'days_in_week':5,'cap':100000} for day in range(1,6)]
+        cases += [{'base':137,'bonus':25,'day_of_week':day,'days_in_week':7,'cap':100000} for day in range(1,8)]
+        cases += [{'base':999,'bonus':100,'day_of_week':7,'days_in_week':7,'cap':1000},
+                  {'base':10,'bonus':0,'day_of_week':7,'days_in_week':7,'cap':1000}]
+        data['income_cases']=cases
+        values=self.call(data)['effective_incomes']
+        self.assertEqual(values,[min(c['cap'],c['base']+(c['base']*c['bonus']*c['day_of_week']//c['days_in_week']//100)
+            -(c['base']*c['bonus']*(c['day_of_week']-1)//c['days_in_week']//100)) for c in cases])
+        self.assertEqual(sum(values[:5]),16)
+
 
 if __name__=='__main__':unittest.main()

@@ -1,6 +1,7 @@
 #include "../Nullkiller2/StdInc.h"
 #include "NativeCampaign.h"
 #include "StrategicDecision.h"
+#include "StrategicIntent.h"
 #include "Forecasts.h"
 #include "OffensivePreparation.h"
 #include "StrategicCandidates.h"
@@ -139,6 +140,8 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
+    const auto intentSignals=strategicIntentSignals(persisted["strategic_intent"],world,actionable);
+    result.insert(result.end(),intentSignals.begin(),intentSignals.end());
     const auto checkpoint=allocationCheckpointSignals(campaign,world,persisted["checkpoint_baseline"],actionable);
     result.insert(result.end(),checkpoint.begin(),checkpoint.end());
     const auto offense=offensiveCheckpointSignals(world,persisted["checkpoint_baseline"],actionable);
@@ -313,7 +316,14 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         +std::to_string(revision)+":"+std::to_string(sequence);
     // Freshness compares full native facts; proposal screening is model-only.
     const auto observationBeforeExchange = world;
-    request["observation"] = strategicCandidateView(world,campaign.plan());
+    request["strategic_intent"]=persisted["strategic_intent"];
+    bool detailedOverview=request["strategic_intent"].isNull();
+    for(const auto & signal:decision.signals)
+        detailedOverview |= signal.question.starts_with("strategy:") || signal.question.starts_with("battle_loss:")
+            || signal.question.starts_with("critical_town:") || signal.question.starts_with("defense:")
+            || signal.question.starts_with("checkpoint:") || signal.question.starts_with("stagnation:");
+    request["observation"] = strategicCandidateView(world,campaign.plan(),request["strategic_intent"]);
+    request["observation"]["map_overview"]=strategicMapOverview(world,request["strategic_intent"],detailedOverview);
     // Retain must echo the exact accepted roles, including order. Expose the
     // same saved owner used by admission; rejected proposals never replace it.
     const auto & metadata=static_cast<const JsonNode &>(persisted)["strategy_metadata"];
@@ -329,11 +339,18 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     // Every strategic request gets a fresh token limit. Saved walltime and
     // addressed facts still gate admission; the token ledger only tracks usage.
     request["budget"]["tokens"].Integer() = strategicRequestTokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
     for(const auto & object : request["observation"]["objects"].Vector()) request["evidence_refs"].Vector().emplace_back("target:"+object["ref"].String());
+    for(const auto & object:request["observation"]["map_overview"]["objects"].Vector())
+    {
+        const JsonNode ref("target:"+object["ref"].String());
+        if(std::find(request["evidence_refs"].Vector().begin(),request["evidence_refs"].Vector().end(),ref)==request["evidence_refs"].Vector().end())
+            request["evidence_refs"].Vector().push_back(ref);
+    }
+    boundStrategicRequest(request);
     const auto input = ai_transport::transportJSON(request.toCompactString());
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
@@ -353,7 +370,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     {
         auto unlock = vstd::makeUnlockSharedGuard(CGameState::mutex);
         response = externalai::exchange(environment("VCMI_EXTERNAL_AI_EXECUTABLE"), {environment("VCMI_EXTERNAL_AI_SCRIPT")},
-            input,std::chrono::milliseconds(decision.deadlineMs),exchangeCancelled);
+            // 32 KiB selected-course reply plus bounded usage/framing overhead.
+            input,std::chrono::milliseconds(decision.deadlineMs),exchangeCancelled,32*1024+1024);
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count();
     if(stopping || exchangeCancelled || !ai.cc->isPlayerMakingTurn(ai.playerID)
@@ -388,16 +406,24 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
             && boundedInteger(usage["output_tokens"],0,1000000000))
             consumed = usage["input_tokens"].Integer()+usage["output_tokens"].Integer();
         CampaignState candidate;
-        accepted = validateStrategicDecision(reply,request,world,campaign,candidate,reason);
+        JsonNode candidateIntent;
+        accepted = validateStrategicDecision(reply,request,world,campaign,candidate,reason,
+            &candidateIntent,&persisted["strategic_intent"]);
         if(accepted && reply["decision"].String() == "retain" && persisted["strategy_metadata"].isStruct()
             && reply["assignments"] != persisted["strategy_metadata"]["assignments"])
         { accepted = false; reason = "retained_plan_changed_roles_without_revision"; }
         if(accepted)
         {
+            // Drain old operation receipts before replacing either value owner.
+            observeIntentProgress();
+            bindStrategicOperation(candidateIntent,reply["operation_focus"],candidate.plan(),persisted["pending_native_task"]);
             campaign = candidate;
+            persisted["strategic_intent"]=candidateIntent;
             acceptedLossRatio=campaign.plan()["policy"]["max_loss_ratio"].Float();
             acceptedRevision=campaign.plan()["revision"].Integer();
-            persisted["strategy_metadata"] = reply;
+            persisted["strategy_metadata"]=JsonNode();
+            for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus"})
+                persisted["strategy_metadata"][field]=reply[field];
             persisted["pending_strategic_questions"] = JsonNode();
             world["goal_statuses"] = campaign.review(world);
             // Model roles/reserves change path and hero analysis as well as
@@ -425,6 +451,11 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     action["decision"]=attemptedReply["decision"];
     action["reason"].String()=reason.substr(0,256);
     action["installed_revision"]=campaign.plan()["revision"];
+    action["strategy_update"]=attemptedReply["strategy_update"]["decision"];
+    action["strategy_change_reason"]=attemptedReply["strategy_update"]["change_reason"];
+    action["strategy_revision"]=persisted["strategic_intent"]["revision"];
+    action["strategy_objective"]=persisted["strategic_intent"]["objective"];
+    action["operation_focus"]=accepted ? attemptedReply["operation_focus"] : JsonNode();
     action["proposed_goals"].Vector();
     if(attemptedReply["plan"]["goals"].isVector())
         for(const auto & goal:attemptedReply["plan"]["goals"].Vector())
@@ -444,6 +475,9 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     trace["remaining_wait_ms"].Integer() = arbiter.remainingBudget().waitMs;
     trace["remaining_tokens"].Integer() = arbiter.remainingBudget().tokens;
     trace["revision"] = campaign.plan()["revision"];
+    trace["strategic_intent"]=persisted["strategic_intent"];
+    trace["strategy_update"]=attemptedReply["strategy_update"];
+    trace["strategy_status"].String()=accepted ? "installed" : "proposed_rejected";
     logAi->info("NK3_STRATEGY %s",trace.toCompactString());
     recordLearningTurn(ai,"decision");
     persist(ai);

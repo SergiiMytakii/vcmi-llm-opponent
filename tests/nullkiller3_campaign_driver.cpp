@@ -4,6 +4,7 @@
 #include "StrategicCandidates.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
+#include "strategic_intent_fixture.h"
 #include "ResourceLedger.h"
 #include "ReturnedHeroRecovery.h"
 #include "../engine/ExternalAI/LocalState.h"
@@ -254,6 +255,7 @@ int main(int argc,char ** argv)
             nullkiller3::CampaignState current,candidate;std::string reason;
             // The initial plan retains the ordinary closed response shape.
             reply["plan"]=plan;
+            initialCourseFixture(request,reply,world);
             require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
             auto extra=reply;extra["defense_exit"]=exit;
             require(!nullkiller3::validateStrategicDecision(extra,request,world,current,candidate,reason),"unrequested exit shape accepted");
@@ -821,6 +823,7 @@ int main(int argc,char ** argv)
         auto request = json(R"({"request_id":"fresh","identity":{"generation":"fresh"},"evidence_refs":["observation:day"]})");
         auto reply = json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"Develop then capture","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"object:0","role":"main"}],"alternatives":[{"approach":"economy","benefit":"Income","cost":"Building","uncertainty":"Unknown threats"},{"approach":"offense","benefit":"Capture","cost":"Army","uncertainty":"Guard estimate"}],"reconsider_when":[{"goal_id":"attack","kind":"executor_lost"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");
         reply["plan"] = proposal;
+        initialCourseFixture(request,reply,world);
         nullkiller3::CampaignState initial, modelCandidate;
         require(nullkiller3::validateStrategicDecision(reply, request, world, initial, modelCandidate, reason), reason.c_str());
         require(modelCandidate.plan()["revision"].Integer() == 1, "model intention was not installed");

@@ -185,7 +185,8 @@ def choose(request):
     metadata={}
     try:
         answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,deadline=deadline,
-            knowledge=knowledge,guide=guide,guide_info=guide_info,game_rules=game_rules,rules_info=rules_info,decision_dir=folder)
+            knowledge=knowledge,guide=guide,guide_info=guide_info,game_rules=game_rules,rules_info=rules_info,
+            decision_dir=folder,max_output_bytes=32768)
         answer=validate_reply(request,answer)
     except BaseException as error:
         if not hasattr(error,'usage'):error.usage=metadata.get('usage')
