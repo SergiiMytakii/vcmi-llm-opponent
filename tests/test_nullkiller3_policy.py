@@ -113,6 +113,9 @@ class NativePolicyTest(unittest.TestCase):
             self.assertGreater(action['army_loss_value'],0)
             task_loss=results['permissive'][2][0]
             if interruption:
+                self.assertEqual(action['selected_route']['target_position'],[7,13,0],
+                    'battle forecast does not describe the chain actually executing inside the composition')
+                self.assertEqual(action['selected_route']['allowed_loss_ratio'],.01)
                 survivor=next(h for h in task_loss['after']['heroes'] if h['ref']==action['actor_ref'])
                 self.assertEqual(survivor['position'],[7,13,0],
                     'the old composition continued beyond the acknowledged guarded visit after excessive casualties')

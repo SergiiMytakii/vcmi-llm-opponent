@@ -5,6 +5,18 @@ import sys
 
 r=json.load(sys.stdin)
 assert r['protocol']==2 and 'actions' not in r
+# Directed setup precedes proof: only actual own callback receipts are used.
+# The production model receives the unmodified, current native DTO afterward.
+setup_mode=os.environ.get('NK3_PROBE_MODE')
+losses=[e for e in r['memory'].get('recent_results',[]) if e.get('action',{}).get('kind')=='battle'
+        and e.get('outcome')=='battle_lost']
+reinforced=any(e.get('goal',{}).get('id')=='restore-helper-force' for e in r['observation'].get('confirmed_deliveries',[]))
+if setup_mode in ('model_after_loss','model_after_helper_reinforcement') and losses and (setup_mode=='model_after_loss' or setup_mode=='model_after_helper_reinforcement' and reinforced):
+    import subprocess
+    from pathlib import Path
+    process=subprocess.run([sys.executable,str(Path(__file__).resolve().parents[2]/'controller/main.py')],
+                           input=json.dumps(r).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    sys.stdout.buffer.write(process.stdout);sys.stderr.buffer.write(process.stderr);sys.exit(process.returncode)
 town=r['observation']['towns'][0]['ref']
 goal=dict(id='guild',kind='develop_town',actor_ref=None,target_ref=town,deadline_day=r['observation']['day']+3,
           priority=80,building_id=0,min_army_value=0,depends_on=[],required_capabilities=['build'],
@@ -18,6 +30,47 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
            reconsider_when=[dict(goal_id='guild',kind='deadline_missed')],plan=plan,
            usage=dict(input_tokens=0,output_tokens=0,known=True))
 mode=os.environ.get('NK3_PROBE_MODE','valid')
+if mode=='model_after_helper_reinforcement':mode='restore_helper_force' if losses else 'hold_helpers'
+if mode in ('hold_helpers','model_after_loss'):
+    own=r['observation'];plan['goals']=[];reply['assignments']=[]
+    plan['approach']='defense';plan['policy']['critical_towns']=[t['ref'] for t in own['towns']]
+    reply['alternatives'][0].update(approach='defense',benefit='Hold the separate own towns',cost='Delay conquest',uncertainty='Observed hostile advance may defeat the helper')
+    reply['reason']='Protect own towns with separate holders; the weak helper remains exposed to the visible hostile force.'
+    for actor in own['heroes']:
+        safe=min(own['towns'],key=lambda t:sum(abs(t['position'][i]-actor['position'][i]) for i in (0,1)))
+        hold=dict(goal,id='hold-'+actor['ref'].replace(':','-'),kind='preserve_force',actor_ref=actor['ref'],
+                  target_ref=safe['ref'],building_id=-1,min_army_value=actor['army_value'],required_capabilities=['land'],
+                  complete_when=dict(kind='force_preserved_until',value=own['day']+3))
+        plan['goals'].append(hold);reply['assignments'].append(dict(hero_ref=actor['ref'],role='defender'))
+    reply['reconsider_when']=[dict(goal_id=g['id'],kind='deadline_missed') for g in plan['goals']]
+    if r.get('campaign') and any(g['kind'] in ('preserve_force','defend_area') for g in r['campaign']['goals']):
+        reply['defense_exit']=dict(waiting_for='Observe the hostile advance before day '+str(own['day']+1),
+                                  expected_gain='Preserve the separate own defenders',next_step='Reassess the observed front')
+if mode=='restore_helper_force':
+    own=r['observation'];actor=min(own['heroes'],key=lambda h:h['army_value'])
+    source=max(own['towns'],key=lambda t:t.get('defense_value',0))
+    goal.update(id='restore-helper-force',kind='reinforce_hero',actor_ref=actor['ref'],target_ref=source['ref'],
+                building_id=-1,min_army_value=actor['army_value']+source['defense_value'],required_capabilities=['land','transfer'],
+                complete_when=dict(kind='army_at_least',value=actor['army_value']+source['defense_value']))
+    reply['assignments']=[dict(hero_ref=h['ref'],role='scout' if h==actor else 'defender') for h in own['heroes']]
+    reply['reconsider_when']=[dict(goal_id=goal['id'],kind='deadline_missed')]
+    reply['alternatives'][0].update(approach='defense',benefit='Use the observed separate own troop pool',cost='Reduce stationary town protection',uncertainty='Hostile movement remains unknown')
+    if r.get('campaign') and any(g['kind'] in ('preserve_force','defend_area') for g in r['campaign']['goals']):reply['defense_exit']=None
+if mode=='battle_attribution':
+    if r.get('campaign') and any(g['kind'] in ('preserve_force','defend_area') for g in r['campaign']['goals']):reply['defense_exit']=None
+    reply['alternatives'][0].update(approach='defense',benefit='Retain stationary own protection while removing the visible attacker',cost='Delay the next operation',uncertainty='Other hostile forces remain unknown')
+    own=r['observation'];actor=max(own['heroes'],key=lambda h:h['army_value'])
+    enemy=next((o for o in own['objects'] if o.get('kind')=='hero' and o.get('visible') is True
+                and o.get('owner') in own.get('enemy_players',[])),None)
+    if enemy:
+        goal.update(id='named-interception',kind='intercept_hero',actor_ref=actor['ref'],target_ref=enemy['ref'],
+                    building_id=-1,min_army_value=actor['army_value'],required_capabilities=['land'],
+                    complete_when=dict(kind='enemy_engaged',value=0),risk=dict(max_loss_ratio=.7,reason='Directed named combat proof'))
+        reply['assignments']=[dict(hero_ref=actor['ref'],role='main')]
+        reply['reconsider_when']=[dict(goal_id=goal['id'],kind='deadline_missed')]
+    else:
+        reply['assignments']=own.get('strategy_assignments',[])
+    plan['policy']['max_loss_ratio']=.15
 if mode in ('small_hero_delivery','disjoint_hero_delivery'):
     own=r['observation'];actor=max(own['heroes'],key=lambda h:h['army_value'])
     existing=next((g for g in (r.get('campaign') or {}).get('goals',[]) if g['id']=='small-delivery'),None)

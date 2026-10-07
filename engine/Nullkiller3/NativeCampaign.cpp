@@ -735,11 +735,48 @@ void NativeCampaign::applyPassageObservations()
     }
     completedPassageVisits.clear();
 }
+void NativeCampaign::battleStarted(int ownID,int enemyID,bool attacker,const JsonNode & position)
+{
+    std::lock_guard lock(executionMutex);
+    JsonNode context;
+    context["enemy_engine_object_id"].Integer()=enemyID;
+    context["own_side"].String()=attacker ? "attacker" : "defender";
+    context["battle_position"]=position;
+    context["battle_origin"].String()=attacker ? (executionActive ? "native_action" : "unknown") : "incoming_attack";
+    if(ownID>=0) context["engine_object_id"].Integer()=ownID;
+    context["goal_id"].String()="";
+    context["campaign_revision"].Integer()=acceptedRevision.load();
+    // Incoming attacks never inherit an outstanding operation. Snapshot the
+    // actual selected task, not the campaign that happens to exist at battle end.
+    if(attacker && executionActive)
+        for(const auto & route:activeExecutionContext["routes"].Vector())
+            if(std::any_of(route["engine_actor_ids"].Vector().begin(),route["engine_actor_ids"].Vector().end(),
+                           [&](const auto & actor) { return actor.Integer()==ownID; }))
+            {
+                context["campaign_revision"]=activeExecutionContext["campaign_revision"];
+                context["goal_id"]=activeExecutionContext["goal_id"];
+                context["battle_origin"].String()=context["goal_id"].String().empty() ? "native_action" : "campaign_operation";
+                context["selected_route"]=route;
+                context["selected_route"].Struct().erase("engine_actor_ids");
+                break;
+            }
+    activeBattleContext=std::move(context);
+}
 void NativeCampaign::battleResult(JsonNode ownResult)
 {
-    ownResult["enemy_engine_object_id"].Integer()=observedBattleEnemy.exchange(-1);
-    ownResult["goal_id"].String()=executingGoal();
-    ownResult["campaign_revision"].Integer()=acceptedRevision.load();
+    {
+        std::lock_guard lock(executionMutex);
+        if(activeBattleContext.isStruct())
+            for(const auto & [key,value]:activeBattleContext.Struct()) ownResult[key]=value;
+        else
+        {
+            ownResult["battle_origin"].String()="unknown";
+            ownResult["goal_id"].String()="";
+            ownResult["enemy_engine_object_id"].Integer()=-1;
+            ownResult.Struct().erase("campaign_revision");
+        }
+        activeBattleContext=JsonNode();
+    }
     // The callback uses only immutable own result facts and atomic accepted
     // policy. The turn worker consumes the flag after mandatory battle queries
     // finish, before any subsequent movement or composition subtask.
@@ -805,10 +842,19 @@ void NativeCampaign::applyBattleObservations()
         for(const auto * field:{"engine_object_id","day","won","draw"}) action.Struct().erase(field);
         action["kind"].String()="battle";
         action["source"].String()="own_battle_result";
+        JsonNode diagnostics;
+        for(const auto * field:{"battle_origin","own_side","battle_position","selected_route"})
+        {
+            if(!action[field].isNull()) diagnostics[field]=action[field];
+            action.Struct().erase(field);
+        }
         externalai::recordResult(persisted["memory"],day,action,false);
         auto & result=persisted["memory"]["recent_results"].Vector().back();
         result["outcome"].String()=draw ? "battle_draw" : won ? "battle_won" : "battle_lost";
         JsonNode trace=result;
+        // Diagnostics are log/journal facts only. The saved memory and model
+        // DTO retain their existing battle-result contract.
+        for(const auto & [field,value]:diagnostics.Struct()) trace["action"][field]=value;
         trace["experience_id"].String()=experienceID;
         trace["player"]=action["player"];
         logAi->info("NK3_EXECUTION %s",trace.toCompactString());
@@ -2406,13 +2452,51 @@ void NativeCampaign::resourcesChanged(const TResources & resources)
     std::lock_guard lock(executionMutex);
     if(resourceLedgerActive) resourceLedger.received(resourceValues(resources));
 }
+void NativeCampaign::executionRoute(NK2AI::Nullkiller & ai,const NK2AI::AIPath & path)
+{
+    if(!executionActive || !path.targetHero || !path.heroArmy) return;
+    const auto goalID=executingGoal();
+    JsonNode route;
+    std::set<int> actors{path.targetHero->id.getNum()};
+    for(const auto & node:path.nodes)
+        if(node.targetHero) actors.insert(node.targetHero->id.getNum());
+    for(const auto actor:actors) route["engine_actor_ids"].Vector().emplace_back(actor);
+    route["hero_ref"].String()=reference(path.targetHero);
+    route["target_position"]=coordinate(path.targetTile());
+    route["day"].Integer()=ai.cc->getCalendar().getCurrentDay()+path.turn();
+    route["army_value"].Integer()=path.heroArmy->estimateCombatValue();
+    route["army_loss_estimate"].Integer()=path.getTotalArmyLoss();
+    route["loss_estimate"]["path_component"].Integer()=path.armyLoss;
+    route["loss_estimate"]["target_component"].Integer()=path.targetObjectArmyLoss;
+    route["loss_estimate"]["basis"].String()="Native conditional heuristic; not a battle simulation or win probability.";
+    route["scope"].String()="whole_native_route";
+    bool namedRoute=false;
+    for(const auto & intention:campaign.plan()["goals"].Vector())
+        if(intention["id"].String()==goalID)
+        {
+            const auto * target=resolve(ai,intention["target_ref"]);
+            namedRoute=target && path.targetTile()==target->visitablePos()
+                && intention["actor_ref"].String()==reference(path.targetHero);
+        }
+    route["allowed_loss_ratio"].Float()=campaign.lossLimit(namedRoute ? goalID : std::string());
+    route["movement_cost"].Float()=path.movementCost();
+    std::lock_guard lock(executionMutex);
+    // This hook runs only when native accepts this chain. Composition ancestry
+    // can include future blocked routes and must never supply the forecast.
+    activeExecutionContext["routes"].Vector()={route};
+}
 void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::TTask & task)
 {
     const auto * goal=dynamic_cast<const NK2AI::Goals::AbstractGoal *>(task.get());
     const auto goalID=goal ? goal->strategicGoalID : "";
     const auto goalType=goal ? goal->goalType : NK2AI::Goals::INVALID;
+    JsonNode context;
+    context["goal_id"].String()=goalID;
+    context["campaign_revision"].Integer()=acceptedRevision.load();
+    context["routes"].Vector();
     {
         std::lock_guard lock(executionMutex);
+        activeExecutionContext=std::move(context);
         spendingGoal=goalID;
         acceptedLossRatio=campaign.lossLimit(goalID);
         emergencyTown=goal ? goal->strategicEmergencyTown : "";
@@ -2540,6 +2624,7 @@ void NativeCampaign::endExecution(NK2AI::Nullkiller & ai,const std::string & ack
     executionActive=false;
     {
         std::lock_guard lock(executionMutex);
+        activeExecutionContext=JsonNode();
         spendingGoal.clear();
         acceptedLossRatio=campaign.lossLimit(std::string());
         emergencyTown.clear();emergencyCost=TResources();emergencyFunds=TResources();

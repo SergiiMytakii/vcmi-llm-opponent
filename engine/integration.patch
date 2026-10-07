@@ -330,11 +330,17 @@ index 02b0d31bf..f2406d5d9 100644
  	}
  }
  
-@@ -1023,3 +1023,8 @@
+@@ -1020,6 +1150,14 @@ void AIGateway::battleStart(const BattleID & battleID, const CCreatureSet * army
+ 	status.setBattle(ONGOING_BATTLE);
+ 	const CGObjectInstance * presumedEnemy = vstd::backOrNull(cc->getVisitableObjs(tile)); //may be nullptr in some very are cases -> eg. visited monolith and fighting with an enemy at the FoW covered exit
+ 	battlename = boost::str(boost::format("Starting battle of %s attacking %s at %s") % (hero1 ? hero1->getNameTextID() : "a army") % (presumedEnemy ? presumedEnemy->getObjectNameTextID() : "unknown enemy") % tile.toString());
 +	if(nullkiller->strategicCampaign)
 +	{
 +		const auto * opponent=side==BattleSide::ATTACKER ? hero2 : hero1;
-+		nullkiller->strategicCampaign->battleOpponent(opponent ? opponent->id.getNum() : -1);
++		const auto * ownHero=side==BattleSide::ATTACKER ? hero1 : hero2;
++		JsonNode position;for(const auto value:{tile.x,tile.y,tile.z}) position.Vector().emplace_back(value);
++		nullkiller->strategicCampaign->battleStarted(ownHero ? ownHero->id.getNum() : -1,
++			opponent ? opponent->id.getNum() : -1,side==BattleSide::ATTACKER,position);
 +	}
  	CAdventureAI::battleStart(battleID, army1, army2, tile, hero1, hero2, side, replayAllowed);
  }
@@ -1886,18 +1892,28 @@ index c362192f0..ab7cf09c8 100644
  
  	if(lockingReason != HeroLockedReason::NOT_LOCKED)
 diff --git a/AI/Nullkiller2/Goals/ExecuteHeroChain.cpp b/AI/Nullkiller2/Goals/ExecuteHeroChain.cpp
-index 2a9973de3..7325a9a70 100644
+index 2a9973de3..839586c46 100644
 --- a/AI/Nullkiller2/Goals/ExecuteHeroChain.cpp
 +++ b/AI/Nullkiller2/Goals/ExecuteHeroChain.cpp
-@@ -145,6 +145,7 @@ bool ExecuteHeroChain::isObjectAffected(ObjectInstanceID id) const
+@@ -11,6 +11,7 @@
+ #include "ExecuteHeroChain.h"
+ #include "../AIGateway.h"
+ #include "../Engine/Nullkiller.h"
++#include "../../Nullkiller3/NativeCampaign.h"
+ #include "../Pathfinding/Actions/DimensionDoorAction.h"
+ 
+ namespace NK2AI
+@@ -145,6 +146,9 @@ bool ExecuteHeroChain::isObjectAffected(ObjectInstanceID id) const
  
  void ExecuteHeroChain::accept(AIGateway * aiGw)
  {
 +	aiGw->checkStrategicTurn();
++	if(aiGw->nullkiller->strategicCampaign)
++		aiGw->nullkiller->strategicCampaign->executionRoute(*aiGw->nullkiller,chainPath);
  	logAi->debug("Executing hero chain towards %s. Path %s", targetName, chainPath.toString());
  
  	aiGw->nullkiller->setActive(chainPath.targetHero, tile);
-@@ -153,7 +154,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
+@@ -153,7 +157,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
  
  	auto targetObject = aiGw->cc->getObj(static_cast<ObjectInstanceID>(objid), false);
  
@@ -1906,7 +1922,7 @@ index 2a9973de3..7325a9a70 100644
  	{
  		auto relations = aiGw->cc->getPlayerRelations(aiGw->playerID, targetObject->getOwner());
  
-@@ -169,9 +170,15 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
+@@ -169,9 +173,15 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
  
  	for(int i = chainPath.nodes.size() - 1; i >= 0; i--)
  	{

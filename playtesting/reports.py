@@ -41,6 +41,23 @@ def native_records(path, marker):
     return records, errors+bool(buffer)
 
 
+def battle_comparison(record):
+    """Compare own facts without allocating a whole-route forecast to one encounter."""
+    action=record['action']
+    before,loss=action.get('army_value_before'),action.get('army_loss_value')
+    forecast=action.get('selected_route')
+    return {'day':record.get('day'),'sequence':record.get('sequence'),
+            'actor_ref':action.get('actor_ref'),'target_ref':action.get('target_ref'),
+            'goal_id':action.get('goal_id') or None,'campaign_revision':action.get('campaign_revision'),
+            'origin':action.get('battle_origin','unknown'),'own_side':action.get('own_side','unknown'),
+            'outcome':record['outcome'],'forecast':forecast,
+            'actual_loss_value':loss,'actual_casualties':action.get('own_casualties'),
+            'own_hero_return':action.get('own_hero_return','unknown'),
+            'actual_loss_ratio':loss/before if type(before) is int and before>0 and type(loss) is int else None,
+            'retreat_cost_unmeasured':action.get('own_hero_return') in ('escape','surrender'),
+            'comparison':'route_estimate_not_single_battle' if isinstance(forecast,dict) else 'unknown'}
+
+
 def report(run):
     run = Path(run).resolve()
     manifest = load(run)
@@ -195,6 +212,7 @@ def report(run):
         "counts": counts, "decision_count": len(decisions), "decisions": decisions,
         "batch_steps":batch_steps,
         "native_execution":native_execution,
+        "battle_comparisons":[battle_comparison(r) for r in native_battles],
         "native_strategy":native_strategy,
         "native_metrics":{
             "execution_outcomes":dict(Counter(r.get('outcome','unknown') for r in native_execution)),
@@ -243,6 +261,19 @@ def report(run):
         cells = [d["decision_id"], d.get("request_id", "?"), d.get("action_id", d["status"]),
                  d["execution"], d.get("duration_seconds", "?"), d.get("explanation", "unavailable")[:512]]
         lines.append("| " + " | ".join(str(c).replace("|", "\\|").replace("\n", " ") for c in cells) + " |")
+    if native_battles:
+        lines += ["", "| Day | Actor | Origin | Goal / revision | Route estimate | Outcome | Actual casualties / value | Return |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        for battle in value['battle_comparisons']:
+            forecast=battle['forecast'] or {}
+            cells=[battle['day'],battle['actor_ref'],battle['origin'],
+                   str(battle['goal_id'])+' / '+str(battle['campaign_revision']),
+                   forecast.get('army_loss_estimate','unknown'),battle['outcome'],
+                   str(battle['actual_casualties'])+' / '+str(battle['actual_loss_value']),
+                   battle['own_hero_return']+(' (unmeasured cost)' if battle['retreat_cost_unmeasured'] else '')]
+            lines.append('| '+' | '.join(str(c).replace('|','\\|').replace('\n',' ') for c in cells)+' |')
+        lines += ["", "Forecasts cover whole native routes, possibly several encounters; they are not single-battle predictions.",
+                  "Missing origin/forecast in older records remains unknown. Zero casualties on retreat does not measure its full cost."]
     lines += ["", f"Episodes: {len(episodes)}; see `episodes/`. Raw exchanges: `decisions/`.",
               "Repeated request IDs (e.g. load) are left unconfirmed rather than joined ambiguously.",
               "Native net resource changes and owned-state snapshots are in `report.json`. Unknown recovery is not command confirmation.",

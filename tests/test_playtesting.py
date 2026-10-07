@@ -323,6 +323,39 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         self.assertEqual(len(report['native_execution']),3)
         self.assertEqual(report['match_outcome'],'unconfirmed','a battle victory became a match victory')
 
+    def test_report_preserves_battle_origin_forecast_scope_and_retreat_cost_unknowns(self):
+        self.prepare()
+        logs=self.run_dir/'engine-logs';logs.mkdir()
+        records=[
+            {'day':2,'sequence':10,'outcome':'battle_won','action':{'kind':'battle','source':'own_battle_result',
+                'actor_ref':'object:0','goal_id':'base','campaign_revision':4,'battle_origin':'campaign_operation',
+                'own_side':'attacker','army_value_before':1000,'army_loss_value':100,
+                'own_casualties':[{'creature_id':0,'count':2}],
+                'selected_route':{'army_loss_estimate':250,'loss_estimate':{'path_component':50,'target_component':200},
+                    'scope':'whole_native_route'}}},
+            {'day':2,'sequence':11,'outcome':'battle_lost','action':{'kind':'battle','source':'own_battle_result',
+                'actor_ref':'object:14','goal_id':'','battle_origin':'incoming_attack','own_side':'defender',
+                'army_value_before':1000,'army_loss_value':0,'own_hero_return':'escape'}},
+            {'day':1,'sequence':1,'outcome':'battle_won','action':{'kind':'battle','source':'own_battle_result',
+                'actor_ref':'object:0','army_loss_value':20}}]
+        (logs/'VCMI_Client_log.txt').write_text(''.join('[2026-10-07 00:00:00.000] INFO [test] ai - NK3_EXECUTION '+json.dumps(r)+'\n' for r in records))
+        result=self.cli('report','--run',self.run_dir)
+        self.assertEqual(result.returncode,0,result.stderr)
+        value=json.loads((self.run_dir/'report.json').read_text())
+        battles=value['battle_comparisons']
+        self.assertEqual([b['origin'] for b in battles],['campaign_operation','incoming_attack','unknown'])
+        self.assertEqual(battles[0]['campaign_revision'],4)
+        self.assertEqual(battles[0]['forecast']['loss_estimate']['target_component'],200)
+        self.assertEqual(battles[0]['actual_loss_ratio'],.1)
+        self.assertEqual(battles[0]['actual_casualties'],[{'creature_id':0,'count':2}])
+        self.assertEqual(battles[0]['comparison'],'route_estimate_not_single_battle')
+        self.assertIsNone(battles[1]['forecast'])
+        self.assertTrue(battles[1]['retreat_cost_unmeasured'])
+        self.assertEqual(battles[1]['own_hero_return'],'escape')
+        self.assertIsNone(battles[2]['actual_casualties'])
+        self.assertEqual(battles[2]['comparison'],'unknown')
+        self.assertIn('incoming_attack',(self.run_dir/'report.md').read_text())
+
     def test_report_requires_engine_evidence_and_does_not_call_an_exit_a_victory(self):
         self.prepare()
         decision = self.run_dir / "decisions/one"

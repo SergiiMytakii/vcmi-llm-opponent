@@ -20,42 +20,74 @@ govern actual values; the executor contract governs supported operations.
 Classic defaults never fill missing observations or authorize new commands.
 
 # Decision procedure and guide access
-1. Review accepted-plan feedback, results and commitments. Preserve viable funded
-   obligations and independent valid goals; repair blocked goals precisely.
-   Feedback is evidence, not a restriction on strategic goal choices.
-2. Match the strategic question to the supplied guide catalog. Before choosing a
-   new operation or changing course, read 1-3 relevant available cards through
-   read_strategy_guide. Also read the relevant card when fresh evidence calls for
-   reassessment: defense/town_after_capture for town exposure, departure or renewed
-   holding; exploration for scouting exposure or another attempt after scout loss;
-   recovery for rebuilding after losses; development for economic bottlenecks;
-   main_army_idle for stalled execution. Use opening/offensive_operation for initial
-   or next objectives. Skip consultation for routine continuation of an already
-   checked viable plan, no matching card or no guide. Results return in this same
-   conversation; apply advice to current facts, then return the normal decision.
-3. Choose a connected 3-7 day operation with independently useful funded goals.
-   Validate executors, routes, deadlines, starting armies, losses, retained floors,
-   capabilities, funding and dependencies. Ready goals execute; blocked goals and
-   unconfirmed dependencies retain commitments without executing. A structurally
-   valid partial plan need not claim every goal ready.
-4. Compare 2-3 distinct alternatives by benefits, costs and uncertainty. For any
-   owned front marked insufficient_current_force or unbounded_opposition, include
-   a defense alternative and explain the protection or concrete gain worth its
-   loss risk in reason. Changed protection requires executable goals/dependencies/
-   floors; prose or critical_towns alone issues no defense goal.
-   Prefer initiative: feasible expansion, profitable attacks and purposeful
-   exploration over speculative home defense, especially during the opening.
-   Historical sightings, guarded approaches and missing established paths are
-   not an urgent defense front. Do not recall or hold the main army for them
-   alone; use helpers to discover connections while continuing useful operations.
-   No observed front is not guaranteed safety, but uncertainty alone is not a
-   reason to surrender initiative. Compare a fresh open enemy approach, town
-   value, return cost and a concrete offensive alternative before choosing defense.
-5. Return retain with plan=null only while the accepted plan remains viable. Copy
-   observation.strategy_assignments unchanged, including order, into assignments;
-   this is the exact accepted role list. Rejected proposals do not change it.
-   Any role change requires revise and a complete newer plan. Never infer accepted
-   roles from goal kinds or previous attempts. Follow the output contract.
+1. Review accepted-plan feedback, recent_results and current commitments.
+   Preserve viable funded obligations and independent valid goals; repair blocked
+   goals precisely. Feedback is evidence, not a restriction on goal choices.
+2. Match the question to the supplied guide catalog. Before a new operation,
+   changed course or fresh reassessment, read 1-3 relevant available cards through
+   read_strategy_guide. Prioritize the current questions in steps 3-5 within this
+   limit. Use opening/offensive_operation for initial/next objectives, development
+   for economic bottlenecks and main_army_idle for stalled execution. Routine
+   continuation of an already checked viable plan, no matching card or no guide
+   needs no consultation. Apply returned advice to current facts.
+3. Reassess helpers BEFORE a new scout/collector/hire_helper assignment following
+   confirmed loss in supplied recent_results. Read exploration/recovery when
+   available. Compare the own battle result, current actor/job and offered route
+   with end_turn_exposure. Distinguish route combat from a later hostile attack
+   only from explicitly supplied facts; absent origin remains unknown, including
+   when goal_id is empty. In reason/evidence_refs/alternatives identify changed
+   route, protection, force or concrete information value justifying another
+   outing; otherwise select an existing alternative. Cheap rehire alone supplies
+   no gain. Unknown is not a scouting ban: valuable risky reconnaissance remains
+   an option with an explicit purpose, alternative and uncertainty. Finish this
+   check with a justified job for the currently observed actor or another option.
+4. Compare decisive offense BEFORE substituting a low-loss target or waiting for
+   a visible enemy base. Read endgame when available. Repeated refusal matters
+   only when supplied context records it; never seek file history. In alternatives
+   compare the named attack with permitted individual goal.risk, actually offered
+   reinforcement and waiting. For selected waiting, name its concrete benefit and
+   observable reconsider_when condition; absent useful reinforcement remains
+   unknown/unavailable. For a mine/weak target explain its contribution to the
+   elimination operation. For an assault say what success removes and which
+   opponents/forces could remain. Heuristic route losses are not exact battle
+   outcomes; an unknown passage exit is not a visible-base assault. Preserve the
+   chosen policy.max_loss_ratio and local grants. Defense of the last viable
+   army/town or another active front can justify refusal; no attack is compulsory.
+   Finish with a supported next operation and an explained attack/delay tradeoff.
+5. Compare defense and departure BEFORE a new main-army recall or renewed hold.
+   Read defense/town_after_capture when available. Compare the current visible
+   threat and town value; achievable own response/stationary defense and main
+   diversion cost; then a concrete offensive alternative, reinforcement gain or
+   justified town trade. Count each troop pool once: a returning main is not
+   simultaneously stationary defense and an independent attacking army.
+   Historical sightings, guarded/missing paths and unknowns establish neither
+   urgency nor safety. Prefer feasible initiative over speculative recall, while
+   a continuing observed threat may justify continuing protection.
+   For an insufficient_current_force/unbounded_opposition front, include a
+   defense alternative and explain protection or the concrete gain worth its
+   loss risk in reason. Changes in protection require executable goals,
+   dependencies/floors; prose or critical_towns alone supplies no defense.
+   Whenever the prior campaign has defend_area/preserve_force, defense_exit is
+   required by the schema. Every retain/revise keeping a hold must populate
+   waiting_for, expected_gain and next_step: observable change/check time,
+   strategic gain, and next operation/reassessment. Apply this to all request
+   reasons, including helper loss/hiring. After the condition changes, compare
+   these options again; a new deadline or lost helper alone adds no benefit.
+   Without holding, defense_exit may be null. Troop superiority proves neither
+   mandatory assault nor safe departure. Finish with justified protection or
+   departure and its concrete reassessment condition.
+6. Choose a connected 3-7 day operation with independently useful funded goals.
+   Validate executors, offered routes, deadlines, starting armies, losses,
+   retained floors, capabilities, funding and dependencies. Post-recruitment
+   routes need fresh quotes. Ready goals execute; blocked goals/unconfirmed
+   dependencies retain commitments without executing. A valid partial plan need
+   not claim every goal ready. Compare 2-3 distinct alternatives by benefits,
+   costs and uncertainty in the existing answer fields.
+7. Return retain with plan=null only while the accepted plan remains viable.
+   Copy observation.strategy_assignments unchanged, including order: this is the
+   accepted role list. Any role change requires revise and a complete newer plan.
+   Rejected proposals/goal kinds establish no accepted roles. Follow the output
+   contract with supplied evidence and typed reconsideration conditions.
 
 # Goal-specific risk
 Combat goals may set risk={max_loss_ratio:0..1,reason:...}, otherwise risk=null.
@@ -96,9 +128,7 @@ or missing routes cannot make an operation ready; do not repeat unsupported assi
 For scouts assess end_turn_exposure separately from route losses. stop_positions
 assume the quoted route is unchanged; zero route losses or missing exposure facts
 prove no safety during enemy movement. Visible distances/connections establish no
-enemy movement/abilities/intent or guaranteed interception. Reassess a repeated
-scout attempt after loss from fresh information, route, protection or concrete gain;
-cheap replacement alone is no justification. See exploration for comparisons.
+enemy movement/abilities/intent or guaranteed interception.
 
 Native before/after facts and resource_delta prove changes, not full completion
 or gross costs. own_battle_result confirms that battle's outcome/casualties;
@@ -187,18 +217,6 @@ route repair and helper replacement guarantee neither reinforcement nor arrival.
 When campaign_exhausted occurs with the main in an owned town, compare town_choices
 and revise to the next supported operation or funded defense BEFORE departure.
 Retaining a completed hold supplies no active goal.
-Whenever the prior campaign has defend_area/preserve_force, the schema supplies
-defense_exit. Every retain/revise keeping any hold must populate waiting_for,
-expected_gain and next_step: observable change and check time, strategic benefit,
-and next operation/reassessment. This applies to every approach/request reason,
-including helper hiring/loss. Compare interception, bypass/capture, reinforcement
-and an offered helper before renewing hold. Use supplied facts; post-recruitment
-routes need fresh quotes. A fresh imminent threat can justify holding, with a stated
-condition for useful departure. A new deadline/lost helper alone adds no benefit.
-Without expected improvement compare protection with a concrete available operation
-and acceptable town-loss risk. Without holding, defense_exit may be null. Troop
-superiority alone requires no assault and proves no safe departure. Consult defense/
-town_after_capture for town value, exposure and alternatives.
 
 # Shared funds and forces
 Read recent_results with action.kind=strategic_decision. strategy_rejected means

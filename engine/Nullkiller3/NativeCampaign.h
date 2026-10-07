@@ -11,7 +11,7 @@
 #include "../Nullkiller2/Goals/CGoal.h"
 #include "../../lib/ResourceSet.h"
 
-namespace NK2AI { class Nullkiller; }
+namespace NK2AI { class Nullkiller; struct AIPath; }
 class CGHeroInstance;
 class CGObjectInstance;
 class CGTownInstance;
@@ -32,7 +32,7 @@ class NativeCampaign
     JsonNode persisted;
     std::string experienceID; // Immutable after construction; callbacks never read mutable JSON.
     std::atomic<bool> terminalRecorded{false};
-    std::atomic<int> observedBattleEnemy{-1};
+    JsonNode activeExecutionContext, activeBattleContext; // Transient, copied at battle start.
     JsonNode world;
     CampaignState campaign;
     std::string spendingGoal;
@@ -114,7 +114,7 @@ public:
     void forceChanged(const CGHeroInstance * hero, int day);
     void resourcesChanged(const TResources & resources);
     void battleResult(JsonNode ownResult);
-    void battleOpponent(int engineID) { observedBattleEnemy.store(engineID); }
+    void battleStarted(int ownID,int enemyID,bool attacker,const JsonNode & position);
     void terminalResult(int player,int day,bool won);
     void recordDelivery(NK2AI::Nullkiller & ai, const CGHeroInstance * receiver, const CArmedInstance * source,
                         uint64_t receiverBefore, uint64_t sourceBefore);
@@ -142,6 +142,7 @@ public:
     bool beginDelivery(const CGHeroInstance * receiver, const CArmedInstance * source);
     void endDelivery();
     void beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::TTask & task);
+    void executionRoute(NK2AI::Nullkiller & ai,const NK2AI::AIPath & path);
     void endExecution(NK2AI::Nullkiller & ai,const std::string & acknowledgment);
     std::string role(const CGHeroInstance * hero) const;
 };
