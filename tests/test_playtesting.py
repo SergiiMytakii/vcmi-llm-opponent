@@ -39,6 +39,7 @@ class PlaytestingTest(unittest.TestCase):
             "players": {"red": "ExternalAI", "blue": "Nullkiller2"},
             "seed": None, "difficulty": "normal", "max_seconds": 60,
             "decision_timeout_seconds": 2,
+            "experience_database": str(self.root / "fixture-experience.sqlite3"),
         }
 
     def cli(self, *args, **kwargs):
@@ -212,9 +213,26 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(library.read_bytes(),before)
 
-    def test_training_and_integration_use_separate_experience_owners(self):
+    def test_game_run_purposes_use_the_same_persistent_default(self):
+        self.settings.pop('experience_database')
+        home=self.root/'home';home.mkdir()
+        env={**os.environ,'HOME':str(home),'APPDATA':str(home/'AppData/Roaming'),'XDG_DATA_HOME':str(home/'data')}
+        env.pop('VCMI_EXPERIENCE_DB',None)
+        paths=[]
+        for purpose in ('integration','training','evaluation'):
+            self.settings['purpose']=purpose
+            self.config.write_text(json.dumps(self.settings))
+            run=self.root/purpose
+            result=self.cli('prepare','--config',self.config,'--out',run,env=env)
+            self.assertEqual(result.returncode,0,result.stderr)
+            manifest=json.loads((run/'manifest.json').read_text())
+            paths.append(manifest['experience']['database'])
+            self.assertFalse(Path(paths[-1]).is_relative_to(run.resolve()))
+        self.assertEqual(len(set(paths)),1)
+
+    def test_integration_game_uses_the_configured_shared_experience_owner(self):
         manifest = self.prepare()
-        self.assertEqual(manifest['experience']['database'],str(self.run_dir.resolve()/'experience.sqlite3'))
+        self.assertEqual(manifest['experience']['database'],str(self.root.resolve()/'fixture-experience.sqlite3'))
         self.assertEqual(manifest['experience']['mode'],'learn')
 
     def test_engine_hook_keeps_protocol_clean_and_records_the_actual_exchange(self):

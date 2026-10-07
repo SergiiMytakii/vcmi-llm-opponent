@@ -25,7 +25,7 @@ class NativeTimeoutTest(unittest.TestCase):
                                     for p in config.get('engine_sources', [])]
         probe = ROOT / 'tests/fixtures/timeout_probe.py'
         config.update(controller=[sys.executable, str(probe), 'recover'],
-                      controller_sources=[], references={}, purpose='integration',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration',
                       case_id='timeout-save-regression', headless=False, max_seconds=180,
                       decision_timeout_seconds=18)
         config.pop('experience_database', None)

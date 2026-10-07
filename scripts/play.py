@@ -15,6 +15,7 @@ MARKER = 'external-ai-profile.json'
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'controller'))
 from codex import MODEL, REASONING_EFFORT, resolve_executable
+from experience import DEFAULT_DB
 
 
 @contextmanager
@@ -101,7 +102,7 @@ def play(args):
         print('Profile:', profile, flush=True)
         from playtesting.learning import LearningRuntime
         learning=LearningRuntime(profile/'logs',{'experience':{'mode':'learn',
-            'database':env.get('VCMI_EXPERIENCE_DB',str(ROOT/'.build/experience.sqlite3'))}})
+            'database':env.get('VCMI_EXPERIENCE_DB',str(DEFAULT_DB))}})
         try:learning.start(env)
         except (OSError,ValueError,subprocess.SubprocessError):
             print('Experience analysis unavailable; game continues from current facts.',file=sys.stderr)

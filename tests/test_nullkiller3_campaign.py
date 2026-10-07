@@ -79,7 +79,7 @@ class NativeCampaignTest(unittest.TestCase):
                                 allow_helper_replacement=True,critical_towns=['object:2']))
         seed = output / 'campaign.json'; seed.write_text(json.dumps(plan))
         config.update(profile_template=str(fixture), map_resource='Maps/NK3DeliveryRestore.vmap',
-                      players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', purpose='integration',
+                      players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', experience_mode='off',purpose='integration',
                       case_id='nk3-delivery-restore', headless=False, max_seconds=30, references={})
         config.pop('save_resource', None)
         def drive(name, saving):
@@ -151,7 +151,7 @@ class NativeCampaignTest(unittest.TestCase):
         print('\nNK3 campaign evidence:', output, flush=True)
         seed = output / 'campaign.json'
         seed.write_text(json.dumps(seed_campaign()))
-        config.update(players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', purpose='integration',
+        config.update(players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', experience_mode='off',purpose='integration',
                       case_id='nk3-campaign', headless=False, max_seconds=40, references={})
         config.pop('save_resource', None)
         def prepare(name):
@@ -218,7 +218,7 @@ class NativeCampaignTest(unittest.TestCase):
         fixture = output / 'fixture'
         shutil.copytree(config['profile_template'], fixture)
         config.update(profile_template=str(fixture), map_resource='Maps/NK3Delivery.vmap',
-                      players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', purpose='integration',
+                      players={'red':'Nullkiller3','blue':'EmptyAI'}, nk3_mode='native', experience_mode='off',purpose='integration',
                       case_id='nk3-delivery', headless=True, max_seconds=35, references={})
         config.pop('save_resource', None)
         def goal(name, kind, actor, target, priority, minimum, predicate):

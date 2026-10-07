@@ -29,7 +29,7 @@ class NativeCampaignSaveLoadTest(unittest.TestCase):
         config['engine_sources'] = [str((config_path.parent / p).resolve())
                                     for p in config.get('engine_sources', [])]
         config.update(controller=[sys.executable, str(ROOT / 'tests/fixtures/campaign_save_probe.py')],
-                      controller_sources=[], references={}, purpose='integration',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration',
                       case_id='campaign-save-load', headless=False, max_seconds=40,
                       decision_timeout_seconds=18,
                       players={'red': 'ExternalAI', 'blue': 'EmptyAI'})

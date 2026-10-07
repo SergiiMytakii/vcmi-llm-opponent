@@ -12,6 +12,8 @@ import sqlite3
 import sys
 import uuid
 
+from controller.experience import DEFAULT_DB
+
 
 ROOT = Path(__file__).resolve().parents[1]
 COLORS = ("red", "blue", "tan", "green", "orange", "purple", "teal", "pink")
@@ -187,12 +189,12 @@ def prepare(config_path, out):
             dest = out / "references" / (name + ".md")
             shutil.copyfile(path, dest)
             references[name] = {"path": str(dest.relative_to(out)), "sha256": digest(dest)}
-        # Live matches learn; integration keeps its own library. Offline replay
-        # consumes the frozen initial baseline without changing live experience.
-        library = absolute(config.get('experience_database',str(ROOT / '.build/experience.sqlite3')),base)
-        experience = {'mode':experience_mode,'database':str(out / 'experience.sqlite3' if config['purpose'] == 'integration' else library),
+        # All game runs share the persistent library. Offline replay consumes
+        # the frozen initial baseline without changing live experience.
+        library = absolute(config.get('experience_database',os.environ.get('VCMI_EXPERIENCE_DB',str(DEFAULT_DB))),base)
+        experience = {'mode':experience_mode,'database':str(library),
                       'baseline':None}
-        if experience_mode != 'off' and (config['purpose'] in ('training','evaluation') or experience_mode == 'read_only') and library.is_file():
+        if experience_mode != 'off' and library.is_file():
             snapshot_path = out / 'experience-before.sqlite3'
             with sqlite3.connect(library.as_uri()+'?mode=ro',uri=True) as source, sqlite3.connect(snapshot_path) as target:
                 source.backup(target)

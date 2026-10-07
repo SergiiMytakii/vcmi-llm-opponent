@@ -45,7 +45,7 @@ class NativeJointEconomyTest(unittest.TestCase):
                   policy=dict(max_loss_ratio=.2,allow_route_repair=True,allow_helper_replacement=True,critical_towns=['object:1']))
         seed=output/'campaign.json';seed.write_text(json.dumps(plan))
         config.update(profile_template=str(fixture),map_resource='Maps/NK3JointEconomy.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},
-                      nk3_mode='native',purpose='integration',case_id='nk3-joint-economy',headless=True,max_seconds=20,references={})
+                      nk3_mode='native',experience_mode='off',purpose='integration',case_id='nk3-joint-economy',headless=True,max_seconds=20,references={})
         config.pop('save_resource',None)
         path=output/'config.json';path.write_text(json.dumps(config));run=output/'game'
         subprocess.run([sys.executable,str(CLI),'prepare','--config',str(path),'--out',str(run)],check=True,capture_output=True)

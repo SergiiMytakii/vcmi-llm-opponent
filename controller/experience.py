@@ -9,10 +9,17 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB = ROOT / '.build/experience.sqlite3'
+if sys.platform == 'darwin':
+    DATA_ROOT = Path.home() / 'Library/Application Support'
+elif os.name == 'nt':
+    DATA_ROOT = Path(os.environ.get('APPDATA', str(Path.home() / 'AppData/Roaming')))
+else:
+    DATA_ROOT = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share')))
+DEFAULT_DB = DATA_ROOT / 'VCMI-Nullkiller3/learning/experience.sqlite3'
 CONDITIONS = ('combat', 'defense', 'economy', 'reinforcement', 'exploration', 'tempo')
 KINDS = {'attack':'combat', 'battle':'combat', 'build':'economy', 'recruit':'reinforcement',
          'transfer':'reinforcement', 'upgrade':'reinforcement', 'explore':'exploration',

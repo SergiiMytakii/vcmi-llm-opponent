@@ -63,7 +63,8 @@ def run_fixture(test, config_path, *, battle_loss=False, battle_win=False, two_p
     config.update(profile_template=str(profile), map_resource='Maps/ExperienceProof.vmap',
         controller=[sys.executable,str(ROOT/'controller/main.py')],controller_sources=[], references={},
         players={'red':'Nullkiller3','blue':'Nullkiller3' if two_players or battle_loss else 'EmptyAI'},
-        nk3_mode='native',experience_mode='learn',purpose='integration',case_id='separate-learning',
+        nk3_mode='native',experience_mode='learn',experience_database=str(output/'run/experience.sqlite3'),
+        purpose='integration',case_id='separate-learning',
         headless=True,max_seconds=25,review_interval_days=0,
         analysis_max_calls=8,analysis_timeout_seconds=3,analysis_interval_seconds=.2)
     config.pop('save_resource',None)

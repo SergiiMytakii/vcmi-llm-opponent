@@ -37,7 +37,7 @@ class NativeForceTest(unittest.TestCase):
                   reserves=[],policy=dict(max_loss_ratio=.2,allow_route_repair=True,
                                            allow_helper_replacement=True,critical_towns=['object:1']))
         seed_path=output/'campaign.json';seed_path.write_text(json.dumps(seed))
-        config.update(profile_template=str(fixture),map_resource='Maps/NK3ForceUnits.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='native',purpose='integration',
+        config.update(profile_template=str(fixture),map_resource='Maps/NK3ForceUnits.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='native',experience_mode='off',purpose='integration',
                       case_id='nk3-force-units',headless=True,max_seconds=15,references={})
         config.pop('save_resource',None)
         path=output/'config.json';path.write_text(json.dumps(config));run=output/'game'

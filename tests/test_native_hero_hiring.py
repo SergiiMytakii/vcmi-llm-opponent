@@ -33,7 +33,7 @@ class NativeHeroHiringTest(unittest.TestCase):
             for name, value in data.items(): archive.writestr(name, json.dumps(value))
         config.update(profile_template=str(fixture), map_resource='Maps/HeroHiring.vmap',
                       controller=[sys.executable, str(ROOT/'tests/fixtures/hire_helpers.py')],
-                      controller_sources=[], references={}, purpose='integration', case_id='hero-hiring',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration', case_id='hero-hiring',
                       headless=True, max_seconds=35, decision_timeout_seconds=30, seed=42,
                       players={'red':'ExternalAI','blue':'EmptyAI'})
         config.pop('save_resource', None)

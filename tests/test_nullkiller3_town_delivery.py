@@ -43,7 +43,7 @@ class NativeTownDeliveryTest(unittest.TestCase):
             for name,value in world.items():archive.writestr(name,json.dumps(value))
         probe=ROOT/'tests/fixtures/nk3_strategy_probe.py'
         config.update(profile_template=str(fixture),map_resource='Maps/NK3SevenSlots.vmap',
-            players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='model',purpose='integration',case_id='nk3-seven-slots',
+            players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='model',experience_mode='off',purpose='integration',case_id='nk3-seven-slots',
             headless=True,max_seconds=10,references={},controller=[sys.executable,str(probe)],controller_sources=[str(probe)])
         config.pop('save_resource',None)
         path=output/'config.json';path.write_text(json.dumps(config));run=output/'game'
@@ -137,7 +137,7 @@ class NativeTownDeliveryTest(unittest.TestCase):
                 required_capabilities=['land'],complete_when=dict(kind='held_until',value=6)))
         seed_path=output/'campaign.json';seed_path.write_text(json.dumps(seed))
         config.update(profile_template=str(fixture),map_resource='Maps/NK3TownDelivery.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},
-                      nk3_mode='native',purpose='integration',case_id='nk3-town-delivery',headless=True,max_seconds=20,references={})
+                      nk3_mode='native',experience_mode='off',purpose='integration',case_id='nk3-town-delivery',headless=True,max_seconds=20,references={})
         if protected:config['review_interval_days']=1
         if review or protected:
             probe=ROOT/'tests/fixtures/nk3_retention_probe.py'

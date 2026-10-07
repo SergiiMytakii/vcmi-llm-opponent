@@ -27,7 +27,7 @@ class NativeVisibilityTest(unittest.TestCase):
             config[key] = str((path.parent / config[key]).resolve())
         config['engine_sources'] = [str((path.parent / p).resolve()) for p in config.get('engine_sources', [])]
         config.update(controller=[sys.executable, str(ROOT / 'tests/fixtures/move_first.py')],
-                      controller_sources=[], references={}, purpose='integration',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration',
                       case_id='visibility-regression', headless=True, max_seconds=30,
                       decision_timeout_seconds=2, seed=42,
                       players={'red': 'ExternalAI', 'blue': 'EmptyAI'})

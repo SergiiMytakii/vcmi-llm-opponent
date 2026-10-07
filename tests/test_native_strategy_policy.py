@@ -65,7 +65,7 @@ class NativeStrategyPolicyTest(unittest.TestCase):
             for name, value in data.items(): archive.writestr(name, json.dumps(value))
         config.update(profile_template=str(profile), map_resource='Maps/StrategyPolicy.vmap',
                       controller=[sys.executable, str(ROOT/'tests/fixtures'/('attack_first.py' if level_up else 'invalid_reply.py'))],
-                      controller_sources=[], references={}, purpose='integration', case_id='strategy-policy',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration', case_id='strategy-policy',
                       headless=True, max_seconds=40, decision_timeout_seconds=37, seed=42,
                       players={'red':'ExternalAI','blue':'EmptyAI'})
         config.pop('save_resource', None)

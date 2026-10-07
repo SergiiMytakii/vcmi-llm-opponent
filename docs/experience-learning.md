@@ -84,11 +84,19 @@ Codex CLI 0.160.0 получает ровно два read-only MCP-инстру�
 расход при ошибке консервативно исчерпывает остаток token budget. После лимита
 продолжаются сбор наблюдений и восстановление публикации, без новых вызовов.
 
-`VCMI_EXPERIENCE_DB` выбирает библиотеку, по умолчанию `.build/experience.sqlite3`.
+`VCMI_EXPERIENCE_DB` выбирает библиотеку, по умолчанию постоянную базу вне сборок:
+- macOS: `~/Library/Application Support/VCMI-Nullkiller3/learning/experience.sqlite3`;
+- Windows: `%APPDATA%/VCMI-Nullkiller3/learning/experience.sqlite3`;
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/VCMI-Nullkiller3/learning/experience.sqlite3`.
+
+Обычные запуски из разных сборок дополняют одну библиотеку. Публикуемый
+`experience.knowledge.json` хранится рядом. Игровые тестовые запуски используют ту же библиотеку; явный `experience_database` или
+`VCMI_EXPERIENCE_DB` сохраняет выбранное пользователем расположение.
+Очистка временных сборок не должна удалять постоянную библиотеку.
 `VCMI_EXPERIENCE_MODE`: `learn`, `read_only`, `off`. Последние два не запускают
 анализ и не меняют библиотеку. Offline replay использует замороженные SQLite и
-knowledge snapshot с проверяемыми хешами. Live training/evaluation используют
-общую библиотеку, integration — собственную. Для отдельного запуска анализатора:
+knowledge snapshot с проверяемыми хешами. Live training/evaluation/integration используют
+общую библиотеку. Для отдельного запуска анализатора:
 
 ```sh
 python3 controller/analyze.py --database /path/to/experience.sqlite3 --once

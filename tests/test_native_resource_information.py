@@ -52,7 +52,7 @@ class NativeResourceInformationTest(unittest.TestCase):
                 archive.writestr(info, json.dumps(value))
         config.update(profile_template=str(fixture), map_resource='Maps/ResourceInfo.vmap',
                       controller=[sys.executable, str(ROOT / 'tests/fixtures/resource_probe.py')],
-                      controller_sources=[], references={}, purpose='integration', case_id='resource-info',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration', case_id='resource-info',
                       headless=True, max_seconds=15, decision_timeout_seconds=5, seed=42,
                       players={'red': 'ExternalAI', 'blue': 'EmptyAI'})
         config.pop('save_resource', None)

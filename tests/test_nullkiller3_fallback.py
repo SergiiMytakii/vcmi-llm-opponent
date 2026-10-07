@@ -27,7 +27,7 @@ class NativeFallbackTest(unittest.TestCase):
                   reserves=[dict(goal_id='capital',resources=[0,0,0,0,0,0,10000],force_value=0)],
                   policy=dict(max_loss_ratio=.2,allow_route_repair=True,allow_helper_replacement=True,critical_towns=['object:1']))
         seed_path=output/'campaign.json';seed_path.write_text(json.dumps(seed))
-        config.update(players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='native',purpose='integration',
+        config.update(players={'red':'Nullkiller3','blue':'EmptyAI'},nk3_mode='native',experience_mode='off',purpose='integration',
                       case_id='nk3-expired-fallback',headless=True,max_seconds=20,references={})
         config.pop('save_resource',None)
         path=output/'config.json';path.write_text(json.dumps(config));run=output/'game'

@@ -110,7 +110,7 @@ class NativeRepairTest(unittest.TestCase):
             seed['goals'][-1]['required_capabilities']=['land']
         seed_path=output/'campaign.json'; seed_path.write_text(json.dumps(seed))
         config.update(profile_template=str(fixture),map_resource='Maps/NK3HelperLoss.vmap',
-                      players={'red':'Nullkiller3','blue':'Nullkiller2'},nk3_mode='native',purpose='integration',
+                      players={'red':'Nullkiller3','blue':'Nullkiller2'},nk3_mode='native',experience_mode='off',purpose='integration',
                       case_id='nk3-helper-loss',headless=not restoring,max_seconds=45 if restoring else 25,references={})
         if review:
             probe=ROOT/'tests/fixtures/nk3_retention_probe.py'

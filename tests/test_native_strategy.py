@@ -31,7 +31,7 @@ class NativeStrategyTest(unittest.TestCase):
             for name, value in data.items(): archive.writestr(name, json.dumps(value))
         config.update(profile_template=str(profile), map_resource='Maps/StrategyProof.vmap',
                       controller=[sys.executable, str(ROOT / 'tests/fixtures/reinforce_probe.py')],
-                      controller_sources=[], references={}, purpose='integration', case_id='strategy-proof',
+                      controller_sources=[], references={}, experience_mode='off',purpose='integration', case_id='strategy-proof',
                       headless=True, max_seconds=25, decision_timeout_seconds=37,
                       players={'red': 'ExternalAI', 'blue': 'EmptyAI'})
         config.pop('save_resource', None)
