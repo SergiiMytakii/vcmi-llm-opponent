@@ -60,7 +60,7 @@ class StrategicVisibilityTest(unittest.TestCase):
                     for filename,value in world.items():archive.writestr(filename,json.dumps(value))
                 path=output/(mode+'-'+name+'.json');path.write_text(json.dumps(config));run=output/(mode+'-'+name)
                 subprocess.run([sys.executable,str(CLI),'prepare','--config',str(path),'--out',str(run)],check=True,capture_output=True)
-                env=dict(os.environ,NK3_PROBE_MODE=mode);env.pop('VCMI_NK3_SEED_CAMPAIGN',None)
+                env=dict(os.environ,NK3_PROBE_MODE=mode,VCMI_AI_OPEN_MAP='0');env.pop('VCMI_NK3_SEED_CAMPAIGN',None)
                 with (run/'driver.log').open('w') as log:
                     child=subprocess.Popen([sys.executable,str(CLI),'run','--run',str(run)],env=env,stdout=log,stderr=subprocess.STDOUT)
                     try:

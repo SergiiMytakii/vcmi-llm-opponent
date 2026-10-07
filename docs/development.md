@@ -154,3 +154,11 @@ Run `test_route_obstruction.py` and `test_neighbour_exploration.py` against the
 prepared native build. For save-based proof, set `VCMI_NATIVE_ROUTE_YIELD_CONFIG`
 to a compatible private tester config containing an obstructed save and run
 `test_native_route_yield.py`. Its profile is isolated; the live game is untouched.
+
+## AI map visibility
+
+Nullkiller2 and Nullkiller3 use an open map by default. Set
+`VCMI_AI_OPEN_MAP=0` before starting a new game to keep normal exploration fog.
+See [game modes and settings](../README.md#game-modes-and-settings) for the
+shared switch, saved-game limitations, team visibility, logging and other
+launch settings.

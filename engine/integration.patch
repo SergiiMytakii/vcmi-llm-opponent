@@ -12,7 +12,7 @@ index df873b241..0ca32ec21 100644
  if(ENABLE_NULLKILLER2_AI)
  	add_subdirectory(Nullkiller2)
 diff --git a/AI/Nullkiller2/AIGateway.cpp b/AI/Nullkiller2/AIGateway.cpp
-index 02b0d31bf..7a5bd6373 100644
+index 02b0d31bf..f2406d5d9 100644
 --- a/AI/Nullkiller2/AIGateway.cpp
 +++ b/AI/Nullkiller2/AIGateway.cpp
 @@ -35,21 +35,24 @@
@@ -42,7 +42,7 @@ index 02b0d31bf..7a5bd6373 100644
  	asyncTasks = std::make_unique<AsyncRunner>();
  }
  
-@@ -170,6 +172,9 @@ void AIGateway::gameOver(PlayerColor player, const EVictoryLossCheckResult & vic
+@@ -170,6 +173,9 @@ void AIGateway::gameOver(PlayerColor player, const EVictoryLossCheckResult & vic
  
  	if(player == playerID)
  	{
@@ -52,7 +52,7 @@ index 02b0d31bf..7a5bd6373 100644
  		if(victoryLossCheckResult.victory())
  		{
  			logAi->debug("AIGateway: Player %d (%s) won. I won! Incredible!", player, player.toString());
-@@ -209,6 +214,8 @@ void AIGateway::heroVisit(const CGHeroInstance * visitor, const CGObjectInstance
+@@ -209,6 +215,8 @@ void AIGateway::heroVisit(const CGHeroInstance * visitor, const CGObjectInstance
  		nullkiller->objectClusterizer->invalidate(visitedObj->id);
  	}
  
@@ -61,7 +61,7 @@ index 02b0d31bf..7a5bd6373 100644
  	status.heroVisit(visitedObj, start);
  }
  
-@@ -263,7 +270,10 @@ void AIGateway::heroExchangeStarted(ObjectInstanceID hero1, ObjectInstanceID her
+@@ -263,7 +271,10 @@ void AIGateway::heroExchangeStarted(ObjectInstanceID hero1, ObjectInstanceID her
  		{
  			auto transferFrom2to1 = [this](const CGHeroInstance * h1, const CGHeroInstance * h2) -> void
  			{
@@ -72,7 +72,7 @@ index 02b0d31bf..7a5bd6373 100644
  				pickBestArtifacts(cc, h1, h2);
  			};
  
-@@ -275,7 +285,20 @@ void AIGateway::heroExchangeStarted(ObjectInstanceID hero1, ObjectInstanceID her
+@@ -275,7 +286,20 @@ void AIGateway::heroExchangeStarted(ObjectInstanceID hero1, ObjectInstanceID her
  			}
  			else
  			{
@@ -94,7 +94,7 @@ index 02b0d31bf..7a5bd6373 100644
  					transferFrom2to1(secondHero, firstHero);
  				else
  					transferFrom2to1(firstHero, secondHero);
-@@ -315,6 +338,10 @@ void AIGateway::heroMovePointsChanged(const CGHeroInstance * hero)
+@@ -315,6 +339,10 @@ void AIGateway::heroMovePointsChanged(const CGHeroInstance * hero)
  void AIGateway::garrisonsChanged(ObjectInstanceID id1, ObjectInstanceID id2)
  {
  	LOG_TRACE(logAi);
@@ -105,7 +105,7 @@ index 02b0d31bf..7a5bd6373 100644
  }
  
  void AIGateway::newObject(const CGObjectInstance * obj)
-@@ -400,6 +427,8 @@ void AIGateway::requestRealized(PackageApplied * pa)
+@@ -400,6 +428,8 @@ void AIGateway::requestRealized(PackageApplied * pa)
  void AIGateway::receivedResource()
  {
  	LOG_TRACE(logAi);
@@ -114,7 +114,7 @@ index 02b0d31bf..7a5bd6373 100644
  }
  
  void AIGateway::showUniversityWindow(const IMarket * market, const CGHeroInstance * visitor, QueryID queryID)
-@@ -562,8 +591,29 @@ void AIGateway::yourTurn(QueryID queryID)
+@@ -562,8 +592,29 @@ void AIGateway::yourTurn(QueryID queryID)
  	executeActionAsync("yourTurn", [this, queryID](){ answerQuery(queryID, 0); });
  	status.startedTurn();
  
@@ -145,7 +145,7 @@ index 02b0d31bf..7a5bd6373 100644
  	asyncTasks->run([this]()
  	{
  		ScopedThreadName guard("NK2AI::AIGateway::makingTurn");
-@@ -572,6 +622,15 @@ void AIGateway::yourTurn(QueryID queryID)
+@@ -572,6 +623,15 @@ void AIGateway::yourTurn(QueryID queryID)
  	});
  }
  
@@ -161,7 +161,7 @@ index 02b0d31bf..7a5bd6373 100644
  void AIGateway::heroGotLevel(const CGHeroInstance * hero, PrimarySkill pskill, std::vector<SecondarySkill> & skills, QueryID queryID)
  {
  	LOG_TRACE_PARAMS(logAi, "queryID '%i'", queryID);
-@@ -785,6 +843,7 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
+@@ -785,6 +845,7 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
  
  					if(newValue > oldValue && nullkiller->getFreeResources().canAfford(upgradeInfo.getUpgradeCostsFor(upgID) * s->getCount()))
  					{
@@ -169,7 +169,7 @@ index 02b0d31bf..7a5bd6373 100644
  						cc->upgradeCreature(obj, SlotID(i), upgID);
  						upgraded = true;
  						logAi->debug("Upgraded %d %s to %s", s->getCount(), upgradeInfo.oldID.toCreature()->getNamePluralTranslated(),
-@@ -801,7 +860,14 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
+@@ -801,7 +862,14 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
  	return upgraded;
  }
  
@@ -185,7 +185,7 @@ index 02b0d31bf..7a5bd6373 100644
  {
  	try
  	{
-@@ -809,12 +875,16 @@ void AIGateway::makeTurn()
+@@ -809,12 +877,16 @@ void AIGateway::makeTurn()
  		logAi->info("Player %d (%s) starting turn, day %d", playerID, playerID.toString(), day);
  
  		std::shared_lock gsLock(CGameState::mutex);
@@ -203,7 +203,7 @@ index 02b0d31bf..7a5bd6373 100644
  		const auto timeElapsedMs = timeElapsed(start);
  		if(timeElapsedMs > 5000)
  			logAi->warn("PERFORMANCE: NK2 makeTurn took %ld ms", timeElapsedMs);
-@@ -872,7 +940,19 @@ void AIGateway::moveCreaturesToHero(const CGTownInstance * t)
+@@ -872,7 +944,19 @@ void AIGateway::moveCreaturesToHero(const CGTownInstance * t)
  {
  	if(t->getVisitingHero() && t->armedGarrison() && t->getVisitingHero()->tempOwner == t->tempOwner)
  	{
@@ -224,7 +224,7 @@ index 02b0d31bf..7a5bd6373 100644
  	}
  }
  
-@@ -881,6 +961,43 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -881,6 +965,43 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  	if(source->stacksCount() == 0)
  		return;
  
@@ -268,7 +268,7 @@ index 02b0d31bf..7a5bd6373 100644
  	const CArmedInstance * armies[] = {destinationArmy, source};
  
  	auto bestArmy = nullkiller->armyManager->getBestArmy(destinationArmy, destinationArmy, source, cc->getTile(source->visitablePos())->getTerrainID());
-@@ -890,6 +1007,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -890,6 +1011,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  		// move first stack at first slot if empty to avoid can not take away last creature
  		if(!army->hasStackAtSlot(SlotID(0)) && army->stacksCount() > 0)
  		{
@@ -276,7 +276,7 @@ index 02b0d31bf..7a5bd6373 100644
  			cc->mergeOrSwapStacks(
  				army,
  				army,
-@@ -911,6 +1029,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -911,6 +1033,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  				if(targetSlot.validSlot())
  				{
  					// remove unwanted creatures
@@ -284,7 +284,7 @@ index 02b0d31bf..7a5bd6373 100644
  					cc->mergeOrSwapStacks(destinationArmy, source, i, targetSlot);
  				}
  				else if(destinationArmy->getStack(i).estimateCombatValue() < destinationArmy->estimateCombatValue() / 100)
-@@ -945,6 +1064,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -945,6 +1068,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  								break;
  
  							// move all except 1 of weakest creature from source to destination
@@ -292,7 +292,7 @@ index 02b0d31bf..7a5bd6373 100644
  							cc->splitStack(
  								source,
  								destinationArmy,
-@@ -957,6 +1077,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -957,6 +1081,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  						else
  						{
  							// Source last stack is not weakest. Move 1 of weakest creature from destination to source
@@ -300,7 +300,7 @@ index 02b0d31bf..7a5bd6373 100644
  							cc->splitStack(
  								destinationArmy,
  								source,
-@@ -966,6 +1087,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
+@@ -966,6 +1091,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const
  						}
  					}
  
@@ -308,7 +308,7 @@ index 02b0d31bf..7a5bd6373 100644
  					cc->mergeOrSwapStacks(armyPtr, destinationArmy, j, i);
  				}
  			}
-@@ -997,6 +1119,7 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
+@@ -997,6 +1123,7 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
  
  				if(duplicatingSlot != stack.first)
  				{
@@ -316,7 +316,7 @@ index 02b0d31bf..7a5bd6373 100644
  					cc->mergeStacks(recruiter, recruiter, stack.first, duplicatingSlot);
  					break;
  				}
-@@ -1008,9 +1131,12 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
+@@ -1008,9 +1135,12 @@ void AIGateway::recruitCreatures(const CGDwelling * d, const CArmedInstance * re
  			}
  		}
  
@@ -330,14 +330,16 @@ index 02b0d31bf..7a5bd6373 100644
  	}
  }
  
-@@ -1023,1 +1023,6 @@
+@@ -1023,3 +1023,8 @@
 +	if(nullkiller->strategicCampaign)
 +	{
 +		const auto * opponent=side==BattleSide::ATTACKER ? hero2 : hero1;
 +		nullkiller->strategicCampaign->battleOpponent(opponent ? opponent->id.getNum() : -1);
 +	}
  	CAdventureAI::battleStart(battleID, army1, army2, tile, hero1, hero2, side, replayAllowed);
-@@ -1028,6 +1154,46 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
+ }
+ 
+@@ -1028,6 +1166,46 @@ void AIGateway::battleEnd(const BattleID & battleID, const BattleResult * br, Qu
  	assert(status.getBattle() == ONGOING_BATTLE);
  	status.setBattle(ENDING_BATTLE);
  	bool won = br->winner == cc->getBattle(battleID)->battleGetMySide();
@@ -384,7 +386,7 @@ index 02b0d31bf..7a5bd6373 100644
  	logAi->debug("Player %d (%s): I %s the %s!", playerID, playerID.toString(), (won ? "won" : "lost"), battlename);
  	battlename.clear();
  
-@@ -1056,7 +1211,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
+@@ -1056,7 +1234,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
  	std::vector<const CGObjectInstance *> ret;
  	for(const ObjectInstanceID objId : nullkiller->memory->visitableObjs)
  	{
@@ -393,7 +395,7 @@ index 02b0d31bf..7a5bd6373 100644
  		if(obj && obj->tempOwner == playerID)
  			ret.push_back(obj);
  	}
-@@ -1065,6 +1220,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
+@@ -1065,6 +1243,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
  
  bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  {
@@ -401,7 +403,7 @@ index 02b0d31bf..7a5bd6373 100644
  	if(!heroPtr.isVerified())
  		throw cannotFulfillGoalException("Hero was lost!");
  
-@@ -1079,6 +1235,9 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1079,6 +1258,9 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  	auto afterMovementCheck = [&]() -> void
  	{
  		waitTillFree(); //movement may cause battle or blocking dialog
@@ -411,7 +413,7 @@ index 02b0d31bf..7a5bd6373 100644
  		if(!heroPtr.isVerified())
  		{
  			lostHero(heroPtr);
-@@ -1096,6 +1255,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1096,6 +1278,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  	{
  		//FIXME: this assertion fails also if AI moves onto defeated guarded object
  		//assert(cb->getVisitableObjs(dst).size() > 1); //there's no point in revisiting tile where there is no visitable object
@@ -419,7 +421,7 @@ index 02b0d31bf..7a5bd6373 100644
  		cc->moveHero(*heroPtr, heroPtr->convertFromVisitablePos(dst), false);
  		afterMovementCheck(); // TODO: is it feasible to hero get killed there if game work properly?
  		// If revisiting, teleport probing is never done, and so the entries into the list would remain unused and uncleared
-@@ -1149,11 +1309,13 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1149,11 +1332,13 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  
  		auto doMovement = [&](int3 dst, bool transit, const EPathfindingLayer & layer)
  		{
@@ -433,7 +435,7 @@ index 02b0d31bf..7a5bd6373 100644
  			if(cc->getObj(exitId) && cc->getObj(exitId)->ID == Obj::WHIRLPOOL)
  			{
  				nullkiller->armyFormation->rearrangeArmyForWhirlpool(*heroPtr);
-@@ -1200,6 +1362,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
+@@ -1200,6 +1385,7 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  
  		for(; i > 0; i--)
  		{
@@ -441,7 +443,7 @@ index 02b0d31bf..7a5bd6373 100644
  			int3 currentCoord = path.nodes[i].coord;
  			const auto & nextNode = path.nodes[i - 1];
  			int3 nextCoord = nextNode.coord;
-@@ -1285,6 +1448,7 @@ void AIGateway::buildStructure(const CGTownInstance * t, BuildingID building)
+@@ -1285,6 +1471,7 @@ void AIGateway::buildStructure(const CGTownInstance * t, BuildingID building)
  {
  	auto name = t->getTown()->buildings.at(building)->getNameTranslated();
  	logAi->debug("Player %d will build %s in town of %s at %s", playerID, name, t->getNameTextID(), t->anchorPos().toString());
@@ -449,7 +451,7 @@ index 02b0d31bf..7a5bd6373 100644
  	cc->buildBuilding(t, building); //just do this;
  }
  
-@@ -1293,6 +1457,7 @@ void AIGateway::tryRealize(Goals::DigAtTile & g)
+@@ -1293,6 +1480,7 @@ void AIGateway::tryRealize(Goals::DigAtTile & g)
  	assert(g.hero->visitablePos() == g.tile); //surely we want to crash here?
  	if(g.hero->diggingStatus() == EDiggingStatus::CAN_DIG)
  	{
@@ -457,7 +459,7 @@ index 02b0d31bf..7a5bd6373 100644
  		cc->dig(g.hero);
  	}
  	else
-@@ -1311,7 +1476,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
+@@ -1311,7 +1499,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
  	{
  		if(const auto * m = dynamic_cast<const IMarket*>(obj))
  		{
@@ -466,7 +468,7 @@ index 02b0d31bf..7a5bd6373 100644
  			for(auto it = ResourceSet::nziterator(freeRes); it.valid(); it++)
  			{
  				auto res = it->resType;
-@@ -1325,6 +1490,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
+@@ -1325,6 +1513,7 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
  				//TODO trade only as much as needed
  				if (toGive) //don't try to sell 0 resources
  				{
@@ -474,7 +476,7 @@ index 02b0d31bf..7a5bd6373 100644
  					cc->trade(m->getObjInstanceID(), EMarketMode::RESOURCE_RESOURCE, res, GameResID(g.resID), toGive);
  					acquiredResources = static_cast<int>(toGet * (it->resVal / toGive));
  					logAi->debug("Traded %d of %s for %d of %s at %s", toGive, res, acquiredResources, g.resID, obj->getObjectNameTextID());
-@@ -1364,6 +1530,7 @@ void AIGateway::endTurn()
+@@ -1364,6 +1553,7 @@ void AIGateway::endTurn()
  
  	do
  	{
@@ -482,7 +484,7 @@ index 02b0d31bf..7a5bd6373 100644
  		cc->endTurn();
  	}
  	while(status.haveTurn()); //for some reasons, our request may fail -> stop requesting end of turn only after we've received a confirmation that it's over
-@@ -1381,6 +1548,7 @@ void AIGateway::buildArmyIn(const CGTownInstance * t)
+@@ -1381,6 +1571,7 @@ void AIGateway::buildArmyIn(const CGTownInstance * t)
  
  void AIGateway::finish()
  {
@@ -490,7 +492,7 @@ index 02b0d31bf..7a5bd6373 100644
  	nullkiller->makingTurnInterruption.interruptThread();
  
  	if (asyncTasks)
-@@ -1395,7 +1563,7 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
+@@ -1395,7 +1586,7 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
  	if (!asyncTasks)
  		throw std::runtime_error("Attempt to execute task on shut down AI state!");
  
@@ -499,7 +501,7 @@ index 02b0d31bf..7a5bd6373 100644
  	{
  		ScopedThreadName guard("NK2AI::AIGateway::" + description);
  		std::shared_lock gsLock(CGameState::mutex);
-@@ -1407,6 +1575,11 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
+@@ -1407,6 +1598,11 @@ void AIGateway::executeActionAsync(const std::string & description, const std::f
  		{
  			logAi->debug("%s thread has been terminated. We'll end it immediately", description);
  		}
@@ -511,7 +513,7 @@ index 02b0d31bf..7a5bd6373 100644
  	});
  }
  
-@@ -1543,6 +1716,8 @@ void AIStatus::waitTillFree()
+@@ -1543,6 +1739,8 @@ void AIStatus::waitTillFree()
  	std::unique_lock<std::mutex> lock(mx);
  	while(battle != NO_BATTLE || !remainingQueries.empty() || !objectsBeingVisited.empty() || ongoingHeroMovement)
  	{
@@ -520,7 +522,41 @@ index 02b0d31bf..7a5bd6373 100644
  		cv.wait_for(lock, std::chrono::milliseconds(10));
  		aiGw->nullkiller->makingTurnInterruption.interruptionPoint();
  	}
-@@ -1720,13 +1895,13 @@ void AIGateway::memorizeVisitableObj(const CGObjectInstance * obj,
+@@ -1679,12 +1877,9 @@ std::string AIGateway::heroRoleDebugText(const CGHeroInstance * hero) const
+ 
+ void AIGateway::cheatMapReveal(const std::unique_ptr<Nullkiller> & nullkiller)
+ {
+-	if(nullkiller->cc->getCalendar().getCurrentDay() == 1) // No need to execute every day, only the first time
++	if(nullkiller->isOpenMap()) // Also reveal after loading an older save or a fog reset
+ 	{
+-		if(nullkiller->isOpenMap())
+-		{
+-			nullkiller->cc->sendMessage("vcmieagles");
+-		}
++		nullkiller->cc->sendMessage("vcmieagles");
+ 	}
+ }
+ 
+@@ -1693,14 +1888,18 @@ void AIGateway::memorizeVisitableObjs(const std::unique_ptr<AIMemory> & memory,
+                                       const PlayerColor & playerID,
+                                       const std::shared_ptr<CCallback> & cc)
+ {
++	size_t visibleTiles = 0, totalTiles = 0;
+ 	foreach_tile_pos(*cc, [&](const int3 & pos)
+ 	{
++		++totalTiles;
++		if(cc->isVisible(pos)) ++visibleTiles;
+ 		// TODO: Inspect what not visible means when using verbose true
+ 		for(const CGObjectInstance * obj : cc->getVisitableObjs(pos, false))
+ 		{
+ 			memorizeVisitableObj(obj, memory, dangerHitMap, playerID, cc);
+ 		}
+ 	});
++	logAi->info("AI_MAP_VISIBILITY player=%d visible=%d total=%d", playerID.getNum(), visibleTiles, totalTiles);
+ }
+ 
+ void AIGateway::memorizeVisitableObj(const CGObjectInstance * obj,
+@@ -1720,13 +1919,13 @@ void AIGateway::memorizeVisitableObj(const CGObjectInstance * obj,
  	}
  }
  
@@ -536,7 +572,7 @@ index 02b0d31bf..7a5bd6373 100644
  			if(obj && isWeeklyRevisitable(playerID, obj))
  				memory->markObjectUnvisited(obj);
  		}
-@@ -1735,7 +1910,7 @@ void AIGateway::memorizeRevisitableObjs(const std::unique_ptr<AIMemory> & memory
+@@ -1735,7 +1934,7 @@ void AIGateway::memorizeRevisitableObjs(const std::unique_ptr<AIMemory> & memory
  
  void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const CGHeroInstance * h, const CGHeroInstance * other)
  {
@@ -545,7 +581,7 @@ index 02b0d31bf..7a5bd6373 100644
  	{
  		bool changeMade = false;
  		std::set<std::pair<ArtifactInstanceID, ArtifactInstanceID>> swappedSet;
-@@ -1797,6 +1972,7 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
+@@ -1797,6 +1996,7 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
  					if(target->isPositionFree(slot) && artifact->canBePutAt(target, slot, true)) //combined artifacts are not always allowed to move
  					{
  						ArtifactLocation destLocation(target->id, slot);
@@ -553,7 +589,7 @@ index 02b0d31bf..7a5bd6373 100644
  						cc->swapArtifacts(location, destLocation); //just put into empty slot
  						emptySlotFound = true;
  						changeMade = true;
-@@ -1843,11 +2019,14 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
+@@ -1843,11 +2043,14 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
  									ArtifactLocation destLocation(target->id, slot);
  									ArtifactLocation backpack(artHolder->id, ArtifactPosition::BACKPACK_START);
  
@@ -1073,7 +1109,7 @@ index 17f79e8f3..03b449dc7 100644
  	if(obj->tempOwner.isValidPlayer() && cb->getPlayerRelations(obj->tempOwner, aiNk->playerID) != PlayerRelations::ENEMIES) //owned or allied objects don't pose any threat
  		return 0;
 diff --git a/AI/Nullkiller2/Engine/Nullkiller.cpp b/AI/Nullkiller2/Engine/Nullkiller.cpp
-index c2adab572..bae74e8c0 100644
+index c2adab572..f266db38d 100644
 --- a/AI/Nullkiller2/Engine/Nullkiller.cpp
 +++ b/AI/Nullkiller2/Engine/Nullkiller.cpp
 @@ -9,6 +9,9 @@
@@ -1110,7 +1146,26 @@ index c2adab572..bae74e8c0 100644
  
  bool canUseOpenMap(const std::shared_ptr<CCallback>& cb, const PlayerColor playerID)
  {
-@@ -105,14 +114,16 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
+@@ -76,17 +85,7 @@ bool canUseOpenMap(const std::shared_ptr<CCallback>& cb, const PlayerColor playe
+ 		return false;
+ 	}
+ 
+-	const TeamState * team = cb->getPlayerTeam(playerID);
+-
+-	const auto hasHumanInTeam = vstd::contains_if(
+-		team->players,
+-		[cb](const PlayerColor teamMateID) -> bool
+-		{
+-			return cb->getPlayerState(teamMateID)->isHuman();
+-		}
+-	);
+-
+-	return !hasHumanInTeam;
++	return true;
+ }
+ 
+ std::vector<HitMapInfo> getTownThreatsForDefenderReservation(const CGTownInstance * town, const Nullkiller * aiNk)
+@@ -105,16 +104,18 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
  
  	settings = std::make_unique<Settings>(cc->getStartInfo()->difficulty);
  
@@ -1124,12 +1179,14 @@ index c2adab572..bae74e8c0 100644
 +	if(strategicMode) nullkiller3::restrictToSupportedMovement(pathfinderOptions);
 +	pathfinderCache = std::make_unique<PathfinderCache>(strategicMode ? &gameInfo() : cc.get(), pathfinderOptions);
  
--	if(canUseOpenMap(cc, playerID))
-+	if(!strategicMode && canUseOpenMap(cc, playerID))
+ 	if(canUseOpenMap(cc, playerID))
  	{
- 		useObjectGraph = settings->isObjectGraphAllowed();
+-		useObjectGraph = settings->isObjectGraphAllowed();
++		useObjectGraph = !strategicMode && settings->isObjectGraphAllowed();
  		openMap = settings->isOpenMap() || useObjectGraph;
-@@ -123,6 +134,18 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
+ 	}
+ 	else
+@@ -123,6 +124,18 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
  		openMap = false;
  	}
  
@@ -1148,7 +1205,7 @@ index c2adab572..bae74e8c0 100644
  	baseGraph.reset();
  	priorityEvaluator.reset(new PriorityEvaluator(this));
  	priorityEvaluators.reset(
-@@ -176,7 +195,7 @@ void TaskPlan::mergeAndFilter(const TSubgoal & task)
+@@ -176,7 +189,7 @@ void TaskPlan::mergeAndFilter(const TSubgoal & task)
  		{
  			if(task == item.task || task->asTask()->isObjectAffected(objid) || (task->asTask()->getHero() != nullptr && task->asTask()->getHero() == item.task->asTask()->getHero()))
  			{
@@ -1157,7 +1214,7 @@ index c2adab572..bae74e8c0 100644
  					return;
  
  				blockers.push_back(item.task);
-@@ -216,8 +235,24 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+@@ -216,8 +229,24 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
  
  	for(const TSubgoal & task : tasks)
  	{
@@ -1183,7 +1240,7 @@ index c2adab572..bae74e8c0 100644
  	}
  
  	auto bestTask = *vstd::maxElementByFun(tasks, [](const Goals::TSubgoal& task) -> float
-@@ -228,6 +263,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+@@ -228,6 +257,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
  	return taskptr(*bestTask);
  }
  
@@ -1209,7 +1266,7 @@ index c2adab572..bae74e8c0 100644
  Nullkiller::EvaluationContextMap Nullkiller::buildEvaluationContexts(const TGoalVec & tasks) const
  {
  	std::vector<std::optional<EvaluationContext>> contexts(tasks.size());
-@@ -264,22 +318,27 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
+@@ -264,22 +312,27 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
  			for(size_t i = r.begin(); i != r.end(); i++)
  			{
  				const auto & task = tasks[i];
@@ -1244,7 +1301,7 @@ index c2adab572..bae74e8c0 100644
  
  	for(const TSubgoal & task : tasks)
  	{
-@@ -325,6 +384,7 @@ void Nullkiller::invalidatePathfinderData()
+@@ -325,6 +378,7 @@ void Nullkiller::invalidatePathfinderData()
  
  void Nullkiller::updateState()
  {
@@ -1252,7 +1309,7 @@ index c2adab572..bae74e8c0 100644
  	const auto start = std::chrono::high_resolution_clock::now();
  	auto startMethod = start;
  	std::map<std::string, uint64_t> methodToElapsedMs = {};
-@@ -336,6 +396,13 @@ void Nullkiller::updateState()
+@@ -336,6 +390,13 @@ void Nullkiller::updateState()
  	activeHero = nullptr;
  	setTargetObject(-1);
  	decomposer->reset();
@@ -1266,7 +1323,7 @@ index c2adab572..bae74e8c0 100644
  
  	buildAnalyzer->update();
  	methodToElapsedMs.emplace("buildAnalyzer->update", timeElapsed(startMethod));
-@@ -397,6 +459,7 @@ void Nullkiller::updateState()
+@@ -397,6 +458,7 @@ void Nullkiller::updateState()
  	startMethod = std::chrono::high_resolution_clock::now();
  	armyManager->update();
  	methodToElapsedMs.emplace("armyManager->update()", timeElapsed(startMethod));
@@ -1274,7 +1331,7 @@ index c2adab572..bae74e8c0 100644
  
  	if(const auto timeElapsedMs = timeElapsed(start); timeElapsedMs > 250)
  	{
-@@ -607,6 +670,7 @@ void Nullkiller::makeTurn()
+@@ -607,6 +669,7 @@ void Nullkiller::makeTurn()
  		reserveRequiredTownDefenders();
  
  		tasks.clear();
@@ -1282,7 +1339,7 @@ index c2adab572..bae74e8c0 100644
  		decompose(tasks, sptr(CaptureObjectsBehavior()), 1);
  		decompose(tasks, sptr(ClusterBehavior()), MAX_DEPTH);
  		decompose(tasks, sptr(DefenceBehavior()), MAX_DEPTH);
-@@ -641,11 +705,16 @@ void Nullkiller::makeTurn()
+@@ -641,11 +704,16 @@ void Nullkiller::makeTurn()
  			}
  		}
  
@@ -1303,7 +1360,7 @@ index c2adab572..bae74e8c0 100644
  		bool hasAnySuccess = false;
  		if(selectedTasks.empty())
  		{
-@@ -727,6 +796,12 @@ void Nullkiller::makeTurn()
+@@ -727,6 +795,12 @@ void Nullkiller::makeTurn()
  			{
  				if(!executeTask(selectedTask))
  				{
@@ -1316,7 +1373,7 @@ index c2adab572..bae74e8c0 100644
  					lockTaskHeroes(selectedTask, HeroLockedReason::HERO_CHAIN);
  					const bool hasRemainingTasks = selectedTaskIndex + 1 < selectedTasks.size();
  					const auto failureAction = chooseTaskFailureAction(hasAnySuccess, hasRemainingTasks, hasUnlockedHeroWithMovement());
-@@ -744,15 +819,18 @@ void Nullkiller::makeTurn()
+@@ -744,15 +818,18 @@ void Nullkiller::makeTurn()
  						break;
  					}
  
@@ -1336,7 +1393,7 @@ index c2adab572..bae74e8c0 100644
  			if(hasUnlockedHeroWithMovement())
  				logAi->debug("Pass %d: No worthwhile task was found at full scan depth. AI turn is complete.", pass);
  			else
-@@ -763,21 +841,41 @@ void Nullkiller::makeTurn()
+@@ -763,21 +840,41 @@ void Nullkiller::makeTurn()
  		}
  
  		for(const auto * heroInfo : cc->getHeroesInfo())
@@ -1379,7 +1436,7 @@ index c2adab572..bae74e8c0 100644
  
  		// TODO: Mircea: Should merge recruiting from DefenseBehavior
  		decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
-@@ -883,14 +981,20 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
+@@ -883,14 +980,20 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
  
  bool Nullkiller::executeTask(const Goals::TTask & task)
  {
@@ -1400,7 +1457,7 @@ index c2adab572..bae74e8c0 100644
  		task->accept(aiGw);
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
-@@ -898,20 +1002,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
+@@ -898,20 +1001,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
  	{
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
@@ -1449,7 +1506,7 @@ index c2adab572..bae74e8c0 100644
  	freeRes.positive();
  	return freeRes;
  }
-@@ -923,6 +1054,7 @@ void Nullkiller::lockResources(const TResources & res)
+@@ -923,6 +1053,7 @@ void Nullkiller::lockResources(const TResources & res)
  
  std::shared_ptr<const CPathsInfo> Nullkiller::getPathsInfo(const CGHeroInstance * h) const
  {
@@ -2854,3 +2911,76 @@ index 102105f4c..0c002cfe8 100644
  	bool accessible = false;
  	bool safe = false;
  	int tilesDiscovered = 0;
+diff --git a/AI/Nullkiller2/Engine/Settings.cpp b/AI/Nullkiller2/Engine/Settings.cpp
+index ff68ab046..294f5b729 100644
+--- a/AI/Nullkiller2/Engine/Settings.cpp
++++ b/AI/Nullkiller2/Engine/Settings.cpp
+@@ -9,6 +9,7 @@
+ */
+ #include "StdInc.h"
+ #include <limits>
++#include <cstdlib>
+ 
+ #include "Settings.h"
+ 
+@@ -63,6 +64,11 @@ namespace NK2AI
+ 		allowObjectGraph = node["allowObjectGraph"].Bool();
+ 		updateHitmapOnTileReveal = node["updateHitmapOnTileReveal"].Bool();
+ 		openMap = node["openMap"].Bool();
++		if(const char * overrideValue = std::getenv("VCMI_AI_OPEN_MAP"))
++		{
++			openMap = std::string(overrideValue) != "0";
++			if(!openMap) allowObjectGraph = false;
++		}
+ 		useTroopsFromGarrisons = node["useTroopsFromGarrisons"].Bool();
+ 		useOneWayMonoliths = node["useOneWayMonoliths"].Bool();
+ 	}
+diff --git a/config/ai/nk2ai/nk2ai-settings.json b/config/ai/nk2ai/nk2ai-settings.json
+index 9df2da14b..3a59d0ce5 100644
+--- a/config/ai/nk2ai/nk2ai-settings.json
++++ b/config/ai/nk2ai/nk2ai-settings.json
+@@ -51,7 +51,7 @@
+ 		"updateHitmapOnTileReveal" : true,
+ 		"useTroopsFromGarrisons" : true,
+ 		"useOneWayMonoliths" : false,
+-		"openMap": false,
++		"openMap": true,
+ 		"allowObjectGraph": false,
+ 		"pathfinderBucketsCount" : 1,
+ 		"pathfinderBucketSize" : 8,
+@@ -73,7 +73,7 @@
+ 		"updateHitmapOnTileReveal" : true,
+ 		"useTroopsFromGarrisons" : true,
+ 		"useOneWayMonoliths" : false,
+-		"openMap": false,
++		"openMap": true,
+ 		"allowObjectGraph": false,
+ 		"pathfinderBucketsCount" : 1,
+ 		"pathfinderBucketSize" : 16,
+@@ -95,7 +95,7 @@
+ 		"updateHitmapOnTileReveal" : true,
+ 		"useTroopsFromGarrisons" : true,
+ 		"useOneWayMonoliths" : false,
+-		"openMap": false,
++		"openMap": true,
+ 		"allowObjectGraph": false,
+ 		"pathfinderBucketsCount" : 1,
+ 		"pathfinderBucketSize" : 32,
+@@ -117,7 +117,7 @@
+ 		"updateHitmapOnTileReveal" : true,
+ 		"useTroopsFromGarrisons" : true,
+ 		"useOneWayMonoliths" : false,
+-		"openMap": false,
++		"openMap": true,
+ 		"allowObjectGraph": false,
+ 		"pathfinderBucketsCount" : 1,
+ 		"pathfinderBucketSize" : 32,
+@@ -139,7 +139,7 @@
+ 		"updateHitmapOnTileReveal" : true,
+ 		"useTroopsFromGarrisons" : true,
+ 		"useOneWayMonoliths" : false,
+-		"openMap": false,
++		"openMap": true,
+ 		"allowObjectGraph": false,
+ 		"pathfinderBucketsCount" : 1,
+ 		"pathfinderBucketSize" : 32,

@@ -84,7 +84,8 @@ class Nullkiller3NativeTest(unittest.TestCase):
                                capture_output=True)
                 with (output / (name + '-driver.log')).open('w') as log:
                     process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/playtest.py'),
-                                                'run', '--run', str(run)], stdout=log, stderr=subprocess.STDOUT)
+                                                'run', '--run', str(run)], env=dict(os.environ, VCMI_AI_OPEN_MAP='0'),
+                                                stdout=log, stderr=subprocess.STDOUT)
                     try:
                         deadline = time.monotonic() + 30
                         while process.poll() is None and time.monotonic() < deadline:
