@@ -22,6 +22,66 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--income")
+        {
+            // Current Koniczyna income on impossible: 4350 base -> 6525 gold.
+            auto world=json(R"({"day":26,"days_in_week":7,"resources":[0,0,0,0,0,0,0],"daily_income":[2,1,2,1,1,1,4350],"economy":{"base_daily_income":[2,1,2,1,1,1,4350],"weekly_bonus_percent":{"wood":375,"mercury":200,"ore":375,"sulfur":200,"crystal":200,"gems":200,"gold":350}},"towns":[{"ref":"home","buildings":[],"building_options":[{"id":10,"supported":true,"availability":"allowed_now","cost":[0,0,0,0,0,100,100000],"income_delta":[0,0,0,0,0,0,500]}],"recruitment_options":[]}]})");
+            auto goal=json(R"({"target_ref":"home","building_id":10,"deadline_day":27})");
+            const auto forecast=nullkiller3::forecastBranches(world,json("[0,0,0,0,0,0,0]"),goal);
+            require(forecast["alternatives"][0]["resources_at_deadline"][6].Integer()==6525,
+                "impossible forecast omitted the gold bonus: expected 6525 from 4350 base");
+            require(forecast["alternatives"][1]["resources_at_deadline"][6].Integer()==6525,
+                "army alternative omitted the same income bonus");
+            const auto & base=world["economy"]["base_daily_income"];
+            require(nullkiller3::forecastDailyIncome(world,27,base)[6].Integer()==6525,
+                "next-day observation income disagrees with funding forecast");
+            const int rareDays[]={1,1,1,2,1,1,2};
+            for(int date=1;date<=7;++date)
+                require(nullkiller3::forecastDailyIncome(world,date,base)[1].Integer()==rareDays[date-1],
+                    "rare income was rounded as a constant daily multiplier");
+            require(nullkiller3::forecastDailyIncome(world,8,base)[1].Integer()==1,
+                "weekly rounding did not restart at the week boundary");
+            auto custom=world;custom["days_in_week"].Integer()=5;
+            const int shortWeek[]={1,1,2,1,2};
+            for(int date=1;date<=5;++date)
+                require(nullkiller3::forecastDailyIncome(custom,date,base)[1].Integer()==shortWeek[date-1],
+                    "forecast ignored the loaded calendar length");
+            custom=world;custom["economy"]["weekly_bonus_percent"]["gold"].Integer()=700;
+            require(nullkiller3::forecastDailyIncome(custom,27,base)[6].Integer()==8700,
+                "income multiplier was hardcoded instead of loaded");
+            custom["economy"]["weekly_bonus_percent"]["gold"].Integer()=-175;
+            auto easyBase=json("[0,0,0,0,0,0,7]");
+            const int easyDays[]={6,5,5,5,6,5,5};
+            for(int date=1;date<=7;++date)
+                require(nullkiller3::forecastDailyIncome(custom,date,easyBase)[6].Integer()==easyDays[date-1],
+                    "easy AI income did not match signed native division");
+
+            // Construction becomes affordable a day earlier with the AI bonus;
+            // its new income is boosted starting on the following day only.
+            world["day"].Integer()=6;world["player"].Integer()=0;
+            world["resources"][6].Integer()=6000;world["capabilities"]=json("[\"build\"]");
+            world["towns"][0]["building_options"][0]["cost"]=json("[0,0,0,0,0,0,10000]");
+            auto plan=json(R"({"version":3,"revision":1,"approach":"economy","horizon_days":3,"goals":[{"id":"income","kind":"develop_town","actor_ref":null,"target_ref":"home","deadline_day":8,"priority":80,"building_id":10,"min_army_value":0,"depends_on":[],"required_capabilities":["build"],"complete_when":{"kind":"building_present","value":10}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+            nullkiller3::CampaignState campaign;std::string reason;
+            require(campaign.accept(plan,world,reason),reason.c_str());
+            const auto commitments=nullkiller3::forecastCommitments(world,campaign);
+            require(commitments["commitments"][0]["build_day"].Integer()==7,
+                "effective income did not unlock construction on day 7");
+            require(commitments["resource_calendar"][0]["income_for_next_day"][6].Integer()==6525,
+                "unbuilt income was credited early");
+            require(commitments["resource_calendar"][1]["resources_start"][6].Integer()==12525,
+                "accepted-plan calendar omitted the AI bonus");
+            require(commitments["resource_calendar"][1]["income_for_next_day"][6].Integer()==7275,
+                "building income delta was not boosted from the new base");
+            require(commitments["resource_calendar"][2]["resources_end"][6].Integer()==9800,
+                "post-build budget counted income or spending twice");
+            const auto branch=nullkiller3::forecastBranches(world,json("[0,0,0,0,0,0,0]"),plan["goals"][0]);
+            require(branch["alternatives"][0]["build_day"].Integer()==7
+                && branch["alternatives"][0]["resources_at_deadline"][6].Integer()==9800,
+                "alternative and accepted-plan income calendars disagree");
+            std::cout << "NK3 effective income forecasts passed\n";
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--delivery")
         {
             auto world=json(R"({"day":1,"player":0,"resources":[10,0,10,0,0,0,10000],"capabilities":["land","build","transfer"],"heroes":[{"ref":"main","army_value":5000},{"ref":"courier","army_value":2000}],"towns":[{"ref":"home","buildings":[],"building_options":[{"id":0,"supported":true}]}],"objects":[]})");

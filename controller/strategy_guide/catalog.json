@@ -18,7 +18,7 @@
     {
       "id": "offensive_operation",
       "title": "Offensive operation",
-      "applicability": "Choosing a next objective, routes, losses, reinforcement and follow-up.",
+      "applicability": "Choosing objectives, routes and follow-up; comparing actors again after losses or troop transfers.",
       "file": "rules/offensive_operation.md",
       "enabled": true
     },
@@ -39,7 +39,7 @@
     {
       "id": "defense",
       "title": "Defense",
-      "applicability": "Reassessing town exposure, insufficient defenders or unbounded opposition; valuable bases and multiple fronts.",
+      "applicability": "Town exposure, insufficient defenders or unbounded opposition; preserving garrison protection across offensive revisions.",
       "file": "rules/defense.md",
       "enabled": true
     },

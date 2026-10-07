@@ -21,6 +21,10 @@ inline bool supportedDeliveryWait(const JsonNode & forecasts,const JsonNode & go
 }
 bool buildingSequence(const JsonNode & town, const JsonNode & target, std::vector<const JsonNode *> & sequence);
 
+// Recurring income for a specific future day, from own post-handicap base
+// income and loaded AI bonus rules. Building deltas change that base first.
+JsonNode forecastDailyIncome(const JsonNode & world, int64_t date, const JsonNode & baseIncome);
+
 // Public, value-only forecast seam. Inputs are complete own facts and visible
 // route estimates; no game state, opponent pointer or hidden bonus is accepted.
 JsonNode forecastBranches(const JsonNode & world, const JsonNode & reserves, const JsonNode & selectedGoal = JsonNode());

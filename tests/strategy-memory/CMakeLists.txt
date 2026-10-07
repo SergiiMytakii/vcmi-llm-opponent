@@ -32,6 +32,7 @@ target_include_directories(nullkiller3-campaign-driver PRIVATE
     "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
 target_link_libraries(nullkiller3-campaign-driver PRIVATE "${VCMI_LIBRARY}")
 add_test(NAME nullkiller3-campaign COMMAND nullkiller3-campaign-driver)
+add_test(NAME nullkiller3-income COMMAND nullkiller3-campaign-driver --income)
 
 add_executable(nullkiller3-idle-driver ../nullkiller3_idle_driver.cpp)
 target_compile_features(nullkiller3-idle-driver PRIVATE cxx_std_20)

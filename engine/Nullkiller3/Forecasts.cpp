@@ -1,8 +1,28 @@
 #include "Global.h"
 #include "Forecasts.h"
+#include "constants/NumericConstants.h"
 
 namespace nullkiller3
 {
+JsonNode forecastDailyIncome(const JsonNode & world, int64_t date, const JsonNode & baseIncome)
+{
+    const auto week=std::max<int64_t>(1,world["days_in_week"].Integer());
+    const auto dayOfWeek=(date-1)%week+1;
+    const auto & bonuses=world["economy"]["weekly_bonus_percent"];
+    constexpr const char * resourceNames[]={"wood","mercury","ore","sulfur","crystal","gems","gold"};
+    JsonNode result;
+    for(int i=0;i<7;++i)
+    {
+        const auto base=baseIncome[i].Integer(), bonus=bonuses[resourceNames[i]].Integer();
+        // Keep NewTurnProcessor's integer division order, including signed easy
+        // difficulty bonuses. Averaging the multiplier loses calendar rounding.
+        const auto before=base*bonus*(dayOfWeek-1)/week/100;
+        const auto after=base*bonus*dayOfWeek/week/100;
+        result.Vector().emplace_back(std::min(GameConstants::PLAYER_RESOURCES_CAP,base+after-before));
+    }
+    return result;
+}
+
 std::string allocationCheckpointFacts(const CampaignState & campaign,const JsonNode & world)
 {
     using Funds=std::array<int64_t,7>;
@@ -137,7 +157,8 @@ JsonNode forecastBranches(const JsonNode & world, const JsonNode & reserves, con
     auto node = [](const Funds & values) {
         JsonNode result; for(auto value:values) result.Vector().emplace_back(value); return result;
     };
-    const auto protectedFunds = funds(reserves), initial = funds(world["resources"]), daily = funds(world["daily_income"]);
+    const auto protectedFunds = funds(reserves), initial = funds(world["resources"]);
+    const auto daily = funds(world["economy"]["base_daily_income"].isVector() ? world["economy"]["base_daily_income"] : world["daily_income"]);
     const int day = world["day"].Integer();
     const int deadline = selectedGoal.isNull() ? day+6 : selectedGoal["deadline_day"].Integer();
     const int week = std::max<int64_t>(1,world["days_in_week"].Integer());
@@ -166,7 +187,7 @@ JsonNode forecastBranches(const JsonNode & world, const JsonNode & reserves, con
         if(!selectedGoal.isNull()) development["goal_id"]=selectedGoal["id"];
         development["status"].String()=best ? "conditional" : "unknown";
         development["assumptions"].Vector().emplace_back("Retain current income sources; no pickups, trade or other spending; protect existing reserves.");
-        development["assumptions"].Vector().emplace_back("One building per town/day including positive prerequisite chains; OR branches choose the lowest gold cost. Special bonuses and negative prerequisites are excluded.");
+        development["assumptions"].Vector().emplace_back("One building per town/day including positive prerequisite chains; OR branches choose the lowest gold cost. Loaded AI bonuses use calendar rounding; weekly rewards/events and negative prerequisites are excluded.");
         auto balance=initial, income=daily;
         int buildDay=-1;
         if(best)
@@ -192,7 +213,11 @@ JsonNode forecastBranches(const JsonNode & world, const JsonNode & reserves, con
                         if(++next==bestSequence.size()) buildDay=date;
                     }
                 }
-                if(date<deadline) for(int i=0;i<7;++i) balance[i]+=income[i];
+                if(date<deadline)
+                {
+                    const auto nextIncome=funds(forecastDailyIncome(world,date+1,node(income)));
+                    for(int i=0;i<7;++i) balance[i]+=nextIncome[i];
+                }
             }
             if(buildDay>=0) development["build_day"].Integer()=buildDay;
             else development["status"].String()="unfunded_at_deadline";
@@ -221,7 +246,11 @@ JsonNode forecastBranches(const JsonNode & world, const JsonNode & reserves, con
             army["stock"].Vector().push_back(stock);
         }
         army["army_purchased_value"].Integer()=power;
-        for(int i=0;i<7;++i) balance[i]+=daily[i]*std::max(0,deadline-day);
+        for(int date=day+1;date<=deadline;++date)
+        {
+            const auto nextIncome=funds(forecastDailyIncome(world,date,node(daily)));
+            for(int i=0;i<7;++i) balance[i]+=nextIncome[i];
+        }
         army["resources_at_deadline"]=node(balance);
         result["alternatives"].Vector().push_back(army);
     }
@@ -354,7 +383,8 @@ JsonNode forecastCommitments(const JsonNode & world, const CampaignState & campa
     auto values=[](const Funds & amounts) { JsonNode result;for(auto value:amounts) result.Vector().emplace_back(value);return result; };
     const int day=world["day"].Integer(), week=std::max<int64_t>(1,world["days_in_week"].Integer());
     int deadline=day;
-    auto balance=amounts(world["resources"]), income=amounts(world["daily_income"]);
+    auto balance=amounts(world["resources"]);
+    auto income=amounts(world["economy"]["base_daily_income"].isVector() ? world["economy"]["base_daily_income"] : world["daily_income"]);
     std::set<std::string> completed, moved;
     for(const auto & [id,status]:campaign.statuses().Struct()) if(status["state"].String()=="completed") completed.insert(id);
     const auto currentLogistics=forecastDeliveries(world,campaign,replacements);
@@ -422,6 +452,7 @@ JsonNode forecastCommitments(const JsonNode & world, const CampaignState & campa
         }
         estimate["assumptions"].Vector().emplace_back("One treasury and existing dwelling stock calendar for accepted building and town-source delivery commitments; priority order and dependencies. No pickups, trade or unrelated spending. Each town builds once per day; keep other live resource and force reserves.");
         estimate["assumptions"].Vector().emplace_back("Existing own income, positive building prerequisites and current weekly growth remain valid. New dwellings, changed growth bonuses, stack packing and routes after a projected meeting remain unproved. Future delivery uses the current route and loss estimate; its recipient can arrive at the source town and wait for recruitment.");
+        estimate["assumptions"].Vector().emplace_back("Use post-handicap recurring income and loaded AI bonuses with daily calendar rounding; weekly rewards/events are excluded.");
         deadline=std::max(deadline,static_cast<int>(goal["deadline_day"].Integer()));entries.push_back(std::move(entry));
     }
     std::ranges::sort(entries,[](const auto & a,const auto & b) {
@@ -507,10 +538,11 @@ JsonNode forecastCommitments(const JsonNode & world, const CampaignState & campa
                 if(entry.sourceTown) moved.insert(recipient);else moved.insert(source);
             }
         }
-        calendar["resources_end"]=values(balance);calendar["income_for_next_day"]=values(income);
+        const auto nextIncome=forecastDailyIncome(world,date+1,values(income));
+        calendar["resources_end"]=values(balance);calendar["income_for_next_day"]=nextIncome;
         result["resource_calendar"].Vector().push_back(calendar);
         for(auto & entry:entries) if(date==(*entry.goal)["deadline_day"].Integer()) entry.estimate["resources_at_deadline"]=values(balance);
-        if(date<deadline) for(int i=0;i<7;++i) balance[i]+=income[i];
+        if(date<deadline) for(int i=0;i<7;++i) balance[i]+=nextIncome[i].Integer();
     }
     for(const auto & entry:entries)
         result[(*entry.goal)["kind"].String()=="develop_town" ? "commitments" : "deliveries"].Vector().push_back(entry.estimate);
