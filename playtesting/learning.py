@@ -34,7 +34,7 @@ class LearningRuntime:
         command=[sys.executable,str(ROOT/'controller/analyze.py'),'--database',database,
             '--journal',str(self.journal),'--players',players,
             '--stop-file',str(self.run/'STOP'),'--finish-file',str(self.directory/'FINISH'),
-            '--records',str(self.directory/'calls'),
+            '--records',str(self.directory/'calls'),'--decisions',str(self.run/'decisions'),
             '--max-calls',str(self.manifest.get('analysis_max_calls',12)),
             '--max-tokens',str(self.manifest.get('analysis_max_tokens',200000)),
             '--timeout',str(self.manifest.get('analysis_timeout_seconds',60)),
@@ -61,7 +61,7 @@ class LearningRuntime:
         if self.child is None:return
         if natural:
             (self.directory/'FINISH').touch()
-            try:self.child.wait(timeout=self.manifest.get('analysis_timeout_seconds',60)+7)
+            try:self.child.wait(timeout=self.manifest.get('analysis_timeout_seconds',60)*self.manifest.get('analysis_max_calls',12)+7)
             except subprocess.TimeoutExpired:pass
         if os.name=='nt':
             self.child.close()

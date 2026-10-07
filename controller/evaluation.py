@@ -25,7 +25,7 @@ def unchanged_actor(before,after,actor):
 class TelemetryCollector:
     def __init__(self,database,journal,players,*,idle_turns=2,mine_turns=2,scouting_turns=3):
         self.database=Path(database);self.journal=Path(journal);self.players=set(players)
-        self.offset=0;self.gap=False
+        self.offset=0;self.gap=False;self.games=set()
         self.idle_turns=idle_turns;self.mine_turns=mine_turns;self.scouting_turns=scouting_turns
 
     def poll(self):
@@ -66,6 +66,7 @@ class TelemetryCollector:
             if action.get('kind')=='battle':
                 if action.get('player')!=player:raise ValueError('foreign battle receipt')
             elif any(not isinstance(action.get(k),dict) or action[k].get('player')!=player for k in ('before','after')):raise ValueError('foreign own-state receipt')
+        self.games.add(event['game'])
         store=Experience(self.database,'learn')
         try:
             if store.db.execute('SELECT 1 FROM turn_events WHERE game=? AND generation=? AND sequence=?',

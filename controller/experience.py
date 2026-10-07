@@ -207,6 +207,10 @@ class Experience:
                 CREATE TABLE IF NOT EXISTS turn_events (
                     game TEXT, generation TEXT, sequence INTEGER, day INTEGER, phase TEXT, payload TEXT,
                     PRIMARY KEY(game,generation,sequence));
+                CREATE TABLE IF NOT EXISTS game_reviews (
+                    game TEXT, generation TEXT, terminal_sequence INTEGER,
+                    source_hash TEXT, report TEXT, usage TEXT,
+                    PRIMARY KEY(game));
                 CREATE TABLE IF NOT EXISTS analysis_usage (
                     id INTEGER PRIMARY KEY, usage TEXT, result TEXT);
                 CREATE INDEX IF NOT EXISTS decisions_game_day ON decisions(game,day);
@@ -371,8 +375,10 @@ class Experience:
         validate_learning(context,learning)
         saved = 0
         assessed = 0
-        with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+        from contextlib import nullcontext
+        transaction = nullcontext() if self.db.in_transaction else self.db
+        with transaction:
+            if not self.db.in_transaction:self.db.execute('BEGIN IMMEDIATE')
             for episode in context['episodes']:
                 row=self.db.execute('SELECT payload FROM episodes WHERE id=? AND game=?',(episode['id'],game)).fetchone()
                 if not row or json.loads(row['payload'])!=episode:raise ValueError('stale analysis episode')

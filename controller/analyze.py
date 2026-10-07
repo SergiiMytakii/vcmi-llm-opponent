@@ -154,6 +154,7 @@ def main():
     parser.add_argument('--model',default=MODEL)
     parser.add_argument('--effort',default=REASONING_EFFORT)
     parser.add_argument('--records',type=Path)
+    parser.add_argument('--decisions',type=Path)
     args=parser.parse_args()
     if args.max_calls<1 or args.max_tokens<1 or not 0<args.timeout<=120 or not 0<args.interval<=60:parser.error('invalid analysis limits')
     if any(not 1<=n<=30 for n in (args.idle_turns,args.mine_turns,args.scouting_turns)):parser.error('invalid review thresholds')
@@ -179,18 +180,24 @@ def main():
                 if args.stop_file and args.stop_file.exists():break
                 if collector:collector.poll()
                 record=None
-                if args.records:
+                if args.records and not collector:
                     record=args.records/str(calls);record.mkdir(parents=True,exist_ok=True)
                 try:
                     if calls>=args.max_calls or tokens>=args.max_tokens:
                         publish(args.database);result={'status':'budget_exhausted'}
                     else:
-                        result=analyze_once(args.database,timeout=args.timeout,model=args.model,effort=args.effort,record_dir=record,feedback=feedback)
-                        if result['status']=='assessed':
+                        if collector:
+                            from game_analysis import review_completed_game
+                            result=review_completed_game(args.database,decisions=args.decisions,records=args.records,
+                                timeout=args.timeout,model=args.model,effort=args.effort,
+                                max_calls=args.max_calls-calls,max_tokens=args.max_tokens-tokens,games=collector.games)
+                        else:
+                            result=analyze_once(args.database,timeout=args.timeout,model=args.model,effort=args.effort,record_dir=record,feedback=feedback)
+                        if result['status'] in ('assessed','game_reviewed'):
                             feedback=None
-                            calls+=1;usage=result.get('usage') or {};tokens+=usage.get('input_tokens',args.max_tokens)+usage.get('output_tokens',0)
+                            calls+=result.get('model_calls',1);usage=result.get('usage') or {};tokens+=usage.get('input_tokens',args.max_tokens)+usage.get('output_tokens',0)
                 except (OSError,ValueError,TypeError,KeyError,sqlite3.Error,TimeoutError,subprocess.SubprocessError) as error:
-                    calls+=1;result={'status':'error','reason':str(error)}
+                    calls+=getattr(error,'model_calls',1);result={'status':'error','reason':str(error)}
                     feedback=getattr(error,'analysis_feedback',None)
                     usage=getattr(error,'usage',None)
                     known=isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0
@@ -201,7 +208,9 @@ def main():
                 if result!=previous:print(json.dumps(result,ensure_ascii=False),flush=True)
                 previous=result
                 if args.once:return 1 if result['status']=='error' else 0
-                if args.finish_file and args.finish_file.exists():break
+                if args.finish_file and args.finish_file.exists():
+                    if result['status']=='game_reviewed':continue
+                    break
                 time.sleep(args.interval)
     except (OSError,ValueError) as error:
         print(json.dumps({'status':'unavailable','reason':str(error)}),file=sys.stderr);return 1
