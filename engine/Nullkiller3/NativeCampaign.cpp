@@ -1086,7 +1086,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     economy["difficulty"].Integer()=difficulty;
     economy["handicap_percent_income"].Integer()=playerSettings->handicap.percentIncome;
     economy["days_in_week"]=world["days_in_week"];
-    economy["weekly_bonus_percent"]=weeklyBonus;
+    economy["weekly_bonus_percent"]=projectStrategicBonusPercent(weeklyBonus);
     economy["forecast_basis"].String()="Current own sources retained; no captures, finds or expenses. Unknown weekly rewards are excluded.";
     economy["effective_income_preview"].Vector();
     int treasuries=0;bool unknownPond=false,crystalGeneration=false;

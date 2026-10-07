@@ -40,6 +40,13 @@ inline std::set<std::string> strategicIntentCandidateRefs(const JsonNode & inten
     }
     return refs;
 }
+inline JsonNode projectStrategicBonusPercent(const JsonNode & configured)
+{
+    auto result=configured;
+    // Mod provenance is serializer metadata, not part of the player-visible DTO.
+    result.setModScope("",true);
+    return result;
+}
 // NewTurnProcessor applies this to income that already includes the handicap.
 // Integer divisions must stay in native order; rounding a daily average differs.
 inline int64_t effectiveAIIncome(int64_t income,int64_t weeklyBonus,int64_t dayOfWeek,int64_t daysInWeek,int64_t cap)

@@ -49,6 +49,12 @@ int main()
         }
         for(const auto & fixture:input["income_cases"].Vector())
             result["effective_incomes"].Vector().emplace_back(nullkiller3::effectiveAIIncome(fixture["base"].Integer(),fixture["bonus"].Integer(),fixture["day_of_week"].Integer(),fixture["days_in_week"].Integer(),fixture["cap"].Integer()));
+        if(input["configured_income_bonus"].isStruct())
+        {
+            auto configured=input["configured_income_bonus"];
+            configured.setModScope("core"); // Real settings carry the originating mod namespace.
+            result["economic_observation"]["weekly_bonus_percent"]=nullkiller3::projectStrategicBonusPercent(configured);
+        }
         result["quote_calls"].Integer()=calls;
         std::cout<<result.toCompactString()<<'\n';return 0;
     }

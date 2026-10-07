@@ -37,6 +37,12 @@ class StrategicCandidatesTest(unittest.TestCase):
         return {'world':world,'plan':{'goals':[],'policy':{'max_loss_ratio':.25,'critical_towns':['home']}},
             'coverage':coverage,'memory':{'known_objects':[]}}
 
+    def test_mod_scoped_income_configuration_is_plain_json_on_the_model_wire(self):
+        data=self.fixture(0)
+        data['configured_income_bonus']={'gold':200,'wood':100,'ore':100,'crystal':200,'gems':200,'sulfur':200,'mercury':200}
+        result=self.call(data)
+        self.assertEqual(result['economic_observation']['weekly_bonus_percent'],data['configured_income_bonus'])
+
     def test_repeated_viewpoints_become_few_distinct_directions_before_quoting(self):
         data=self.fixture(1000);result=self.call(data)
         options=result['scouts']['scouting']
