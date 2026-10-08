@@ -199,7 +199,7 @@ def choose(request):
 
 
 def _compact_response_schema(schema):
-    """Share large string enums in an expanded native schema, without changing its language."""
+    """Share repeated schema fragments without changing their allowed values."""
     def normalize(value):
         if isinstance(value, list):return [normalize(item) for item in value]
         if not isinstance(value, dict):return value
@@ -215,29 +215,29 @@ def _compact_response_schema(schema):
     normalized = normalize(schema)
     counts = Counter()
     nodes = {}
-    def enum_key(value):
-        if value.get('type') == 'string' and 'enum' in value:
+    def schema_key(value):
+        if 'type' in value or 'anyOf' in value:
             key = compact_json(value)
-            if len(key.encode('utf-8')) >= 256:return key
+            if len(key.encode('utf-8')) >= 128:return key
         return None
     def collect(value):
         if isinstance(value, dict):
-            key = enum_key(value)
+            key = schema_key(value)
             if key is not None:counts[key] += 1;nodes[key] = value
             for item in value.values():collect(item)
         elif isinstance(value, list):
             for item in value:collect(item)
     collect(normalized)
     names = {key:'allowed_'+str(i) for i,key in enumerate(key for key in counts if counts[key] > 1)}
-    def share(value):
+    def share(value, definition=False):
         if isinstance(value, dict):
-            key = enum_key(value)
-            if key in names:return {'$ref':'#/$defs/'+names[key]}
+            key = schema_key(value)
+            if key in names and not definition:return {'$ref':'#/$defs/'+names[key]}
             return {key:share(item) for key,item in value.items()}
         if isinstance(value, list):return [share(item) for item in value]
         return value
     result = share(normalized)
-    if names:result['$defs'] = {name:nodes[key] for key,name in names.items()}
+    if names:result['$defs'] = {name:share(nodes[key], definition=True) for key,name in names.items()}
     return result
 
 

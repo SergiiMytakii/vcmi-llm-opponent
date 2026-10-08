@@ -12,6 +12,7 @@ from codex_fixture import codex_fixture
 from fixtures.strategic_intent import with_intent
 from test_nullkiller3_controller import strategic_request
 from controller.native_strategy import reply_schema
+from controller.strategy import _validate_shape
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +47,23 @@ def expand_schema(schema):
 
 
 class ResponseSchemaTest(unittest.TestCase):
+    def test_model_schema_keeps_goal_deadlines_within_the_selected_horizon(self):
+        request, reply = self.request_and_reply()
+        request['identity']['day'] = request['observation']['day'] = 23
+        for horizon, last_day in ((3, 26), (4, 27), (5, 28), (6, 29), (7, 30)):
+            with self.subTest(horizon=horizon):
+                reply['plan']['horizon_days'] = horizon
+                reply['plan']['goals'][0]['deadline_day'] = last_day
+                result, sent, _, _ = self.call(request, reply)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['plan'], reply['plan'])
+                schema = expand_schema(sent)
+                _validate_shape(reply, schema)
+                invalid = copy.deepcopy(reply)
+                invalid['plan']['goals'][0]['deadline_day'] = last_day + 1
+                with self.assertRaises(ValueError):
+                    _validate_shape(invalid, schema)
+
     def test_visible_ore_mine_can_be_selected_and_validated_as_a_resource_goal(self):
         request, reply = self.request_and_reply()
         request['observation']['visible_objects'] = [

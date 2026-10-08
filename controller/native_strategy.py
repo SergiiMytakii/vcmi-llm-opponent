@@ -310,6 +310,15 @@ def reply_schema(request):
                     'policy':_object({'max_loss_ratio':{'type':'number','minimum':0,'maximum':.5},
                                       'allow_route_repair':{'type':'boolean'}, 'allow_helper_replacement':{'type':'boolean'},
                                       'critical_towns':array(owned_town, high=12 if town_refs else 0)})})
+    # Bind deadlines to the model's chosen horizon before generation. Separate
+    # branches retain every supported horizon without admitting contradictory plans.
+    plans = []
+    for horizon in range(3, 8):
+        option = copy.deepcopy(plan)
+        option['properties']['horizon_days'] = {**integer(horizon, horizon), 'enum':[horizon]}
+        for variant in option['properties']['goals']['items']['anyOf']:
+            variant['properties']['deadline_day'] = integer(day, day+horizon)
+        plans.append(option)
     properties = {'protocol':{**integer(2,2),'enum':[2]},
                   'request_id':{'type':'string','enum':[request['request_id']]},
                   'identity':_object({key:{'type':'string' if isinstance(value,str) else 'integer', 'enum':[value],
@@ -323,7 +332,7 @@ def reply_schema(request):
                   'alternatives':array(_object({'approach':approach,'benefit':text,'cost':text,'uncertainty':text}),2,4),
                   'reconsider_when':array(_object({'goal_id':label,'kind':{'type':'string','enum':
                                               ['executor_lost','deadline_missed','route_not_established']}}),1),
-                  'plan':{'anyOf':[{'type':'null'},plan]},
+                  'plan':{'anyOf':[{'type':'null'},*plans]},
                   'strategy_update':_object({'decision':{'type':'string','enum':['keep','revise'] if intent else ['revise']},
                       'base_revision':{**integer(0,2147483647),'enum':[intent_revision]},
                       'selected':{'anyOf':[{'type':'null'},selected_schema(request)]},
