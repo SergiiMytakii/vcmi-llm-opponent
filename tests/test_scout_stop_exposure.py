@@ -34,6 +34,22 @@ int main() {
             result=subprocess.run([str(binary)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
 
+    def test_enemy_keys_block_only_the_matching_player_and_allow_bypasses(self):
+        self.proof(r'''
+std::vector<KnownLandTile> land(4);
+land[0].neighbors={1};land[0].movementCosts={100};
+land[1].neighbors={2};land[1].movementCosts={100};
+land[2].neighbors={3};land[2].movementCosts={100};
+land[1].blockedPlayers.insert(0);
+require(knownLandApproach(land,0,3,1000,0)["status"].String()=="no_complete_visible_land_connection");
+require(knownLandApproach(land,0,3,1000,1)["movement_scenario"]["turns"].Integer()==1);
+land[0].neighbors.push_back(2);land[0].movementCosts.push_back(500);
+require(knownLandApproach(land,0,3,1000,0)["movement_scenario"]["turns"].Integer()==1);
+land[0].neighbors={1};land[0].movementCosts={100};
+land[1].blockedPlayers.erase(0);
+require(knownLandApproach(land,0,3,1000,0)["known_land_steps"].Integer()==3);
+''')
+
     def test_helper_route_progress_does_not_repeat_the_same_safety_question(self):
         self.proof(r'''
 auto review=json(R"({"hero_ref":"helper","reason":"automatic_helper_approaches_stronger_visible_enemy","status":"conditional_unchanged_route","origin":[0,0,0],"stop_positions":[[3,0,0]],"target_position":[10,0,0],"own_strength":107,"visible_threats":[{"enemy_ref":"enemy","position":[50,0,0],"army_interval":{"lower":10000,"upper":15000},"tile_distance":47,"known_land_approach":{"status":"no_visible_neutral_barrier_on_known_land_connection","known_land_steps":47,"movement_scenario":{"status":"conditional_direct_land_approach","turns":3,"daily_points":2000}}}]})");

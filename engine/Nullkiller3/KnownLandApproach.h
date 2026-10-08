@@ -27,6 +27,7 @@ struct KnownLandTile
     std::vector<size_t> neighbors;
     std::vector<std::string> neutralGuards;
     std::vector<int64_t> movementCosts; // Visible road/base terrain cost, parallel to neighbors.
+    std::set<int64_t> blockedPlayers; // Exact key access at visible border gates/guards.
 };
 // Observed random exits are possible enemy approaches, never guaranteed own travel.
 inline void addKnownPassageEdges(std::vector<KnownLandTile> & land,const JsonNode & positions,const JsonNode & links,int64_t movementCost)
@@ -72,7 +73,7 @@ inline bool yieldOpensKnownConnection(const std::vector<KnownLandTile> & tiles,s
 // A neutral zone on the target asset alone does not shield that hero/town.
 // Visible land connectivity is an overapproximation: no private enemy movement,
 // no unseen tiles, no water/spells, no claim that a guard can or cannot be beaten.
-inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_t source,size_t target,int64_t dailyPoints=0)
+inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_t source,size_t target,int64_t dailyPoints=0,int64_t player=-1)
 {
     auto walk=[&](bool avoidGuards) {
         std::vector<int64_t> parents(tiles.size(),-1);std::deque<size_t> queue;
@@ -81,7 +82,7 @@ inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_
         {
             const auto at=queue.front();queue.pop_front();
             for(const auto next:tiles[at].neighbors)
-                if(parents[next]<0 && (!avoidGuards || next==target || tiles[next].neutralGuards.empty()))
+                if(next<tiles.size() && !tiles[next].blockedPlayers.count(player) && parents[next]<0 && (!avoidGuards || next==target || tiles[next].neutralGuards.empty()))
                 { parents[next]=at;queue.push_back(next); }
         }
         return parents;
@@ -114,7 +115,7 @@ inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_
             for(size_t i=0;i<tiles[at].neighbors.size();++i)
             {
                 const auto next=tiles[at].neighbors[i];const auto step=tiles[at].movementCosts[i];
-                if(next>=tiles.size() || step<0 || step>dailyPoints
+                if(next>=tiles.size() || tiles[next].blockedPlayers.count(player) || step<0 || step>dailyPoints
                     || (next!=target && !tiles[next].neutralGuards.empty())) continue;
                 Cost cost=spent+step<=dailyPoints ? Cost{turn,spent+step} : Cost{turn+1,step};
                 if(cost<costs[next]) { costs[next]=cost;pending.emplace(cost.first,cost.second,next); }
@@ -191,9 +192,9 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
         if(position.Vector().size()!=3) continue;
         if(position[2]!=stop[2]) {
             const auto from=cell(position),to=cell(stop);
-            if(from>=land.size() || to>=land.size() || knownLandApproach(land,from,to)["status"].String()=="no_complete_visible_land_connection") continue;
+            if(from>=land.size() || to>=land.size() || knownLandApproach(land,from,to,0,enemy["owner"].Integer())["status"].String()=="no_complete_visible_land_connection") continue;
         }
-        JsonNode threat;threat["enemy_ref"]=enemy["ref"];threat["position"]=position;
+        JsonNode threat;threat["enemy_ref"]=enemy["ref"];threat["enemy_player"]=enemy["owner"];threat["position"]=position;
         threat["tile_distance"].Integer()=std::max(std::abs(position[0].Integer()-stop[0].Integer()),std::abs(position[1].Integer()-stop[1].Integer()));
         threat["army_interval"]=enemy["army_interval"];
         threats.push_back(std::move(threat));
@@ -209,7 +210,7 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
     for(auto & threat:threats)
     {
         const auto from=cell(threat["position"]),to=cell(stop);
-        if(from<land.size() && to<land.size()) threat["known_land_approach"]=knownLandApproach(land,from,to);
+        if(from<land.size() && to<land.size()) threat["known_land_approach"]=knownLandApproach(land,from,to,0,threat["enemy_player"].Integer());
         else threat["known_land_approach"]["status"].String()="no_complete_visible_land_connection";
     }
     result["visible_threats"].Vector()=std::move(threats);
@@ -235,7 +236,7 @@ inline JsonNode helperStopReview(const JsonNode & origin,uint64_t ownStrength,co
             || next["status"].String()!="no_visible_neutral_barrier_on_known_land_connection") continue;
         const auto enemy=cell(threat["position"]);
         if(enemy>=land.size()) continue;
-        const auto previous=knownLandApproach(land,enemy,start);
+        const auto previous=knownLandApproach(land,enemy,start,0,threat["enemy_player"].isNumber() ? threat["enemy_player"].Integer() : -1);
         if(previous["status"].String()!="no_visible_neutral_barrier_on_known_land_connection"
             || next["known_land_steps"].Integer()>=previous["known_land_steps"].Integer()) continue;
         auto review=exposure;
@@ -246,7 +247,7 @@ inline JsonNode helperStopReview(const JsonNode & origin,uint64_t ownStrength,co
             {
                 const auto source=cell(visible["position"]),stop=cell(review["stop_positions"][0]);
                 if(source<land.size() && stop<land.size())
-                    visible["known_land_approach"]=knownLandApproach(land,source,stop,dailyPoints);
+                    visible["known_land_approach"]=knownLandApproach(land,source,stop,dailyPoints,visible["enemy_player"].isNumber() ? visible["enemy_player"].Integer() : -1);
             }
         return review;
     }
@@ -279,7 +280,7 @@ inline JsonNode townStopReview(const std::string & heroRef,const JsonNode & orig
             if(enemy["kind"].String()!="hero" || from>=land.size()
                 || std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),enemy["owner"])==world["enemy_players"].Vector().end()
                 || !enemy["army_interval"]["lower"].isNumber() || enemy["army_interval"]["lower"].Integer()<=retained) continue;
-            const auto path=knownLandApproach(land,from,target);
+            const auto path=knownLandApproach(land,from,target,0,enemy["owner"].Integer());
             if(path["status"].String()!="no_visible_neutral_barrier_on_known_land_connection") continue;
             JsonNode review;review["reason"].String()="automatic_departure_exposes_town";
             review["town_ref"]=town["ref"];review["enemy_ref"]=enemy["ref"];

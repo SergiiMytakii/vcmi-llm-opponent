@@ -457,6 +457,19 @@ JsonNode projectTown(const NK2AI::Nullkiller & ai,const CGTownInstance * town,
     }
     return item;
 }
+// Deliberately privileged observation: expose only opponent keys for known colors.
+void projectOpponentKeys(const NK2AI::Nullkiller & ai,JsonNode & item,MapObjectSubID color)
+{
+    auto & keys=item["opponent_key_access"];keys.Vector().clear();
+    const auto & state=static_cast<const IGameInfoCallback &>(*ai.cc).gameState();
+    for(const auto & [player,playerState]:state.players)
+        if(ai.cc->getPlayerRelations(ai.playerID,player)==PlayerRelations::ENEMIES)
+        {
+            JsonNode key;key["player"].Integer()=player.getNum();
+            key["key_owned"].Bool()=playerState.wasKeymasterVisited(color);
+            keys.Vector().push_back(std::move(key));
+        }
+}
 JsonNode projectVisibleObject(const NK2AI::Nullkiller & ai,const CGObjectInstance * object,
     const std::string & ref,int64_t alias,bool borderVisited,const JsonNode & eligibleHeroes)
 {
@@ -515,6 +528,7 @@ JsonNode projectVisibleObject(const NK2AI::Nullkiller & ai,const CGObjectInstanc
     if(keymasterObject(item))
     {
         item["key_color"].Integer()=object->subID.getNum();
+        projectOpponentKeys(ai,item,object->subID);
         item["key_owned"].Bool()=ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(object->subID);
         item["visited"].Bool()=object->ID==Obj::KEYMASTER ? object->wasVisited(ai.playerID)
             : borderVisited;
@@ -1340,6 +1354,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         if(keymasterObject(object) && object["key_color"].isNumber())
         {
             object["key_owned"].Bool()=ai.cc->getPlayerState(ai.playerID)->wasKeymasterVisited(MapObjectSubID(object["key_color"].Integer()));
+            projectOpponentKeys(ai,object,MapObjectSubID(object["key_color"].Integer()));
             if(!object["visible"].Bool()) object["eligible_hero_refs"].Vector().clear();
         }
         world["objects"].Vector().push_back(object);
@@ -1427,6 +1442,15 @@ VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & 
         const auto cell=index.find(int3(pos[0].Integer(),pos[1].Integer(),pos[2].Integer()));
         if(cell!=index.end()) land[cell->second].neutralGuards.push_back(object["ref"].String());
     }
+    for(const auto & object:world["visible_objects"].Vector())
+    {
+        if(object["kind"].String()!="border_gate" && object["kind"].String()!="border_guard") continue;
+        const auto & pos=object["position"];
+        const auto cell=index.find(int3(pos[0].Integer(),pos[1].Integer(),pos[2].Integer()));
+        if(cell==index.end()) continue;
+        for(const auto & key:object["opponent_key_access"].Vector())
+            if(!key["key_owned"].Bool()) land[cell->second].blockedPlayers.insert(key["player"].Integer());
+    }
     // Use visible native entrance restrictions in both directions, as CMap does.
     // Private opponent abilities and unseen bypasses remain unknown.
     for(const auto & [position,id]:index)
@@ -1509,9 +1533,9 @@ JsonNode enemyApproaches(const JsonNode & world,const VisibleLandGraph & graph)
             const auto & where=asset["position"];
             const auto target=index.find(int3(where[0].Integer(),where[1].Integer(),where[2].Integer()));
             if(target==index.end()) continue;
-            auto approach=knownLandApproach(land,source->second,target->second,graph.dailyMovement);
+            auto approach=knownLandApproach(land,source->second,target->second,graph.dailyMovement,enemy["owner"].Integer());
             approach["source_ref"]=enemy["ref"];approach["target_ref"]=asset["ref"];
-            approach["assumptions"].String()="Currently visible land connectivity with native directional entrances; other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Observed gate/portal links are included; random exits describe possibilities. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
+            approach["assumptions"].String()="Currently visible land connectivity with native directional entrances; other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Known opponent key access blocks closed border gates/guards. Observed gate/portal links are included; random exits describe possibilities. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
             result.Vector().push_back(approach);
         }
     }
