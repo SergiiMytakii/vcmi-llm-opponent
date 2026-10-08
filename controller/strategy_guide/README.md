@@ -2,7 +2,7 @@
 
 This bundle compares strategic choices. [Game Rules](../game_rules/README.md)
 explains mechanics through a separate catalog and `read_game_rules` tool.
-Keep tactical recommendations here and mechanical explanations in Game Rules;
+Keep strategic recommendations here and mechanical explanations in Game Rules;
 the mandatory executor contract remains in Native Instructions.
 
 Edit a card → validate the complete bundle → prepare a new run:
@@ -21,11 +21,23 @@ A requested result, including file metadata and JSON encoding, is limited to
 Use six sections in every card: applicability, facts/unknowns, alternatives,
 benefits/costs/risks, reconsideration and executor limits. Text is editable advice;
 it cannot add commands, observations, routes, force estimates or capabilities.
-The model decides whether to read 1–3 enabled cards through the read-only
+Keep each comparison in its owning card; refer to the common executor contract
+instead of repeating it. Group related conditions and use one instruction per
+bullet. Mandatory safety/schema rules remain in Native Instructions. Explain
+strategy through the existing reason, alternatives and review fields, without
+duplicating a rationale across them.
+Native Instructions owns consultation triggers. Each call reads 1–3 enabled cards
+through the read-only
 `nk3_strategy_guide.read_strategy_guide` MCP tool. The selected cards return inside
 the same conversation; one Codex process produces the final normal strategic reply.
-Only the catalog is included before tool use. Repeated reads remain under the
-request deadline and bounded section sizes; there is no controller-driven second
+Only the catalog is included before tool use. Start with the most relevant cards;
+read additional cards when other active triggers remain uncovered, reusing cards
+already read in the decision. The 1–3 limit is per call, not an aggregate quota.
+All reads share one model conversation; later reads add to earlier results and
+the current comparison. Ephemeral/no-history settings disable disk persistence,
+not context within the active decision. This does not promise memory across new
+strategic requests; those receive fresh supplied state.
+Repeated reads remain under the request deadline and bounded section sizes; there is no controller-driven second
 planning call or guide-specific aggregate token admission check.
 
 Each native strategic request advertises an independent 120000-token allowance.

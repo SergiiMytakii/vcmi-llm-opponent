@@ -1,19 +1,24 @@
 # Development
 
 ## When useful
-When choosing economic expansion or when income, production, recruitment, delivery or hero readiness constrains the saved course or next operation.
+When choosing economic expansion or resolving an income, production, recruitment, delivery or readiness bottleneck in the saved course/next operation.
 
 ## Facts and unknowns
-Check resources, income, quoted construction/recruitment costs, resource_calendar, stack compatibility, source/meeting options and safe mines/sites. Future income and delivery are uncertain until observed.
+Check income, resources, quoted construction/recruitment, resource_calendar, army stack compatibility and source/meeting options.
 
 ## Alternatives to compare
-Compare economic construction, troop production, useful mine/town capture, reinforcement, useful hero visits and retaining funds for defense. Identify the bottleneck in income/resources -> construction and recruitable growth -> affordable recruitment -> compatible delivery. Extra gold helps little without stock; extra production helps little without funds or delivery.
+- Compare income construction, troop production, useful mine/town capture, reinforcement, useful visits and funds for defense.
+- Identify the bottleneck: income/resources -> construction/growth -> affordable recruitment -> compatible delivery. Gold without stock, or production without funds/delivery, adds little.
 
 ## Benefits, costs and risks
-Compare quoted prerequisite costs/days and payback from known income_delta with the army need and uncertain campaign duration. An investment beyond the current operation can serve the saved course if its later military gain outweighs lost tempo and risk. Assess additional affordable troops over several weeks only from supported income/stock/growth; beyond supplied forecasts remains conditional, not executable funding. Mines/towns cost travel, combat, holding and delivery. Allocate shared funds/stock once. Use resource_calendar; new dwellings do not establish changed forecast growth. Current recruitment still needs compatible delivery.
+- Compare construction prerequisites, total cost and days with the next army need.
+- Compare payback from known income_delta/costs with army need and uncertain campaign duration. Investment beyond the current operation may serve the saved course if later military gain outweighs lost tempo/risk.
+- Project affordable troops over several weeks only from supported income/stock/growth; beyond forecasts is conditional, not executable funding.
+- Compare production before growth with affordable recruitment and delivery. Use resource_calendar; do not assume a new dwelling changes forecast growth.
+- Mines/towns consume travel, battle losses, holding and delivery time. Recruitment improves its receiving pool; judge it by the operation subsequent delivery unlocks.
 
 ## When to reconsider
-Reassess after income loss, threats, delivery, stock or route changes. Move investment to the next bottleneck; switch to offense when the course's readiness is met. Reconsider economic delay when useful force fails to materialize or an earlier decisive opening appears.
+Review income, threats, delivery, stock/routes and shift investment to the next bottleneck. Switch to offense at course readiness or an earlier decisive opening; reconsider delay when useful force fails to materialize.
 
 ## Executor limits
-Buildings need offered supported IDs. Reinforcement requires legal current delivery and its receipt; buying stock does not establish arrival. Do not invent future recruitment routes.
+Use offered building IDs and shared-fund/delivery admission rules.

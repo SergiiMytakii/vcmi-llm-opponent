@@ -16,12 +16,9 @@ class GameRules(ReferenceBundle):
         super().__init__(root)
 
     def instructions(self):
-        return ('\n# Game rules catalog\nThese cards explain mechanics, not which strategy to choose. '
-                'When a decision depends on unclear mechanics, use nk3_game_rules.read_game_rules '
-                'to read 1-3 relevant IDs. Use read_strategy_guide separately for strategic comparisons. '
-                'Current observations, scenario/mod rules and native quotes govern actual values; '
-                'the executor contract governs supported operations. Classic defaults do not fill '
-                'missing observations or create capabilities. Continue with the normal decision.\n'
+        return ('\n# Game rules catalog\nMechanics reference: when mechanics are unclear, '
+                'select available IDs through read_game_rules under the Native Instructions '
+                'reference procedure. Each call accepts 1-3 IDs.\n'
                 + json.dumps(self.catalog, ensure_ascii=False, separators=(',', ':')))
 
 

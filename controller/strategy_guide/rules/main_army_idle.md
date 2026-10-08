@@ -1,19 +1,21 @@
 # Main army idle
 
 ## When useful
-When a substantial army retains movement while making no useful progress.
+When a substantial army retains movement without useful progress.
 
 ## Facts and unknowns
-Check main_army_idle, accepted goals, assigned_routes issues, feedback, commitments and execution receipts. operation_pending is unconfirmed execution, not a known refusal or completion.
+Check main_army_idle, accepted goals, assigned_routes, feedback, commitments and receipts. operation_pending means unconfirmed execution, not refusal.
 
 ## Alternatives to compare
-Compare concrete defense, supported delivery wait, ready expansion, purposeful scouting, revised deadline/actor or reinforcement before a dependent attack. If only the deadline fails, consider the offered earliest safe arrival before abandoning a valuable target; extend it only to serve the operation. For safe_options, compare a later deadline, another owned actor or explicit preparation. Without a usable route, compare a reachable information gain, safe offered approach, intermediate objective or reinforcement dependency before the future operation.
+- Compare concrete defense, supported delivery wait, ready expansion and purposeful scouting.
+- For safe_options compare another actor, explicit preparation or earliest_safe_arrival_day with a revised deadline.
+- With no route, compare reachable information, a safe approach or an intermediate objective.
 
 ## Benefits, costs and risks
-Waiting can protect a demonstrated obligation but loses initiative. Revision can free the army while preserving valid funded goals. A defender label alone does not justify waiting; unknown enemy strength alone does not explain days of inactivity.
+Waiting can protect an obligation but loses initiative. Keep valid funded goals while repairing blocked ones. A defender label or unknown enemy strength alone does not justify inactivity.
 
 ## When to reconsider
-No task with much movement requires operational revision, not relabeling. Revise idle defensive plans when profitable known expansion is supported. Reassess after fresh quotes, delivery, changed threat, deadline failure or observed refusal.
+No active task with substantial movement requires operational revision, not relabeling. Recheck after delivery, threat/route change, deadline failure or observed refusal. Extend a deadline only when it serves the operation.
 
 ## Executor limits
-Intent cannot supply a missing route, unsupported action or execution receipt. State the precise missing condition and distinguish a blocked route from an unavailable command.
+Name the precise missing admission condition; distinguish a blocked route from an unsupported command.

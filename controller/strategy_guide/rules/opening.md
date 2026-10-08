@@ -4,16 +4,20 @@
 At the start of a campaign or before a settled operation; use circumstances, not a universal day number.
 
 ## Facts and unknowns
-Check own armies, commander capability, offered routes, income, funds, building options and visible threats. Hidden objectives and enemy intent remain unknown.
+Check armies, commander capabilities, routes, income, funds, building options and visible threats.
 
 ## Alternatives to compare
-Compare supported expansion by a viable main; useful independent scouting; income or troop production; saving funds for demonstrated defense. Early on, prioritize reachable sawmills and ore mines when wood or ore limits construction; weigh route risk and existing income. When decisive offense is distant, compare securing a productive town or recurring income with an early attack; large map size alone does not settle the choice.
+- Compare reachable expansion, independent scouting, income/troop production and funds for demonstrated defense.
+- Prioritize reachable sawmills/ore mines when wood/ore limits construction; weigh route risk and current income.
+- When decisive offense is distant, compare a productive town/recurring income with early attack; map size alone does not settle it.
 
 ## Benefits, costs and risks
-Expansion gains assets with battle exposure. Scouting costs movement and exposure. Construction spends shared funds and can delay recruitment. A new hero needs a concrete uncovered defense, reinforcement or collection job; cash and starting troops alone are no job. Rank mines/towns by recurring income, construction bottlenecks and recruitable production, minus capture/holding costs and delivery time. Prefer assets that enable useful military growth; unknown subtype/output cannot justify a specific benefit.
+- Rank mines/towns by recurring income, construction bottlenecks and recruitable production, minus capture/holding costs and delivery time. Prefer usable military growth; unknown subtype/output cannot justify a specific benefit.
+- Expansion costs battle losses; scouting costs movement/exposure; construction can delay recruitment.
+- Hire only for a concrete uncovered job. Compare existing helpers first; cash and starting troops alone are insufficient.
 
 ## When to reconsider
-Reassess after discovery of a useful target, route changes, income loss, a threatened last town or confirmed delivery.
+Review useful discoveries, route changes, income loss, threatened last town or confirmed delivery.
 
 ## Executor limits
-Use only supported goals and current offered routes. An opening schedule, future building or intended battle proves no readiness or execution.
+Use current goal contracts and admission rules. A fixed opening schedule establishes no readiness.

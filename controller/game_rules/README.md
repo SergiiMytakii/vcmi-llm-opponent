@@ -4,9 +4,12 @@ This reference explains game mechanics. The separate Strategy Guide compares
 strategic choices. Experience lessons remain a third independent source.
 Native Instructions owns the mandatory executor contract and critical guards.
 
-The model sees only this catalog and reads 1–3 cards when mechanics are unclear
+The model sees only this catalog and reads 1–3 cards per call when mechanics are unclear
 through `nk3_game_rules.read_game_rules`. Full cards return in the same model
 conversation; reading does not start another planning process or execute actions.
+Additional unresolved mechanics may need another call within the request deadline;
+reuse cards already read. Native Instructions owns the shared authority and
+consultation procedure.
 
 | Card | Mechanics |
 | --- | --- |
@@ -19,6 +22,8 @@ conversation; reading does not start another planning process or execute actions
 
 Cards use four sections: mechanics, applicability/exceptions, facts to check,
 and executor boundary. Explain mechanisms rather than prescribing a strategy.
+Use focused bullets; keep executor-specific caveats and refer to the common
+contract instead of repeating general authority, route or delivery guards.
 Current scenario/mod facts and quotes govern amounts and availability. Unknown
 values remain unknown. This is a basic reference, not a full rules encyclopedia.
 
@@ -57,3 +62,12 @@ its own tool and audit. Both stay under the existing model deadline and usage.
 The rules were checked against the pinned engine and current observation and
 executor code: [source notes](../../docs/research/2026-10-06-game-rules-sources.md).
 Protocol tests establish delivery and separation, not improved play or wins.
+
+## Common provenance
+
+Each card keeps its manual page range and short engine revision in the runtime
+text. Shared sources are the [NWC/3DO 1999 manual](https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/297000/manuals/BONUS_Heroes_of_Might_and_Magic_III_HDEdition_OldManual1999_EN.pdf)
+and pinned VCMI revision `6a1ca68e00f540087f35579c62ffaf037f5be269`. Full validation
+notes and code pointers stay in the source notes linked above. Runtime tools return
+the catalog and requested cards, not this README; compact provenance is not a new
+lookup requirement for the model.

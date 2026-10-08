@@ -4,70 +4,70 @@
     {
       "id": "opening",
       "title": "Opening",
-      "applicability": "Choosing the initial commander, reconnaissance, battles, income, construction and useful economic expansion.",
+      "applicability": "Initial operation: commander, reachable expansion, scouting and construction.",
       "file": "rules/opening.md",
       "enabled": true
     },
     {
       "id": "global_strategy",
       "title": "Global strategy",
-      "applicability": "Initial or revised victory course: early offense versus economic expansion, especially on large maps or long routes; milestones and readiness to attack.",
+      "applicability": "Initial or materially reconsidered saved victory course; milestones and stalled conquest.",
       "file": "rules/global_strategy.md",
       "enabled": true
     },
     {
       "id": "development",
       "title": "Development",
-      "applicability": "Economic expansion and conversion into military advantage: income payback, construction, affordable growth, recruitment and delivery bottlenecks.",
+      "applicability": "Economic expansion or income, production, recruitment, delivery and readiness bottlenecks in the saved course/operation.",
       "file": "rules/development.md",
       "enabled": true
     },
     {
       "id": "offensive_operation",
       "title": "Offensive operation",
-      "applicability": "Choosing objectives, routes and follow-up; comparing actors again after losses or troop transfers.",
+      "applicability": "Next conquest objective; compare actors again after losses or transfers.",
       "file": "rules/offensive_operation.md",
       "enabled": true
     },
     {
       "id": "main_army_idle",
       "title": "Main army idle",
-      "applicability": "Distinguishing intentional defense from blocked routes, execution and unsupported goals.",
+      "applicability": "Main army has movement without progress; blocked routes, deadlines or goals.",
       "file": "rules/main_army_idle.md",
       "enabled": true
     },
     {
       "id": "recovery",
       "title": "Recovery",
-      "applicability": "Own retreat/surrender and urgent tavern recovery; commander loss, mana, delivery and next operation.",
+      "applicability": "Commander loss, retreat/surrender recovery, rebuilding or depleted mana.",
       "file": "rules/recovery.md",
       "enabled": true
     },
     {
       "id": "defense",
       "title": "Defense",
-      "applicability": "Town exposure, insufficient defenders or unbounded opposition; preserving garrison protection across offensive revisions.",
+      "applicability": "Main-army recall or changed town protection; shortfall, uncertain opposition or several fronts.",
       "file": "rules/defense.md",
       "enabled": true
     },
     {
       "id": "town_after_capture",
       "title": "Town after capture",
-      "applicability": "After capture/completed hold: economic and production value, development, delivery, departure, garrison, interception and renewed defense.",
+      "applicability": "Departure after capture/completed hold, renewed holding or base trade.",
       "file": "rules/town_after_capture.md",
       "enabled": true
     },
     {
       "id": "exploration",
       "title": "Exploration",
-      "applicability": "Choosing viewpoints, sites and passages; end-turn scouting exposure and reassessment after scout loss.",
+      "applicability": "Information/routes needed; key/border/passage choices or helper reassignment after confirmed loss.",
       "file": "rules/exploration.md",
       "enabled": true
     },
     {
       "id": "endgame",
       "title": "Finish the game",
-      "applicability": "Choosing a concrete elimination operation, decisive attack or town denial instead of recurring local gains.",
+      "applicability": "Decisive attack versus minor targets/waiting; elimination and recapture prevention.",
       "file": "rules/endgame.md",
       "enabled": true
     }

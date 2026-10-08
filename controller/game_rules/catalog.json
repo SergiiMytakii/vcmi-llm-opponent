@@ -4,7 +4,7 @@
     {
       "id": "day_and_week",
       "title": "Day, week and movement",
-      "applicability": "Day/week, slowest-creature movement, roads/terrain, boats and weekly recruitment stock.",
+      "applicability": "Calendar, movement, roads/terrain, boats, neutral passage guards and weekly recruitment stock.",
       "file": "rules/day_and_week.md",
       "enabled": true
     },

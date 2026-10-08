@@ -20,6 +20,7 @@ config={v.split('=',1)[0]:json.loads(v.split('=',1)[1]) for v in a if '=' in v}
 i=pathlib.Path(config['model_instructions_file']).read_text()
 p=pathlib.Path(os.environ['CAPTURE']);n=len(list(p.glob('call-*.json')))+1
 (p/f'call-{n}.json').write_text(json.dumps({'request':r,'schema':json.loads(pathlib.Path(a[a.index('--output-schema')+1]).read_text()),'instructions':i}))
+read_sections=[]
 for namespace,tool,mode,ids_default in [('strategy_guide','read_strategy_guide','GUIDE','["opening","defense"]'),('game_rules','read_game_rules','RULES','["day_and_week","town_economy"]')]:
  if os.environ.get(mode+'_TEST_MODE') not in ('consult','consult_timeout'):continue
  key='mcp_servers.nk3_'+namespace+'.'
@@ -31,15 +32,26 @@ for namespace,tool,mode,ids_default in [('strategy_guide','read_strategy_guide',
  call('initialize',{'protocolVersion':'2024-11-05'})
  tools=call('tools/list',{})
  (p/(namespace+'-tools.json')).write_text(json.dumps(tools))
- result=call('tools/call',{'name':tool,'arguments':{'ids':json.loads(os.environ.get(mode+'_TEST_IDS',ids_default))}})
- if os.environ.get(mode+'_TEST_MODE')=='consult_timeout':
-  import time
-  (p/'model-pid').write_text(str(os.getpid()));(p/'tool-pid').write_text(str(child.pid));time.sleep(10)
+ batches=json.loads(os.environ.get(mode+'_TEST_BATCHES','null')) or [json.loads(os.environ.get(mode+'_TEST_IDS',ids_default))]
+ results=[]
+ for ids in batches:
+  result=call('tools/call',{'name':tool,'arguments':{'ids':ids}})
+  results.append(result)
+  if 'error' not in result:
+   read_sections.extend(json.loads(result['result']['content'][0]['text']))
+  if os.environ.get(mode+'_TEST_MODE')=='consult_timeout':
+   import time
+   (p/'model-pid').write_text(str(os.getpid()));(p/'tool-pid').write_text(str(child.pid));time.sleep(10)
+  if 'error' in result:break
+  print(json.dumps({'type':'item.completed','item':{'type':'mcp_tool_call','server':'nk3_'+namespace,'tool':tool}}))
  child.stdin.close();child.wait(timeout=2)
  (p/('tool-result.json' if namespace=='strategy_guide' else 'rules-result.json')).write_text(json.dumps(result))
+ (p/(namespace+'-results.json')).write_text(json.dumps(results))
  if 'error' in result:sys.exit(4)
- print(json.dumps({'type':'item.completed','item':{'type':'mcp_tool_call','server':'nk3_'+namespace,'tool':tool}}))
-pathlib.Path(a[a.index('-o')+1]).write_text(os.environ['FINAL_REPLY'])
+reply=json.loads(os.environ['FINAL_REPLY'])
+if os.environ.get('TEST_CONTINUITY')=='on':
+ reply['reason']=read_sections[0]['text'].splitlines()[0]+' -> '+read_sections[-1]['text'].splitlines()[0]
+pathlib.Path(a[a.index('-o')+1]).write_text(json.dumps(reply))
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':120,'output_tokens':40}}))
 '''
 
@@ -86,6 +98,35 @@ class StrategyGuideTest(unittest.TestCase):
         sections=json.loads(json.loads((self.folder/'tool-result.json').read_text())['result']['content'][0]['text'])
         self.assertEqual([s['id'] for s in sections],['opening','defense'])
         self.assertEqual(sections[0]['text'],(ROOT/'controller/strategy_guide/rules/opening.md').read_text())
+
+    def test_successive_reference_reads_share_one_model_decision_and_keep_earlier_results(self):
+        guide_batches=[['opening','defense','exploration'],['endgame','development'],['global_strategy']]
+        rules_batches=[['hero_army','town_economy','combat_strength'],['mana_magic']]
+        self.env.update(GUIDE_TEST_MODE='consult',RULES_TEST_MODE='consult',
+            VCMI_GAME_RULES_MODE='on',GUIDE_TEST_BATCHES=json.dumps(guide_batches),
+            RULES_TEST_BATCHES=json.dumps(rules_batches),TEST_CONTINUITY='on')
+        self.env.pop('VCMI_GAME_RULES',None)
+        result=self.exchange();self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(len(list(self.folder.glob('call-*.json'))),1)
+        reply=json.loads(result.stdout)
+        self.assertEqual(reply['request_id'],self.request['request_id'])
+        self.assertEqual(reply['identity'],self.request['identity'])
+        # The final reply consumes text from the first and last tool reads.
+        self.assertEqual(reply['reason'],'# Opening -> # Mana and magic readiness')
+        info=json.loads(result.stderr)
+        for namespace,batches in [('strategy_guide',guide_batches),('game_rules',rules_batches)]:
+            self.assertEqual([c['ids'] for c in info[namespace]['calls']],batches)
+            self.assertEqual(info[namespace]['requested_ids'],[i for batch in batches for i in batch])
+            responses=json.loads((self.folder/(namespace+'-results.json')).read_text())
+            self.assertEqual(len(responses),len(batches))
+            for response,ids in zip(responses,batches):
+                sections=json.loads(response['result']['content'][0]['text'])
+                self.assertEqual([s['id'] for s in sections],ids)
+                for section in sections:
+                    self.assertEqual(section['text'],(ROOT/'controller'/namespace/section['file']).read_text())
+        events=[json.loads(line) for line in (self.folder/'model-call-1/codex-events.jsonl').read_text().splitlines()]
+        self.assertEqual(sum(e.get('type')=='turn.completed' for e in events),1)
+        self.assertEqual(sum(e.get('item',{}).get('type')=='mcp_tool_call' for e in events),5)
 
     def test_invalid_tool_selection_is_rejected(self):
         self.env.update(GUIDE_TEST_MODE='consult',GUIDE_TEST_IDS='["opening","opening"]')

@@ -1,19 +1,24 @@
 # Finish the game
 
 ## When useful
-Choose a decisive operation or resolve delayed elimination.
+Choose a decisive operation, or before substituting a minor target/wait for a supported decisive attack.
 
 ## Facts and unknowns
-Read public victory rules, hostile bases and remaining forces. Retreat, rehire and unknown holdings can prevent elimination. Loss estimates are heuristics, not battle outcomes.
+Check public victory rules, hostile bases and remaining forces. The last known base may not be the last existing one; retreat/rehire can prevent elimination. Repeated refusal is relevant only when supplied context records it.
 
 ## Alternatives to compare
-Compare defeating the main force, denying bases and preventing recapture by time to confirmed elimination. Include the enemy growth and extra operations caused by waiting. A cheap fight or mine matters only if it shortens that path.
+- Compare the named attack with a justified local goal.risk, offered reinforcement and waiting; absent reinforcement is unavailable/unknown.
+- Compare main-force defeat, base denial and recapture prevention by the path to confirmed elimination.
+- For a mine/weak target explain which elimination step it enables.
 
 ## Benefits, costs and risks
-When conquest stalls, compare a supported reinforcement-to-attack sequence with continued defensive accumulation. A costly decisive attack can be worth more than repeated safe preparation. Grant higher risk to that named goal when its concrete gain outweighs losses and base exposure; retain a viable surviving force or recovery base. Ordinary limits remain elsewhere.
+- Include enemy growth and extra operations caused by waiting. A costly decisive attack may beat repeated safe accumulation.
+- Grant higher goal.risk only when the named attack's gain outweighs casualties/base exposure; preserve ordinary policy.max_loss_ratio elsewhere.
+- State what success removes and which opponents/forces may remain. Protection of the last viable army/town or another active front can justify refusal; no attack is compulsory.
+- Waiting needs a concrete benefit and observable review condition; unknown passage exploration is not a visible-base assault.
 
 ## When to reconsider
-After each battle or capture, select the next remaining elimination step using fresh quotes. Judge preparation by the operation it opens, not accumulated wealth. Apply town_after_capture when extending defense.
+After battle/capture select the next remaining elimination step from fresh quotes. Judge preparation by the operation it opens. Use town_after_capture for renewed holds.
 
 ## Executor limits
-Use supported attacks, interception and garrisons. Town capture alone proves neither elimination nor a defeat countdown. Confirm final victory from native results.
+Use supported attack/interception goals. Heuristic losses are not outcomes; native terminal results confirm victory.
