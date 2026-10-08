@@ -11,7 +11,7 @@
     {
       "id": "global_strategy",
       "title": "Global strategy",
-      "applicability": "Initial or materially reconsidered saved victory course; milestones and stalled conquest.",
+      "applicability": "Choosing or revising the victory course, measurable stages and readiness; stalled conquest.",
       "file": "rules/global_strategy.md",
       "enabled": true
     },
@@ -25,7 +25,7 @@
     {
       "id": "offensive_operation",
       "title": "Offensive operation",
-      "applicability": "Next conquest objective; compare actors again after losses or transfers.",
+      "applicability": "Choosing a conquest target or breakthrough; compare continuations, actors and base exposure before acting and after passage opening, capture, losses or reinforcement.",
       "file": "rules/offensive_operation.md",
       "enabled": true
     },
@@ -39,14 +39,14 @@
     {
       "id": "recovery",
       "title": "Recovery",
-      "applicability": "Commander loss, retreat/surrender recovery, rebuilding or depleted mana.",
+      "applicability": "Restoring combat readiness after loss, retreat/surrender or rebuilding; comparing low-mana attack with recovery.",
       "file": "rules/recovery.md",
       "enabled": true
     },
     {
       "id": "defense",
       "title": "Defense",
-      "applicability": "Main-army recall or changed town protection; shortfall, uncertain opposition or several fronts.",
+      "applicability": "Protection affected by recall, departure, transfers or opening enemy access; return/interception timing, uncertain threats and several fronts.",
       "file": "rules/defense.md",
       "enabled": true
     },
@@ -60,7 +60,7 @@
     {
       "id": "exploration",
       "title": "Exploration",
-      "applicability": "Information/routes needed; key/border/passage choices or helper reassignment after confirmed loss.",
+      "applicability": "Missing information or routes, keys/borders/passages; scout/collector/helper assignment after confirmed helper loss.",
       "file": "rules/exploration.md",
       "enabled": true
     },

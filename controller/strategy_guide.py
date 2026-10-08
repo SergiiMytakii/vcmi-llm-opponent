@@ -97,7 +97,7 @@ class StrategyGuide(ReferenceBundle):
 
     def instructions(self):
         return ('\n# Strategy guide catalog\nStrategic choices: select available IDs '
-                'using the reference triggers in Native Instructions. Each read_strategy_guide '
+                'by matching decision questions to catalog applicability. Each read_strategy_guide '
                 'call accepts 1-3 IDs; continue with the normal reply in this conversation.\n'
                 + json.dumps(self.catalog,ensure_ascii=False,separators=(',',':')))
 

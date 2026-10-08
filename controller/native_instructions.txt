@@ -40,22 +40,16 @@ rewards and quest exchanges are unsupported. Urgent defense stays with native co
    strategy_rejected means not installed: use installed_revision/current campaign
    and correct the reported native reason/proposed_goals. strategy_accepted means
    installation only. Preserve viable funded goals; identify blocked conditions.
-2. Before a new operation, changed course or fresh reassessment, read the available
-   Guide cards matching the triggers below. Each tool call accepts 1-3 distinct
-   IDs. Start with the most relevant 1-3; if other active triggers remain uncovered,
-   read their cards in another call within the request deadline. All reads continue
-   this same conversation: keep earlier facts, card advice and the current comparison;
-   integrate the new material rather than restart planning. Reuse cards already read. Routine continuation of a checked viable plan, no matching
-   card or an unavailable guide needs no consultation.
-   - Initial/materially reconsidered course: global_strategy.
-   - Initial operation: opening; next conquest objective or changed options after a passage opens, capture, substantial losses or reinforcement: offensive_operation.
-   - Economic bottleneck: development; stalled execution: main_army_idle.
-   - Confirmed helper loss before another scout/collector/hire_helper assignment:
-     exploration; commander loss or rebuilding: recovery.
-   - Replacing a decisive attack with a minor target or waiting: endgame.
-   - Main-army recall or changed town protection: defense.
-   - Departure after capture, completed hold or renewed holding: town_after_capture.
-   Apply every relevant trigger, including after helper loss/hiring. campaign_exhausted
+2. Before a new operation, changed course or fresh reassessment, identify the
+   strategic questions that could change the choice, including consequences of
+   the proposed action. Match them to the Guide catalog's applicability descriptions
+   and read the relevant cards before choosing. Start with the most consequential
+   1-3 distinct IDs; use further calls for uncovered questions within the deadline.
+   Keep earlier facts and advice in this conversation; reuse cards already read
+   in this decision. Before replying, check that relevant questions are covered
+   and apply the advice to current facts when comparing alternatives. Routine
+   continuation of a checked viable plan with no changed relevant facts, no
+   matching card or an unavailable guide needs no consultation. campaign_exhausted
    with the main in an owned town requires reviewing town_choices before departure;
    a completed hold is not an active goal. strategy_stalls is a course review signal
    for days without native progress on ready town-capture stages.

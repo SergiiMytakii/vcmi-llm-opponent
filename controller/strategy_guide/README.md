@@ -26,12 +26,16 @@ instead of repeating it. Group related conditions and use one instruction per
 bullet. Mandatory safety/schema rules remain in Native Instructions. Explain
 strategy through the existing reason, alternatives and review fields, without
 duplicating a rationale across them.
-Native Instructions owns consultation triggers. Each call reads 1–3 enabled cards
+Native Instructions owns the consultation procedure; catalog applicability owns
+card selection. Match questions and prospective consequences to the catalog
+before choosing an operation, then check that relevant questions are covered.
+Keep applicability descriptions aligned with their cards; do not duplicate a
+per-card trigger list in Native Instructions. Each call reads 1–3 enabled cards
 through the read-only
 `nk3_strategy_guide.read_strategy_guide` MCP tool. The selected cards return inside
 the same conversation; one Codex process produces the final normal strategic reply.
 Only the catalog is included before tool use. Start with the most relevant cards;
-read additional cards when other active triggers remain uncovered, reusing cards
+read additional cards when other decision questions remain uncovered, reusing cards
 already read in the decision. The 1–3 limit is per call, not an aggregate quota.
 All reads share one model conversation; later reads add to earlier results and
 the current comparison. Ephemeral/no-history settings disable disk persistence,
