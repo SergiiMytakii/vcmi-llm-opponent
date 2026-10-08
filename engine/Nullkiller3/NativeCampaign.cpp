@@ -1,6 +1,7 @@
 #include "../Nullkiller2/StdInc.h"
 #include "NativeCampaign.h"
 #include "KnownLandApproach.h"
+#include "PlayerView.h"
 #include "NativeTrace.h"
 #include "Forecasts.h"
 #include "NativePersistence.h"
@@ -32,6 +33,7 @@
 #include "../Nullkiller2/Goals/Composition.h"
 #include "../../lib/CPlayerState.h"
 #include "../../lib/gameState/CGameState.h"
+#include "../../lib/gameState/InfoAboutArmy.h"
 #include "../../lib/entities/building/CBuilding.h"
 #include "../../lib/entities/hero/CHero.h"
 #include "../../lib/battle/CombatValue.h"
@@ -355,6 +357,7 @@ JsonNode projectTown(const NK2AI::Nullkiller & ai,const CGTownInstance * town,
     item["defense_value"].Integer() = town->getUpperArmy()->estimateCombatValue();
     item["army_units"]=armyUnits(town->getUpperArmy());
     item["daily_income"] = resourceValues(town->dailyIncome());
+    item["fort_level"].Integer()=town->fortLevel();
     item["hiring_options"].Vector();
     TResources hireCost;hireCost[EGameResID::GOLD]=GameConstants::HERO_GOLD_COST;
     const auto * visitor=town->getVisitingHero();
@@ -457,6 +460,11 @@ JsonNode projectVisibleObject(const NK2AI::Nullkiller & ai,const CGObjectInstanc
     item["kind"].String() = objectKind(object);
     item["visible"].Bool()=true;
     item["last_seen_day"].Integer()=ai.cc->getCalendar().getCurrentDay();
+    if(object->ID==Obj::TOWN)
+    {
+        InfoAboutTown info;
+        if(ai.cc->getTownInfo(object,info)) item["fort_level"].Integer()=info.fortLevel;
+    }
     if(const auto * resource=dynamic_cast<const CGResource *>(object))
     {
         item["resource_type"].String()=GameResID::encode(resource->resourceID().getNum());
@@ -1338,7 +1346,7 @@ struct VisibleLandGraph
     std::vector<KnownLandTile> land;
     JsonNode positions;
 };
-VisibleLandGraph visibleLandGraph(NK2AI::Nullkiller & ai,const JsonNode & world,
+VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & world,
     const std::function<std::string(const CGObjectInstance *)> & objectReference)
 {
     VisibleLandGraph graph;graph.positions.Vector();
@@ -1378,6 +1386,39 @@ VisibleLandGraph visibleLandGraph(NK2AI::Nullkiller & ai,const JsonNode & world,
                     && view.checkForVisitableDir(next->first,position))
                     land[id].neighbors.push_back(next->second);
     return graph;
+}
+JsonNode ordinaryStopExposure(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target,
+    const JsonNode & world,const VisibleLandGraph & graph,bool allThreats)
+{
+    if(!hero) return JsonNode();
+    CGPath ownPath;JsonNode nodes;nodes.Vector();
+    const bool ownRoute=ai.getPathsInfo(hero)->getPath(ownPath,target,EPathfindingLayer::LAND);
+    if(ownRoute && ownPath.nodes.size()>1)
+        for(auto step=ownPath.nodes.rbegin()+1;step!=ownPath.nodes.rend();++step)
+        {
+            // Native blocking visits leave the hero on the predecessor tile.
+            nodes.Vector().push_back(ordinaryStopNode(coordinate(step->coord),step->turns,step->action,
+                step->layer==EPathfindingLayer::LAND));
+        }
+    return scoutStopExposure(coordinate(hero->visitablePos()),nodes,ownRoute,world,graph.land,graph.positions,allThreats);
+}
+JsonNode pathStopExposure(const NK2AI::Nullkiller & ai,const NK2AI::AIPath & path,const JsonNode & world,
+    const VisibleLandGraph & graph)
+{
+    const auto * hero=path.targetHero;
+    if(!hero) return JsonNode();
+    CGPath ownPath;JsonNode nativeWaypoints,playerWaypoints;nativeWaypoints.Vector();playerWaypoints.Vector();
+    const bool ownRoute=ai.getPathsInfo(hero)->getPath(ownPath,path.targetTile(),EPathfindingLayer::LAND);
+    for(auto node=path.nodes.rbegin();node!=path.nodes.rend();++node)
+    { JsonNode item;item["position"]=coordinate(node->coord);item["turn"].Integer()=node->turns;nativeWaypoints.Vector().push_back(item); }
+    for(auto node=ownPath.nodes.rbegin();node!=ownPath.nodes.rend();++node)
+    { JsonNode item;item["position"]=coordinate(node->coord);item["turn"].Integer()=node->turns;playerWaypoints.Vector().push_back(item); }
+    const bool ordinary=ownRoute && path.exchangeCount<=1
+        && std::all_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node) {
+            return node.targetHero==hero && !node.specialAction && node.layer==EPathfindingLayer::LAND;
+        }) && scoutRouteCorresponds(nativeWaypoints,playerWaypoints);
+    if(ordinary) return ordinaryStopExposure(ai,hero,path.targetTile(),world,graph,false);
+    return scoutStopExposure(coordinate(hero->visitablePos()),JsonNode(),false,world,graph.land,graph.positions);
 }
 JsonNode enemyApproaches(const JsonNode & world,const VisibleLandGraph & graph)
 {
@@ -1421,15 +1462,6 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
         const auto paths=ai.pathfinder->getPathInfo(position,false);
         for(const auto * hero:ai.cc->getHeroesInfo())
         {
-            CGPath ownPath;JsonNode routeNodes;routeNodes.Vector();
-            const bool ownRoute=!(frontier || area) || ai.getPathsInfo(hero)->getPath(ownPath,position,EPathfindingLayer::LAND);
-            if((frontier || area) && ownRoute && ownPath.nodes.size()>1)
-                for(auto step=ownPath.nodes.rbegin()+1;step!=ownPath.nodes.rend();++step)
-                {
-                    JsonNode node;node["position"]=coordinate(step->coord);node["turn"].Integer()=step->turns;
-                    node["interaction"].Bool()=step->action!=EPathNodeAction::NORMAL || step->layer!=EPathfindingLayer::LAND;
-                    routeNodes.Vector().push_back(node);
-                }
             for(const auto & path:paths)
             {
                 if(path.targetHero!=hero || !path.heroArmy || path.getFirstBlockedAction()) continue;
@@ -1469,28 +1501,7 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
 
                 arrival["army_value"].Integer()=path.heroArmy->estimateCombatValue();
                 arrival["fighting_strength_estimate"].Integer()=path.getHeroStrength();
-                if(frontier || area)
-                {
-                    // Native paths compress ordinary tiles into waypoints.
-                    // Every retained waypoint must agree, in movement order,
-                    // with the player route used by ordinary native movement.
-                    JsonNode nativeWaypoints,playerWaypoints;nativeWaypoints.Vector();playerWaypoints.Vector();
-                    for(auto node=path.nodes.rbegin();node!=path.nodes.rend();++node)
-                    {
-                        JsonNode waypoint;waypoint["position"]=coordinate(node->coord);waypoint["turn"].Integer()=node->turns;
-                        nativeWaypoints.Vector().push_back(waypoint);
-                    }
-                    for(auto node=ownPath.nodes.rbegin();node!=ownPath.nodes.rend();++node)
-                    {
-                        JsonNode waypoint;waypoint["position"]=coordinate(node->coord);waypoint["turn"].Integer()=node->turns;
-                        playerWaypoints.Vector().push_back(waypoint);
-                    }
-                    const bool ordinary=ownRoute && path.exchangeCount<=1
-                        && std::all_of(path.nodes.begin(),path.nodes.end(),[&](const auto & node) {
-                            return node.targetHero==hero && !node.specialAction && node.layer==EPathfindingLayer::LAND;
-                        }) && scoutRouteCorresponds(nativeWaypoints,playerWaypoints);
-                    arrival["end_turn_exposure"]=scoutStopExposure(coordinate(hero->visitablePos()),routeNodes,ordinary,world,landGraph.land,landGraph.positions);
-                }
+                arrival["end_turn_exposure"]=pathStopExposure(ai,path,world,landGraph);
                 if(std::find(result.Vector().begin(),result.Vector().end(),arrival)==result.Vector().end()) result.Vector().push_back(arrival);
             }
         }
@@ -2361,8 +2372,76 @@ void NativeCampaign::recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstanc
             return;
         }
 }
+JsonNode NativeCampaign::helperMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const
+{
+    if(!hero) return JsonNode();
+    const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
+    auto refOf=[&](const CGObjectInstance * object) {
+        const auto found=aliases.find(std::to_string(object->id.getNum()));
+        return found==aliases.end() ? std::string() : externalai::objectReference(found->second);
+    };
+    const auto ref=refOf(hero);
+    bool helper=ai.heroManager->getHeroRoleOrDefaultInefficient(hero)==NK2AI::HeroRole::SCOUT;
+    for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector())
+        if(assignment["hero_ref"].String()==ref) helper=assignment["role"].String()!="main";
+    if(!helper) return JsonNode();
+    const auto graph=visibleLandGraph(ai,world,refOf);
+    const auto exposure=ordinaryStopExposure(ai,hero,target,world,graph,true);
+    auto review=helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions);
+    if(!review.isNull()) { review["hero_ref"].String()=ref;review["target_position"]=coordinate(target); }
+    return review;
+}
+void NativeCampaign::reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2AI::Goals::TGoalVec & tasks)
+{
+    // Planner-thread collection follows parallel, read-only priority evaluation.
+    // Priority passes may contain only named tasks; retain pending native choices
+    // until the arbiter receives fresh evidence for them.
+    std::function<void(const NK2AI::Goals::TSubgoal &,int)> inspect=[&](const auto & item,int depth) {
+        if(depth>16 || !item->strategicGoalID.empty()) return;
+        if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
+            for(const auto & child:composition->decompose(nullptr)) inspect(child,depth+1);
+        if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
+            for(const auto & node:chain->getPath().nodes)
+            {
+                const auto review=helperMoveReview(ai,node.targetHero,node.coord);
+                if(!review.isNull())
+                {
+                    auto & current=helperSafetyReviews[review["hero_ref"].String()];
+                    if(current.isNull() || review.toCompactString()<current.toCompactString()) current=review;
+                }
+            }
+    };
+    for(const auto & task:tasks) inspect(task,0);
+}
+void NativeCampaign::checkHelperMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target)
+{
+    if(!executingGoal().empty()) return;
+    // Own movement can reveal enemies between nodes of the same chain.
+    if(ai.playerView) ai.playerView->refresh();
+    observe(ai);
+    const auto review=helperMoveReview(ai,hero,target);
+    if(!review.isNull())
+    {
+        helperSafetyReviews[review["hero_ref"].String()]=review;
+        throw NK2AI::cannotFulfillGoalException("Automatic helper approach requires a strategic choice");
+    }
+}
 float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
 {
+    if(task->strategicGoalID.empty())
+    {
+        std::function<bool(const NK2AI::Goals::TSubgoal &,int)> automaticAllowed=[&](const auto & item,int depth) {
+            if(depth>16) return false;
+            if(!item->strategicGoalID.empty()) return true;
+            if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
+                for(const auto & child:composition->decompose(nullptr)) if(!automaticAllowed(child,depth+1)) return false;
+            if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
+                for(const auto & node:chain->getPath().nodes)
+                    if(!helperMoveReview(ai,node.targetHero,node.coord).isNull()) return false;
+            return true;
+        };
+        if(!automaticAllowed(task,0)) return 0;
+    }
     // Ordinary policy covers every native path; a model grant applies only
     // to its named actor and exact operation endpoint.
     if(!campaign.plan().isNull())

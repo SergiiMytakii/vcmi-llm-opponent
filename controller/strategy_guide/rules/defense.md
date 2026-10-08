@@ -4,7 +4,7 @@
 When town exposure or defenders change; protecting valuable/last bases or allocating several fronts.
 
 ## Facts and unknowns
-Check town income, stock/buildings, walls, troops, role, remaining bases/victory, separate threats and own return routes. critical_towns is policy. Bought troops or a conditional returning main do not prove lasting stationary defense. Threat sums are scenarios; unknown ETA implies neither safety nor indefinite holding.
+Check town income, stock/buildings, walls, troops, role, remaining bases/victory, separate threats and own return routes. critical_towns is policy. Bought troops or a conditional returning main do not prove lasting stationary defense. A force shortfall against summed enemy armies does not prove defense impossible. Compare individual threats, fortifications, reinforcement and counterattack. Unknown ETA implies neither safety nor indefinite holding.
 
 ## Alternatives to compare
 Compare funded stock, retaining/detaching force, other defenders, supported return/interception and pressure. For late reinforcement, consider reinforce_hero to a nearer defender; compare meeting and recipient arrival, compatible stacks, force floors and fresh delivery/arrival quotes. Allocate force once; not every town is critical. Gold buys no absent stock. Before splitting forces or departing a threatened town, compare consolidation for a counterattack, town defense and continued offense. Depart only when a concrete gain, considering timing and consequences, outweighs the risk of losing the town. Unconfirmed threats alone do not justify main-army recall.

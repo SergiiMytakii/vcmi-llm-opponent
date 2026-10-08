@@ -85,15 +85,29 @@ for(const auto status:{"no_complete_visible_land_connection","neutral_encounter_
 }
 ''')
 
-    def test_open_current_approach_keeps_defense_and_uses_route_length(self):
+    def test_distant_open_approach_is_not_an_urgent_defense_deadline(self):
         self.proof(r'''
 auto world=json(R"({"day":3,"enemy_players":[1],"objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[2,0,0],"last_seen_day":3,"army_interval":{"upper":10000}}],"towns":[{"ref":"town","position":[0,0,0],"defense_value":200}],"heroes":[],"enemy_approaches":[{"source_ref":"enemy","target_ref":"town","status":"no_visible_neutral_barrier_on_known_land_connection","known_land_steps":81}],"forecasts":{"routes":[]}})");
 world["visible_objects"]=world["objects"];
 world["forecasts"]["threats"]=forecastThreats(world);
-require(world["forecasts"]["threats"][0]["advance_scenario_day"].Integer()==5);
+require(world["forecasts"]["threats"][0]["assessment"].String()=="observed_open_approach");
+require(world["forecasts"]["threats"][0]["advance_scenario_day"].isNull());
+require(world["forecasts"]["threats"][0]["earliest_possible_day"].isNull());
+CampaignState campaign;auto result=forecastDefenses(world,campaign);
+require(result[0]["status"].String()=="no_observed_front");
+require(result[0]["scenario_deadline_day"].isNull());
+require(result[0]["unconfirmed_threats"].Vector().size()==1);
+''')
+
+    def test_adjacent_legal_enemy_approach_keeps_local_defense(self):
+        self.proof(r'''
+auto world=json(R"({"day":3,"enemy_players":[1],"objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[1,0,0],"last_seen_day":3,"army_interval":{"upper":10000}}],"towns":[{"ref":"town","position":[0,0,0],"defense_value":200}],"heroes":[],"enemy_approaches":[{"source_ref":"enemy","target_ref":"town","status":"no_visible_neutral_barrier_on_known_land_connection","known_land_steps":1}],"forecasts":{"routes":[]}})");
+world["visible_objects"]=world["objects"];world["forecasts"]["threats"]=forecastThreats(world);
+require(world["forecasts"]["threats"][0]["advance_scenario_day"].Integer()==3);
+require(world["forecasts"]["threats"][0]["earliest_possible_day"].isNull());
 CampaignState campaign;auto result=forecastDefenses(world,campaign);
 require(result[0]["status"].String()=="insufficient_current_force");
-require(result[0]["scenario_deadline_day"].Integer()==5);
+require(result[0]["scenario_deadline_day"].Integer()==3);
 world["objects"][0]["army_interval"]["upper"]=JsonNode();
 world["forecasts"]["threats"]=forecastThreats(world);
 require(forecastDefenses(world,campaign)[0]["status"].String()=="unbounded_opposition");

@@ -37,6 +37,19 @@ class StrategicCandidatesTest(unittest.TestCase):
         return {'world':world,'plan':{'goals':[],'policy':{'max_loss_ratio':.25,'critical_towns':['home']}},
             'coverage':coverage,'memory':{'known_objects':[]}}
 
+    def test_visible_foreign_town_fortification_survives_both_overview_modes(self):
+        for compact in (True, False):
+            data=self.fixture(0)
+            data['compact']=compact
+            data['world']['visible_objects']=[{'ref':'enemy-town','kind':'town',
+                'owner':0,'visible':True,'position':[4,4,0],'fort_level':3,
+                'details':{'goldIncome':9999,'hallLevel':3},'stock':[999]}]
+            overview=self.call(data)['overview']
+            town=next(o for o in overview['objects'] if o['ref']=='enemy-town')
+            self.assertEqual(town['fort_level'],3)
+            self.assertNotIn('details',town)
+            self.assertNotIn('stock',town)
+
     def test_mod_scoped_income_configuration_is_plain_json_on_the_model_wire(self):
         data=self.fixture(0)
         data['configured_income_bonus']={'gold':200,'wood':100,'ore':100,'crystal':200,'gems':200,'sulfur':200,'mercury':200}

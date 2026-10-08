@@ -140,6 +140,18 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
+    world["helper_safety_reviews"].Vector();
+    for(const auto & [ref,review]:helperSafetyReviews.Struct())
+    {
+        const CGHeroInstance * actor=nullptr;
+        for(const auto * hero:ai.cc->getHeroesInfo())
+            if(resolve(ai,JsonNode(ref))==hero) actor=hero;
+        const auto & target=review["target_position"];
+        const auto fresh=actor ? helperMoveReview(ai,actor,int3(target[0].Integer(),target[1].Integer(),target[2].Integer())) : JsonNode();
+        if(fresh.isNull()) continue;
+        world["helper_safety_reviews"].Vector().push_back(fresh);
+        result.push_back({"helper_safety:"+ref,fresh.toCompactString(),true,true,actionable,false});
+    }
     const auto intentSignals=strategicIntentSignals(persisted["strategic_intent"],world,actionable);
     result.insert(result.end(),intentSignals.begin(),intentSignals.end());
     const auto checkpoint=allocationCheckpointSignals(campaign,world,persisted["checkpoint_baseline"],actionable);
@@ -266,6 +278,7 @@ bool NativeCampaign::reviewIdleArmy(NK2AI::Nullkiller & ai)
     ai.updateState();
     world["main_army_idle"]=mainArmyIdle(campaign,world);
     logAi->info("NK3_IDLE %s",world["main_army_idle"].toCompactString());
+    if(!helperSafetyReviews.isNull() && !helperSafetyReviews.Struct().empty()) return reviewStrategy(ai,true);
     if(!idleArmyNeedsReview(world["main_army_idle"])) return false;
     if(repairOwnHeroObstruction(ai)) return true;
     return reviewStrategy(ai,true);
@@ -340,7 +353,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     // Every strategic request gets a fresh token limit. Saved walltime and
     // addressed facts still gate admission; the token ledger only tracks usage.
     request["budget"]["tokens"].Integer() = strategicRequestTokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview","strategy_stalls"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview","strategy_stalls","helper_safety_reviews"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
@@ -438,6 +451,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
                 if(defense["status"].String()=="unbounded_opposition"
                     || defense["status"].String()=="insufficient_current_force")
                     arbiter.resolved(defenseSignal(defense,true));
+            helperSafetyReviews=JsonNode();
             recordCheckpointBaseline(); // New goals/reserves own the next review's comparison.
         }
     }

@@ -1220,7 +1220,7 @@ index c2adab572..f266db38d 100644
  					return;
  
  				blockers.push_back(item.task);
-@@ -216,8 +229,24 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+@@ -216,8 +229,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
  
  	for(const TSubgoal & task : tasks)
  	{
@@ -1239,6 +1239,7 @@ index c2adab572..f266db38d 100644
 +
 +	if(strategicCampaign)
 +	{
++		strategicCampaign->reviewAutomaticTasks(*this,tasks);
 +		const auto best = std::max_element(tasks.begin(), tasks.end(), [](const auto & a, const auto & b) {
 +			return nullkiller3::prefersTask(*b->asTask(), *a->asTask());
 +		});
@@ -1272,7 +1273,7 @@ index c2adab572..f266db38d 100644
  Nullkiller::EvaluationContextMap Nullkiller::buildEvaluationContexts(const TGoalVec & tasks) const
  {
  	std::vector<std::optional<EvaluationContext>> contexts(tasks.size());
-@@ -264,22 +312,27 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
+@@ -264,22 +312,28 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
  			for(size_t i = r.begin(); i != r.end(); i++)
  			{
  				const auto & task = tasks[i];
@@ -1288,6 +1289,7 @@ index c2adab572..f266db38d 100644
  			}
  		}
  	);
++	if(strategicCampaign) strategicCampaign->reviewAutomaticTasks(*this,tasks);
  
 -	std::ranges::sort(
 -		tasks,
@@ -1938,6 +1940,15 @@ index 2a9973de3..839586c46 100644
  		HeroPtr heroPtr(hero, aiGw->cc.get());
  
  		if(!heroPtr.isVerified())
+@@ -313,6 +317,8 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
+ 					try
+ 					{
++						if(aiGw->nullkiller->strategicCampaign)
++							aiGw->nullkiller->strategicCampaign->checkHelperMove(*aiGw->nullkiller,hero,node->coord);
+ 						if(moveHeroToTile(aiGw, hero, node->coord))
+ 						{
+ 							continue;
+ 						}
 diff --git a/AI/Nullkiller2/Goals/RecruitHero.cpp b/AI/Nullkiller2/Goals/RecruitHero.cpp
 index d93ba3ed6..34afa021f 100644
 --- a/AI/Nullkiller2/Goals/RecruitHero.cpp

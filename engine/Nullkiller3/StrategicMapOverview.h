@@ -132,7 +132,7 @@ inline JsonNode strategicMapOverview(const JsonNode & world,const JsonNode & int
         // contains public production/artifact effects and town development facts.
         if(!detailed && priority(object)>=3) continue;
         JsonNode item;
-        for(const auto * field:{"ref","kind","owner","position","visible","stale","not_seen_at_last_position","last_seen_day","army_value","army_interval","visited","key_color","key_owned","resource_type","production_per_day","resource_visibility"})
+        for(const auto * field:{"ref","kind","owner","position","visible","stale","not_seen_at_last_position","last_seen_day","army_value","army_interval","visited","key_color","key_owned","resource_type","production_per_day","resource_visibility","fort_level"})
             if(!object[field].isNull()) item[field]=object[field];
         if(object["visible"].Bool()) item["last_seen_day"]=world["day"];
         if(detailed)

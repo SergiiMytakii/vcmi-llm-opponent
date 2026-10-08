@@ -587,14 +587,16 @@ JsonNode forecastThreats(const JsonNode & world)
             threat["latest_possible_day"]=JsonNode();
             threat["advance_scenario_day"]=JsonNode();
             threat["delay_scenario_day"]=JsonNode();
-            if(visible && age==0 && open)
+            // A legal adjacent approach proves local exposure without guessing enemy movement.
+            // An open distant route supplies no defensive deadline.
+            if(visible && age==0 && open && approach["known_land_steps"].isNumber()
+                && approach["known_land_steps"].Integer()<=1)
             {
-                const auto advance=approach["known_land_steps"].Integer()/40;
-                threat["advance_scenario_day"].Integer()=world["day"].Integer()+advance;
-                threat["delay_scenario_day"].Integer()=world["day"].Integer()+advance+1;
+                threat["advance_scenario_day"]=world["day"];
+                threat["delay_scenario_day"].Integer()=world["day"].Integer()+1;
             }
             threat["redirect_scenario_day"]=JsonNode();
-            threat["assumptions"].String()="Only a currently visible enemy with an established unguarded land connection receives an advance/delay scenario, using known route length and 40 tiles/day. This is not an ETA, movement bound or attack intent. Historical, guarded and unconfirmed approaches require new evidence, not preventive main-army holding. Fog, water and spells remain unknown.";
+            threat["assumptions"].String()="Only a currently visible enemy on a legal adjacent unguarded land connection receives a local advance/delay scenario. Distant open connections have unknown timing and do not impose urgent defense. This is not an ETA, movement bound or attack intent. Historical, guarded and unconfirmed approaches require new evidence, not preventive main-army holding. Fog, water and spells remain unknown.";
             result.Vector().push_back(threat);
         }
     }

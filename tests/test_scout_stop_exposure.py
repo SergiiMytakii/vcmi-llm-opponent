@@ -32,6 +32,37 @@ int main() {
             self.assertEqual(compiled.returncode,0,compiled.stderr)
             subprocess.run([str(binary)],check=True,capture_output=True,text=True)
 
+    def test_helper_approach_needs_a_model_choice_but_collection_away_stays_automatic(self):
+        self.proof(r'''
+std::vector<KnownLandTile> land(13);
+JsonNode positions;positions.Vector();
+for(size_t i=0;i<land.size();++i) {
+ positions.Vector().push_back(json("["+std::to_string(i)+",0,0]"));
+ if(i) land[i].neighbors.push_back(i-1);
+ if(i+1<land.size()) land[i].neighbors.push_back(i+1);
+}
+auto world=json(R"({"enemy_players":[1],"visible_objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[12,0,0],"army_interval":{"lower":10000,"upper":15000}}]})");
+auto origin=json("[0,0,0]");
+auto route=json(R"([{"position":[3,0,0],"turn":0}])");
+route.Vector().push_back(ordinaryStopNode(json("[4,0,0]"),0,EPathNodeAction::BLOCKING_VISIT,true));
+auto exposure=scoutStopExposure(origin,route,true,world,land,positions,true);
+auto review=helperStopReview(origin,107,exposure,land,positions);
+require(!review.isNull());
+require(review["stop_positions"]==json("[[3,0,0]]"));
+require(review["enemy_movement_unknown"].Bool());
+require(helperStopReview(origin,20000,exposure,land,positions).isNull());
+land[9].neutralGuards={"screen"};
+exposure=scoutStopExposure(origin,json(R"([{"position":[3,0,0],"turn":0}])"),true,world,land,positions,true);
+require(helperStopReview(origin,107,exposure,land,positions).isNull());
+land[9].neutralGuards.clear();
+origin=json("[3,0,0]");
+route=json(R"([{"position":[0,0,0],"turn":0}])");
+route.Vector().push_back(ordinaryStopNode(json("[1,0,0]"),0,EPathNodeAction::BLOCKING_VISIT,true));
+exposure=scoutStopExposure(origin,route,true,world,land,positions,true);
+require(helperStopReview(origin,107,exposure,land,positions).isNull());
+require(helperStopReview(origin,107,scoutStopExposure(origin,json("[]"),false,world,land,positions,true),land,positions).isNull());
+''')
+
     def test_multiday_stop_is_current_turn_position_with_visible_enemy_context(self):
         self.proof(r'''
 auto world=json(R"({"enemy_players":[1],"visible_objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[2,0,0],"army_interval":{"lower":500,"upper":1000}}]})");
