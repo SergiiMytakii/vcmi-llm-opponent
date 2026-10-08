@@ -9,6 +9,7 @@ Check commander_options: hero_multiplier, hero_combat_value, mana, movement and 
 ## Alternatives to compare
 - First recover an offered own retreated/surrendered hero before its tavern slot is replaced. Compare skills, equipment and legal funded hiring gates.
 - Then compare safe capture, reinforcement then dependent capture, preservation and purposeful scouting from the newly observed state.
+- Before a hard battle with low mana, compare attacking now with an overnight stop in a reachable owned town with a mage guild: travel time, restored spell readiness, expected losses and exposure.
 - With unknown follow-up quotes, make funded reinforcement the concrete task and reassess after handoff; helpers may scout/collect.
 
 ## Benefits, costs and risks
