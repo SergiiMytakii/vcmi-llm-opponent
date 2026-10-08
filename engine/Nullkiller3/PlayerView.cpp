@@ -201,7 +201,8 @@ JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance
         if(!callback.getTownInfo(object, info)) return result;
         army = info.army;
     }
-    else if(const auto * armed = dynamic_cast<const CArmedInstance *>(object)) army = InfoAboutArmy(armed, false).army;
+    else if(const auto * armed = dynamic_cast<const CArmedInstance *>(object))
+        army = InfoAboutArmy(armed, object->ID == Obj::MONSTER).army;
     else
     {
         result["status"].String() = "not_armed";
@@ -214,10 +215,19 @@ JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance
     static constexpr int64_t high[] = {0,4,9,19,49,99,249,499,999,0};
     int64_t minimum=0, maximum=0, midpoint=0;
     bool bounded=true;
+    const bool exactNeutral = object->ID == Obj::MONSTER && army.isDetailed;
+    if(exactNeutral) result["stacks"].Vector();
     for(const auto & [slot, stack] : army)
     {
         const auto count=stack.getCount();
         const int64_t value=LIBRARY->creh->getCombatValue().getAIValue(stack.getType());
+        if(exactNeutral)
+        {
+            JsonNode observed;
+            observed["creature_id"].Integer() = stack.getType()->getId().getNum();
+            observed["count"].Integer() = count;
+            result["stacks"].Vector().push_back(observed);
+        }
         if(army.isDetailed) { minimum+=value*count; maximum+=value*count; midpoint+=value*count; }
         else if(count>=1 && count<=9)
         {
@@ -231,7 +241,9 @@ JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance
     result["lower"].Integer()=minimum;
     result["estimate"].Integer()=midpoint;
     if(bounded) result["upper"].Integer()=maximum;
-    result["basis"].String()="UI creature counts and public creature AI values; enemy combat bonuses and intentions unknown";
+    result["basis"].String()=exactNeutral
+        ? "Exact currently visible neutral creature counts and public creature AI values; not a battle simulation or loss guarantee"
+        : "UI creature counts and public creature AI values; enemy combat bonuses and intentions unknown";
     return result;
 }
 uint64_t observedArmyStrength(const CCallback & callback, const CGObjectInstance * object)

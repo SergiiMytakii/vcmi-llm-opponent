@@ -92,9 +92,10 @@ class StrategicVisibilityTest(unittest.TestCase):
                 launch=json.loads((run/'launch.json').read_text())
                 self.assertTrue(launch['cleanup_complete']);self.assertTrue(launch['protected_files_unchanged'])
                 self.assertTrue(json.loads((run/'report.json').read_text())['assignment_matches'])
-            for name in ('hidden','hidden_insert','hidden_remove','same_category'):
+            for name in ('hidden','hidden_insert','hidden_remove'):
                 self.assertEqual(observations[name],observations['base'],mode+': '+name+' '+str(output))
             self.assertNotEqual(observations['different_category'],observations['base'])
+            self.assertNotEqual(observations['same_category'],observations['base'])
             results[mode]=observations
         (output/'comparison.json').write_text(json.dumps(results,indent=2))
 

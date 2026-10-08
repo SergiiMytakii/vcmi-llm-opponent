@@ -50,7 +50,7 @@ def first_movement(records):
 @unittest.skipUnless(sys.platform == 'darwin' and os.environ.get('VCMI_NK3_NATIVE_CONFIG'),
                      'requires a separate Nullkiller3 build and private native fixture')
 class Nullkiller3NativeTest(unittest.TestCase):
-    def test_hidden_world_and_same_visible_category_preserve_rankings_and_commands_after_movement(self):
+    def test_hidden_world_preserves_commands_but_visible_neutral_counts_change_evidence(self):
         source = Path(os.environ['VCMI_NK3_NATIVE_CONFIG']).resolve()
         config = json.loads(source.read_text())
         output = Path(tempfile.mkdtemp(prefix='nk3-visibility-', dir=ROOT / '.build/playtests'))
@@ -117,13 +117,15 @@ class Nullkiller3NativeTest(unittest.TestCase):
         self.assertEqual(len(results), len(variants()), 'one or more native runs failed: ' + str(output))
         visible_guard=next(o for o in results['base'][0]['visible_objects'] if o['type']==54 and o['position'][0]==9)
         interval=visible_guard['army_interval']
-        # Public horde category spans 100..249 pikemen. The same pinned runtime
-        # measures a known owned 100-pikeman garrison as 8,900 troop value.
-        self.assertEqual(interval['lower'],8900,'visible enemy bounds use a different troop-value unit')
-        self.assertEqual(interval['upper'],22161,'visible enemy upper bound understates the public category')
-        for name in ('hidden', 'hidden_insert', 'hidden_remove', 'same_category'):
+        # The fixture has 150 pikemen at 89 troop value each, now exact.
+        self.assertEqual(interval['status'],'exact_observed')
+        self.assertEqual(interval['stacks'],[{'creature_id':0,'count':150}])
+        self.assertEqual(interval['lower'],13350)
+        self.assertEqual(interval['upper'],13350)
+        for name in ('hidden', 'hidden_insert', 'hidden_remove'):
             self.assertEqual(results[name], results['base'], str(output) + ': ' + name)
-        # A changed visible quantity category must alter the planner's evidence.
+        # Exact visible counts differ even within the same UI category.
+        self.assertNotEqual(results['same_category'], results['base'], str(output))
         self.assertNotEqual(results['different_category'], results['base'], str(output))
 
 
