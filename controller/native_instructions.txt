@@ -120,6 +120,11 @@ Every depends_on ID names a goal in this returned plan; dependencies are acyclic
 Completed old-plan goals are not implicit dependencies. Independent goals continue
 when others are blocked. Parallel goals cannot share an actor or reinforcement
 donor; sequential jobs depend on the earlier goal, including collection then defense.
+Two mine captures by the same hero must form a chain: recruit -> mine A -> mine B;
+making both captures depend only on recruitment still assigns parallel jobs.
+preserve_force is a timed job, not a passive safety annotation for capture_target.
+For capture after preservation, make capture depend on preservation; for capture
+now, use the quoted army minimum/loss limit instead of a concurrent hold goal.
 
 Count each physical army_holder_ref pool once, including town/hero aliases.
 Reinforcement from town T aliased to hero H conflicts with H's defense unless it
@@ -139,6 +144,9 @@ cannot reserve projected force before recruitment. Do not add target_owned goals
 for already-owned mines/towns. Resource reserves cannot exceed current funds,
 even for future construction. Goals spend their own reserves; others release only
 on observed completion, cancellation or confirmed deadline/ownership failure.
+A building costing 10000 with 9905 currently available may be a future funded
+goal, but its current gold reserve must be at most 9905 (and share that pool with
+all other reserves). Future income belongs to the forecast, not today's reserve.
 
 Fund construction/recruitment/hiring from current quotes. resource_calendar shares
 funds and stock; quantity forecasts are alternatives, not jointly spendable pools.

@@ -119,6 +119,11 @@ JsonNode strategicBasis(const JsonNode & world)
 JsonNode preparationScope(const JsonNode & world,const CampaignState & campaign)
 {
     JsonNode scope;scope["actors"].Vector();scope["targets"].Vector();scope["needs"].Vector();
+    scope["requires_review"].Bool()=false;
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+        if(campaign.statuses()[goal["id"].String()]["state"].String()=="completed")
+            for(const auto & dependent:campaign.plan()["goals"].Vector())
+                if(contains(dependent["depends_on"],goal["id"])) scope["requires_review"].Bool()=true;
     for(const auto & route:world["forecasts"]["routes"].Vector())
         for(const auto & arrival:route["own_arrivals"].Vector())
             if(arrival["army_loss_estimate"].isNumber() && arrival["army_loss_estimate"].Integer()==0

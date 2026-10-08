@@ -131,7 +131,10 @@ class NativeBackgroundTest(unittest.TestCase):
     def test_completed_prerequisite_and_expired_live_goal_require_review(self):
         case=fixture();old=copy.deepcopy(case['request']['campaign']['goals'][0]);old.update(id='later',building_id=2,depends_on=['old'])
         old['complete_when']['value']=2;case['request']['campaign']['goals'].append(old)
-        self.assertEqual(self.run_case(case)['reason'],'completed_prerequisite_requires_review')
+        result=self.run_case(case)
+        self.assertEqual(result['reason'],'completed_prerequisite_requires_review')
+        self.assertTrue(result['scope']['requires_review'])
+        self.assertFalse(self.run_case(fixture())['scope']['requires_review'])
         case=fixture();case['observed']['towns'][0]['buildings']=[]
         case['request']['campaign']['goals'][0]['deadline_day']=1
         self.assertEqual(self.run_case(case)['reason'],'invalid_carried_commitment')

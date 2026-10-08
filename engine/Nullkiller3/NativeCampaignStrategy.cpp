@@ -353,6 +353,9 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
     const bool strategicReview=std::any_of(decision.signals.begin(),decision.signals.end(),[](const auto & signal){return signal.question!="campaign_exhausted";});
     if(!strategicReview)
     {
+        // Routine preparation cannot rewrite dependencies on completed goals;
+        // own-turn review must resolve them before another model request.
+        if(scope["requires_review"].Bool()) return;
         std::set<std::string> assigned;
         for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector()) assigned.insert(assignment["hero_ref"].String());
         std::erase_if(scope["actors"].Vector(),[&](const auto & actor){return !assigned.count(actor.String());});
