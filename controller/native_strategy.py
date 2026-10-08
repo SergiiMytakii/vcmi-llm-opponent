@@ -25,7 +25,13 @@ def array(item, low=0, high=12):
 
 def references(request):
     world = request['observation']
-    return {item['ref'] for key in ('heroes', 'towns', 'objects', 'scouting_options') for item in world.get(key, [])} | set(world.get('frontiers', []))
+    return set(goal_objects(request)) | {item['ref'] for key in ('heroes', 'towns', 'scouting_options') for item in world.get(key, [])} | set(world.get('frontiers', []))
+
+
+def goal_objects(request):
+    """Current visible facts take precedence over remembered goal objects."""
+    world = request['observation']
+    return {item['ref']:item for key in ('objects', 'visible_objects') for item in world.get(key, [])}
 
 
 def strategic_objects(request):
@@ -42,6 +48,7 @@ def strategic_objects(request):
 
 def evidence(request):
     refs = campaign_evidence({**request, 'actions': []})
+    refs.extend('target:' + ref for ref in goal_objects(request))
     if 'goal_feedback' in request['observation']:
         refs.append('observation:goal_feedback')
     if 'offensive_preparation' in request['observation']:
@@ -245,7 +252,7 @@ def reply_schema(request):
         return {'type':'string','enum':sorted(set(values))}
     town_refs = [t['ref'] for t in world['towns']]
     own_refs = [*heroes,*town_refs]
-    objects = world['objects']
+    objects = list(goal_objects(request).values())
     targets = {
         'hire_helper':[t['ref'] for t in world['towns'] if any(c.get('can_recruit') is True for c in t.get('hiring_options',[]))],
         'develop_town':town_refs,
@@ -434,7 +441,7 @@ def validate_reply(request, reply, wire=False):
         if name not in goals or name in stack: raise ValueError('missing or cyclic dependency')
         for dep in goals[name]['depends_on']: visit(dep, stack|{name})
     for name in goals: visit(name,set())
-    by_ref = {o['ref']:o for o in request['observation']['objects']}
+    by_ref = goal_objects(request)
     hiring_costs=[0]*7
     hired_candidates=set()
     for g in goals.values():

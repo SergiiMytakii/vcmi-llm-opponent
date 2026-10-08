@@ -1117,7 +1117,7 @@ index 17f79e8f3..03b449dc7 100644
  	if(obj->tempOwner.isValidPlayer() && cb->getPlayerRelations(obj->tempOwner, aiNk->playerID) != PlayerRelations::ENEMIES) //owned or allied objects don't pose any threat
  		return 0;
 diff --git a/AI/Nullkiller2/Engine/Nullkiller.cpp b/AI/Nullkiller2/Engine/Nullkiller.cpp
-index c2adab572..f266db38d 100644
+index c2adab572..27fe95829 100644
 --- a/AI/Nullkiller2/Engine/Nullkiller.cpp
 +++ b/AI/Nullkiller2/Engine/Nullkiller.cpp
 @@ -9,6 +9,9 @@
@@ -1222,8 +1222,12 @@ index c2adab572..f266db38d 100644
  					return;
  
  				blockers.push_back(item.task);
-@@ -216,8 +229,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+@@ -214,10 +227,28 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+ 		return taskptr(Invalid());
+ 	}
  
++	if(strategicCampaign) strategicCampaign->reviewAutomaticTasks(*this,tasks);
++
  	for(const TSubgoal & task : tasks)
  	{
 -		if(task->asTask()->priority <= 0)
@@ -1241,7 +1245,6 @@ index c2adab572..f266db38d 100644
 +
 +	if(strategicCampaign)
 +	{
-+		strategicCampaign->reviewAutomaticTasks(*this,tasks);
 +		const auto best = std::max_element(tasks.begin(), tasks.end(), [](const auto & a, const auto & b) {
 +			return nullkiller3::prefersTask(*b->asTask(), *a->asTask());
 +		});
@@ -1249,7 +1252,7 @@ index c2adab572..f266db38d 100644
  	}
  
  	auto bestTask = *vstd::maxElementByFun(tasks, [](const Goals::TSubgoal& task) -> float
-@@ -228,6 +257,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
+@@ -228,6 +259,25 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
  	return taskptr(*bestTask);
  }
  
@@ -1275,7 +1278,7 @@ index c2adab572..f266db38d 100644
  Nullkiller::EvaluationContextMap Nullkiller::buildEvaluationContexts(const TGoalVec & tasks) const
  {
  	std::vector<std::optional<EvaluationContext>> contexts(tasks.size());
-@@ -264,22 +312,28 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
+@@ -264,22 +314,27 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(
  			for(size_t i = r.begin(); i != r.end(); i++)
  			{
  				const auto & task = tasks[i];
@@ -1291,7 +1294,6 @@ index c2adab572..f266db38d 100644
  			}
  		}
  	);
-+	if(strategicCampaign) strategicCampaign->reviewAutomaticTasks(*this,tasks);
  
 -	std::ranges::sort(
 -		tasks,
@@ -1311,7 +1313,7 @@ index c2adab572..f266db38d 100644
  
  	for(const TSubgoal & task : tasks)
  	{
-@@ -325,6 +378,7 @@ void Nullkiller::invalidatePathfinderData()
+@@ -325,6 +380,7 @@ void Nullkiller::invalidatePathfinderData()
  
  void Nullkiller::updateState()
  {
@@ -1319,7 +1321,7 @@ index c2adab572..f266db38d 100644
  	const auto start = std::chrono::high_resolution_clock::now();
  	auto startMethod = start;
  	std::map<std::string, uint64_t> methodToElapsedMs = {};
-@@ -336,6 +390,13 @@ void Nullkiller::updateState()
+@@ -336,6 +392,13 @@ void Nullkiller::updateState()
  	activeHero = nullptr;
  	setTargetObject(-1);
  	decomposer->reset();
@@ -1333,7 +1335,7 @@ index c2adab572..f266db38d 100644
  
  	buildAnalyzer->update();
  	methodToElapsedMs.emplace("buildAnalyzer->update", timeElapsed(startMethod));
-@@ -397,6 +458,7 @@ void Nullkiller::updateState()
+@@ -397,6 +460,7 @@ void Nullkiller::updateState()
  	startMethod = std::chrono::high_resolution_clock::now();
  	armyManager->update();
  	methodToElapsedMs.emplace("armyManager->update()", timeElapsed(startMethod));
@@ -1341,7 +1343,7 @@ index c2adab572..f266db38d 100644
  
  	if(const auto timeElapsedMs = timeElapsed(start); timeElapsedMs > 250)
  	{
-@@ -607,6 +669,7 @@ void Nullkiller::makeTurn()
+@@ -607,6 +671,7 @@ void Nullkiller::makeTurn()
  		reserveRequiredTownDefenders();
  
  		tasks.clear();
@@ -1349,7 +1351,15 @@ index c2adab572..f266db38d 100644
  		decompose(tasks, sptr(CaptureObjectsBehavior()), 1);
  		decompose(tasks, sptr(ClusterBehavior()), MAX_DEPTH);
  		decompose(tasks, sptr(DefenceBehavior()), MAX_DEPTH);
-@@ -641,11 +704,16 @@ void Nullkiller::makeTurn()
+@@ -617,6 +682,7 @@ void Nullkiller::makeTurn()
+ 		if(!isOpenMap())
+ 			decompose(tasks, sptr(ExplorationBehavior()), MAX_DEPTH);
+ 
++		if(strategicCampaign) strategicCampaign->reviewAutomaticTasks(*this,tasks);
+ 		const auto evaluationContexts = buildEvaluationContexts(tasks);
+ 		TTaskVec selectedTasks;
+ 		int prioOfTask = 0;
+@@ -641,11 +707,16 @@ void Nullkiller::makeTurn()
  			}
  		}
  
@@ -1370,7 +1380,7 @@ index c2adab572..f266db38d 100644
  		bool hasAnySuccess = false;
  		if(selectedTasks.empty())
  		{
-@@ -727,6 +795,12 @@ void Nullkiller::makeTurn()
+@@ -727,6 +798,12 @@ void Nullkiller::makeTurn()
  			{
  				if(!executeTask(selectedTask))
  				{
@@ -1383,7 +1393,7 @@ index c2adab572..f266db38d 100644
  					lockTaskHeroes(selectedTask, HeroLockedReason::HERO_CHAIN);
  					const bool hasRemainingTasks = selectedTaskIndex + 1 < selectedTasks.size();
  					const auto failureAction = chooseTaskFailureAction(hasAnySuccess, hasRemainingTasks, hasUnlockedHeroWithMovement());
-@@ -744,15 +818,18 @@ void Nullkiller::makeTurn()
+@@ -744,15 +821,18 @@ void Nullkiller::makeTurn()
  						break;
  					}
  
@@ -1403,7 +1413,7 @@ index c2adab572..f266db38d 100644
  			if(hasUnlockedHeroWithMovement())
  				logAi->debug("Pass %d: No worthwhile task was found at full scan depth. AI turn is complete.", pass);
  			else
-@@ -763,21 +840,41 @@ void Nullkiller::makeTurn()
+@@ -763,21 +843,41 @@ void Nullkiller::makeTurn()
  		}
  
  		for(const auto * heroInfo : cc->getHeroesInfo())
@@ -1446,7 +1456,7 @@ index c2adab572..f266db38d 100644
  
  		// TODO: Mircea: Should merge recruiting from DefenseBehavior
  		decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
-@@ -883,14 +980,20 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
+@@ -883,14 +983,20 @@ bool Nullkiller::hasUnlockedHeroWithMovement() const
  
  bool Nullkiller::executeTask(const Goals::TTask & task)
  {
@@ -1467,7 +1477,7 @@ index c2adab572..f266db38d 100644
  		task->accept(aiGw);
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
-@@ -898,20 +1001,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
+@@ -898,20 +1004,47 @@ bool Nullkiller::executeTask(const Goals::TTask & task)
  	{
  		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
  	}
@@ -1516,7 +1526,7 @@ index c2adab572..f266db38d 100644
  	freeRes.positive();
  	return freeRes;
  }
-@@ -923,6 +1053,7 @@ void Nullkiller::lockResources(const TResources & res)
+@@ -923,6 +1056,7 @@ void Nullkiller::lockResources(const TResources & res)
  
  std::shared_ptr<const CPathsInfo> Nullkiller::getPathsInfo(const CGHeroInstance * h) const
  {

@@ -1344,6 +1344,17 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         }
         world["objects"].Vector().push_back(object);
     }
+    // Bounded memory can omit an object that is still visible. Keep current
+    // targets available to native admission as well as to the model schema.
+    for(const auto & object:world["visible_objects"].Vector())
+    {
+        auto & objects=world["objects"].Vector();
+        const auto remembered=std::find_if(objects.begin(),objects.end(),[&](const auto & item) {
+            return item["ref"]==object["ref"];
+        });
+        if(remembered==objects.end()) objects.push_back(object);
+        else *remembered=object;
+    }
     applyBattleObservations();
     applyForceObservations();
     if(!executionActive && !persisted["pending_native_task"].isNull())
@@ -1450,11 +1461,12 @@ VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & 
     return graph;
 }
 JsonNode ordinaryStopExposure(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target,
-    const JsonNode & world,const VisibleLandGraph & graph,bool allThreats)
+    const JsonNode & world,const VisibleLandGraph & graph,bool allThreats,const CPathsInfo * paths=nullptr)
 {
     if(!hero) return JsonNode();
     CGPath ownPath;JsonNode nodes;nodes.Vector();
-    const bool ownRoute=ai.getPathsInfo(hero)->getPath(ownPath,target,EPathfindingLayer::LAND);
+    const bool ownRoute=(paths ? paths->getPath(ownPath,target,EPathfindingLayer::LAND)
+        : ai.getPathsInfo(hero)->getPath(ownPath,target,EPathfindingLayer::LAND));
     if(ownRoute && ownPath.nodes.size()>1)
         for(auto step=ownPath.nodes.rbegin()+1;step!=ownPath.nodes.rend();++step)
         {
@@ -2437,35 +2449,48 @@ void NativeCampaign::recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstanc
 JsonNode NativeCampaign::automaticMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const
 {
     if(!hero) return JsonNode();
+    return automaticMoveReviewer(ai)(hero,target);
+}
+std::function<JsonNode(const CGHeroInstance *,const int3 &)> NativeCampaign::automaticMoveReviewer(const NK2AI::Nullkiller & ai) const
+{
     const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
     auto refOf=[&](const CGObjectInstance * object) {
         const auto found=aliases.find(std::to_string(object->id.getNum()));
         return found==aliases.end() ? std::string() : externalai::objectReference(found->second);
     };
-    const auto ref=refOf(hero);
-    const auto & crossing=static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())];
-    if(crossing.isStruct()) {
-        JsonNode review;review["hero_ref"].String()=ref;review["target_position"]=coordinate(target);
-        review["reason"].String()="passage_crossing_requires_fresh_decision";
-        review["crossing"]=crossing;review["position"]=coordinate(hero->visitablePos());
-        review["review_day"]=world["day"]; // A failed wait may be reconsidered next turn, never retried in a loop.
+    auto graph=visibleLandGraph(ai,world,refOf);
+    // This reviewer lives only for one unchanged planning pass. Execution and
+    // strategy review construct a fresh reviewer after any world change.
+    return [this,&ai,refOf,graph=std::move(graph),paths=std::map<int,std::shared_ptr<const CPathsInfo>>{}]
+        (const CGHeroInstance * hero,const int3 & target) mutable -> JsonNode {
+        if(!hero) return JsonNode();
+        const auto ref=refOf(hero);
+        const auto & crossing=static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())];
+        if(crossing.isStruct()) {
+            JsonNode review;review["hero_ref"].String()=ref;review["target_position"]=coordinate(target);
+            review["reason"].String()="passage_crossing_requires_fresh_decision";
+            review["crossing"]=crossing;review["position"]=coordinate(hero->visitablePos());
+            review["review_day"]=world["day"]; // A failed wait may be reconsidered next turn, never retried in a loop.
+            return review;
+        }
+        bool helper=ai.heroManager->getHeroRoleOrDefaultInefficient(hero)==NK2AI::HeroRole::SCOUT;
+        for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector())
+            if(assignment["hero_ref"].String()==ref) helper=assignment["role"].String()!="main";
+        auto & heroPaths=paths[hero->id.getNum()];
+        if(!heroPaths) heroPaths=ai.getPathsInfo(hero);
+        const auto exposure=ordinaryStopExposure(ai,hero,target,world,graph,true,heroPaths.get());
+        auto review=helper ? helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions,graph.dailyMovement) : JsonNode();
+        if(review.isNull()) review=townStopReview(ref,coordinate(hero->visitablePos()),exposure,world,graph.land,graph.positions);
+        if(!review.isNull()) { review["hero_ref"].String()=ref;review["target_position"]=coordinate(target); }
         return review;
-    }
-    bool helper=ai.heroManager->getHeroRoleOrDefaultInefficient(hero)==NK2AI::HeroRole::SCOUT;
-    for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector())
-        if(assignment["hero_ref"].String()==ref) helper=assignment["role"].String()!="main";
-    const auto graph=visibleLandGraph(ai,world,refOf);
-    const auto exposure=ordinaryStopExposure(ai,hero,target,world,graph,true);
-    auto review=helper ? helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions,graph.dailyMovement) : JsonNode();
-    if(review.isNull()) review=townStopReview(ref,coordinate(hero->visitablePos()),exposure,world,graph.land,graph.positions);
-    if(!review.isNull()) { review["hero_ref"].String()=ref;review["target_position"]=coordinate(target); }
-    return review;
+    };
 }
 void NativeCampaign::reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2AI::Goals::TGoalVec & tasks)
 {
-    // Planner-thread collection follows parallel, read-only priority evaluation.
-    // Priority passes may contain only named tasks; retain pending native choices
-    // until the arbiter receives fresh evidence for them.
+    // Prepare on the planner thread before parallel, read-only priority evaluation.
+    // Retain pending safety questions until the arbiter receives fresh evidence.
+    automaticTaskReviews.clear();
+    auto reviewer=automaticMoveReviewer(ai);
     std::function<void(const NK2AI::Goals::TSubgoal &,int)> inspect=[&](const auto & item,int depth) {
         if(depth>16 || !item->strategicGoalID.empty()) return;
         if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
@@ -2473,7 +2498,10 @@ void NativeCampaign::reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2
         if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
             for(const auto & node:chain->getPath().nodes)
             {
-                const auto review=automaticMoveReview(ai,node.targetHero,node.coord);
+                const auto key=std::pair{node.targetHero ? node.targetHero->id.getNum() : -1,node.coord};
+                auto [entry,inserted]=automaticTaskReviews.try_emplace(key);
+                if(inserted) entry->second=reviewer(node.targetHero,node.coord);
+                const auto & review=entry->second;
                 if(!review.isNull())
                 {
                     auto & current=automaticSafetyReviews[review["hero_ref"].String()];
@@ -2526,7 +2554,7 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
                 for(const auto & child:composition->decompose(nullptr)) if(!automaticAllowed(child,depth+1)) return false;
             if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
                 for(const auto & node:chain->getPath().nodes)
-                    if(!automaticMoveReview(ai,node.targetHero,node.coord).isNull()) return false;
+                    if(!automaticTaskReviews.at({node.targetHero ? node.targetHero->id.getNum() : -1,node.coord}).isNull()) return false;
             return true;
         };
         if(!automaticAllowed(task,0)) return 0;

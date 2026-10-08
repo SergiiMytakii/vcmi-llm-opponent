@@ -46,6 +46,32 @@ def expand_schema(schema):
 
 
 class ResponseSchemaTest(unittest.TestCase):
+    def test_visible_ore_mine_can_be_selected_and_validated_as_a_resource_goal(self):
+        request, reply = self.request_and_reply()
+        request['observation']['visible_objects'] = [
+            dict(ref='object:80', kind='mine', owner=-1, visible=True, resource_type='ore')]
+        goal = reply['plan']['goals'][0]
+        goal.update(kind='secure_resource', actor_ref='object:0', target_ref='object:80',
+                    building_id=-1, required_capabilities=['land'],
+                    complete_when=dict(kind='target_owned', value=0))
+        reply['evidence_refs'] = ['target:object:80']
+        reply['assignments'] = [dict(hero_ref='object:0', role='main')]
+        result, _, _, _ = self.call(request, reply)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['plan']['goals'][0]['target_ref'], 'object:80')
+        # A remembered owner cannot override the current visible mine.
+        request['observation']['objects'].append(
+            dict(ref='object:80', kind='mine', owner=0, visible=False))
+        result, _, _, _ = self.call(request, reply)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for change in (dict(owner=0), dict(kind='artifact')):
+            with self.subTest(change=change):
+                invalid = copy.deepcopy(request)
+                invalid['observation']['visible_objects'][0].update(change)
+                result, _, _, _ = self.call(invalid, reply)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+
     def request_and_reply(self):
         request = strategic_request()
         request['observation']['visible_objects'] = [

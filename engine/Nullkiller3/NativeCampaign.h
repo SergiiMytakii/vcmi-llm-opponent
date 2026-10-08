@@ -8,6 +8,7 @@
 #include <chrono>
 #include <tuple>
 #include <exception>
+#include <functional>
 #include "../Nullkiller2/Goals/CGoal.h"
 #include "../../lib/ResourceSet.h"
 
@@ -35,6 +36,8 @@ class NativeCampaign
     JsonNode activeExecutionContext, activeBattleContext; // Transient, copied at battle start.
     JsonNode world;
     JsonNode automaticSafetyReviews; // Transient blocked automatic choices, keyed by own hero.
+    std::map<std::pair<int,int3>,JsonNode> automaticTaskReviews; // Read-only during parallel priority evaluation.
+    std::function<JsonNode(const CGHeroInstance *,const int3 &)> automaticMoveReviewer(const NK2AI::Nullkiller & ai) const;
     JsonNode automaticMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const;
     CampaignState campaign;
     std::string spendingGoal;
