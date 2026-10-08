@@ -8,7 +8,7 @@ Check armies, commander capabilities, routes, income, funds, building options an
 
 ## Alternatives to compare
 - Compare reachable expansion, independent scouting, income/troop production and funds for demonstrated defense.
-- Prioritize reachable sawmills/ore mines when wood/ore limits construction; weigh route risk and current income.
+- Secure nearby sawmills and ore mines in the first days, before distant pickups or optional visits, when native routes and losses are acceptable.
 - When decisive offense is distant, compare a productive town/recurring income with early attack; map size alone does not settle it.
 
 ## Benefits, costs and risks
