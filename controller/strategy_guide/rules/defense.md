@@ -1,24 +1,25 @@
 # Defense
 
 ## When useful
-When town exposure or defenders change; protecting valuable/last bases or allocating several fronts.
+When town exposure/defenders change or allocating fronts.
 
 ## Facts and unknowns
-Check town income, stock/buildings, walls, troops, role, remaining bases/victory, separate threats and own return routes. critical_towns is policy. Bought troops or a conditional returning main do not prove lasting stationary defense. A force shortfall against summed enemy armies does not prove defense impossible. Compare individual threats, fortifications, reinforcement and counterattack. Unknown ETA does not remove a visible open threat or justify indefinite holding.
+Check income, stock, walls, troops, bases, threats and return routes. critical_towns is policy. Purchases or a returning main do not prove stationary defense. Summed enemy armies do not prove defense impossible: compare threats individually, walls and reinforcement. Unknown ETA neither removes an open threat nor justifies indefinite holding.
 
 ## Alternatives to compare
-- Before recall, splitting or departure compare stationary defense, consolidation/counterattack and continued offense.
-- Compare funded recruitment, detachment, other defenders and supported return/interception. For late delivery, compare a nearer recipient's meeting and arrival quotes.
-- Compare conditional enemy approach days with own return/interception quotes. If return is later, choose protection, interception or an offensive gain worth losing the base.
+- Before departure/recall compare stationary defense, counterattack and continued offense.
+- Compare funded recruitment, detachment, defenders and return/interception. Late delivery needs nearer-recipient quotes.
+- If conditional enemy approach precedes own return, compare protection/interception with offensive gain worth losing the base.
 
 ## Benefits, costs and risks
-- Size stationary defense for observed weak raiders; weigh exposure to the enemy main against offensive gain instead of requiring a garrison that defeats it.
-- Prefer feasible initiative over speculative recall. An ongoing observed threat may justify protection; historical/guarded/missing approaches establish neither urgency nor safety.
-- Keep protection through departure, including prepare_garrison obligations after completion. The returning main is not also an independent attacker or stationary pool.
-- Keeping every town is not the objective. A token helper cannot stop the enemy main; clearing a neutral screen can open passage for both sides.
+- Size defense for weak raiders; weigh enemy-main exposure against offensive gain rather than requiring a winning garrison.
+- Prefer feasible initiative over speculative recall. Historical/guarded/missing approaches establish neither urgency nor safety.
+- Keep protection through departure, including completed prepare_garrison obligations. A returning main is not an independent attacker or stationary pool.
+- Keeping every town is not the objective. Token helpers cannot stop the enemy main; clearing neutral screens can open passage for both sides.
+- Renew a hold for a quoted reinforcement, recruitment, building or interception before its exit. Preserving today's force or awaiting an unspecified route adds no readiness; compare enemy income/growth during the wait.
 
 ## When to reconsider
-Recheck threats, stock, routes, ownership, transfers and departure. Compare again after the hold's exit condition changes. Use town_after_capture for renewed holds and endgame for decisive attack risk.
+Recheck threats, stock, routes and ownership at the exit. After base loss, reassess income/production and return assumptions; compare quoted recapture, pressure elsewhere and funded reinforcement. Holding the surviving town alone restores no lost production. Use town_after_capture for renewed holds and endgame for decisive risk.
 
 ## Executor limits
-Use current town choices and the common defense-output contract. A hero intended to remain needs an active defense goal; its role or completed preparation does not keep it stationary.
+Use town choices and the defense-output contract. Stationary defense needs an active goal, not a role or completed preparation.
