@@ -34,6 +34,29 @@ int main() {
             result=subprocess.run([str(binary)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
 
+    def test_unflaggable_monsters_screen_a_visible_enemy_without_forcing_a_hold(self):
+        self.proof(r'''
+for(const auto owner:{PlayerColor::UNFLAGGABLE,PlayerColor::NEUTRAL}) {
+ std::vector<KnownLandTile> land(3);
+ land[0].neighbors={1};land[1].neighbors={0,2};land[2].neighbors={1};
+ if(isNeutralMonsterGuard(Obj::MONSTER,owner)) land[1].neutralGuards={"visible-monster"};
+ auto approach=knownLandApproach(land,0,2);
+ require(approach["status"].String()=="neutral_encounter_required_on_known_land_connections");
+ require(approach["example_guard_refs"][0].String()=="visible-monster");
+ approach["source_ref"].String()="enemy";approach["target_ref"].String()="town";
+ auto world=json(R"({"day":1,"enemy_players":[1],"objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[2,0,0],"last_seen_day":1,"army_interval":{"upper":6400}}],"towns":[{"ref":"town","position":[0,0,0],"defense_value":5400}],"heroes":[],"forecasts":{"routes":[]}})");
+ world["visible_objects"]=world["objects"];world["enemy_approaches"].Vector().push_back(approach);
+ world["forecasts"]["threats"]=forecastThreats(world);
+ require(world["forecasts"]["threats"][0]["assessment"].String()=="guarded_approach");
+ require(world["forecasts"]["threats"][0]["advance_scenario_day"].isNull());
+ CampaignState campaign;auto defense=forecastDefenses(world,campaign);
+ require(defense[0]["status"].String()=="no_observed_front");
+ require(defense[0]["opposing_upper_sum"].Integer()==0);
+}
+require(!isNeutralMonsterGuard(Obj::MONSTER,PlayerColor(1)));
+require(!isNeutralMonsterGuard(Obj::MINE,PlayerColor::UNFLAGGABLE));
+''')
+
     def test_stale_unconnected_sighting_does_not_create_an_urgent_defense_front(self):
         self.proof(r'''
 auto world=json(R"({"day":11,"enemy_players":[1],"objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[4,5,0],"last_seen_day":9,"army_interval":{"upper":13603}}],"visible_objects":[],"towns":[{"ref":"town","position":[32,33,0],"defense_value":1515}],"heroes":[],"enemy_approaches":[],"forecasts":{"routes":[]}})");

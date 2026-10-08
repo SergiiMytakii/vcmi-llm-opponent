@@ -1353,7 +1353,7 @@ VisibleLandGraph visibleLandGraph(NK2AI::Nullkiller & ai,const JsonNode & world,
         if(!tile || !tile->isLand() || !tile->entrableTerrain() || (tile->blocked() && !tile->visitable())) continue;
         KnownLandTile cell;
         for(const auto * guard:view.getGuardingCreatures(position))
-            if(guard->ID==Obj::MONSTER && guard->getOwner()==PlayerColor::NEUTRAL)
+            if(isNeutralMonsterGuard(guard->ID,guard->getOwner()))
                 cell.neutralGuards.push_back(objectReference(guard));
         index.emplace(position,land.size());land.push_back(std::move(cell));
         graph.positions.Vector().push_back(coordinate(position));
@@ -1368,12 +1368,14 @@ VisibleLandGraph visibleLandGraph(NK2AI::Nullkiller & ai,const JsonNode & world,
         const auto cell=index.find(int3(pos[0].Integer(),pos[1].Integer(),pos[2].Integer()));
         if(cell!=index.end()) land[cell->second].neutralGuards.push_back(object["ref"].String());
     }
-    // Allow extra geometric edges rather than falsely proving a barrier from
-    // directional entrances or private opponent abilities. Unknown stays unknown.
+    // Use visible native entrance restrictions in both directions, as CMap does.
+    // Private opponent abilities and unseen bypasses remain unknown.
     for(const auto & [position,id]:index)
         for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx)
             if(dx || dy)
-                if(const auto next=index.find(position+int3(dx,dy,0));next!=index.end())
+                if(const auto next=index.find(position+int3(dx,dy,0));next!=index.end()
+                    && view.checkForVisitableDir(position,next->first)
+                    && view.checkForVisitableDir(next->first,position))
                     land[id].neighbors.push_back(next->second);
     return graph;
 }
@@ -1394,7 +1396,7 @@ JsonNode enemyApproaches(const JsonNode & world,const VisibleLandGraph & graph)
             if(target==index.end()) continue;
             auto approach=knownLandApproach(land,source->second,target->second);
             approach["source_ref"]=enemy["ref"];approach["target_ref"]=asset["ref"];
-            approach["assumptions"].String()="Currently visible land connectivity only; directional entrances and other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
+            approach["assumptions"].String()="Currently visible land connectivity with native directional entrances; other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
             result.Vector().push_back(approach);
         }
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include "json/JsonNode.h"
+#include "constants/EntityIdentifiers.h"
 #include <deque>
 #include <algorithm>
 #include <cstdlib>
@@ -10,6 +11,12 @@
 
 namespace nullkiller3
 {
+inline bool isNeutralMonsterGuard(Obj type,PlayerColor owner)
+{
+    // Monsters normally have UNFLAGGABLE ownership; neither neutral code is a player.
+    return type==Obj::MONSTER && (owner==PlayerColor::NEUTRAL || owner==PlayerColor::UNFLAGGABLE);
+}
+
 struct KnownLandTile
 {
     std::vector<size_t> neighbors;
@@ -98,7 +105,7 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
     JsonNode result;result["stop_positions"].Vector();result["visible_threats"].Vector();
     result["status"].String()="unknown";
     result["enemy_movement_unknown"].Bool()=true;
-    result["basis"].String()="Own current-turn stop only when the player-scoped ordinary route matches the native route; interruption, replanning and later orders can change it. Visible land connections ignore directional entrances and other armies; fog, water, spells and neutral battle outcomes remain unknown.";
+    result["basis"].String()="Own current-turn stop only when the player-scoped ordinary route matches the native route; interruption, replanning and later orders can change it. Visible land connections respect directional entrances but ignore other armies; fog, water, spells and neutral battle outcomes remain unknown.";
     result["coverage"].String()="At most three closest currently visible enemy heroes on the stop's level; other enemies and unseen movement remain unknown. Distances are not movement bounds or attack probabilities.";
     if(!ordinaryRoute) return result;
     auto stop=origin;
