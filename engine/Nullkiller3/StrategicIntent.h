@@ -96,7 +96,7 @@ inline bool validIntentSelection(const JsonNode & selected,const JsonNode * worl
                 if(kind=="target_owned" && (predicate["value"]!=(*world)["player"]
                     || (objectKind!="town" && objectKind!="mine" && intentOwnedObject(*world,"towns",predicate["target_ref"]).isNull()))) return false;
                 if(kind=="building_present" && objectKind!="town" && intentOwnedObject(*world,"towns",predicate["target_ref"]).isNull()) return false;
-                if(kind=="passage_explored" && objectKind!="subterranean_gate") return false;
+                if(kind=="passage_explored" && objectKind!="subterranean_gate" && objectKind!="portal") return false;
                 if(kind=="site_visited" && objectKind!="artifact" && objectKind!="scholar" && objectKind!="treasure_chest" && objectKind!="obelisk"
                     && objectKind!="keymaster_tent" && objectKind!="border_guard" && objectKind!="border_gate") return false;
             }

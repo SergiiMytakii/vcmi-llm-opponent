@@ -22,6 +22,8 @@ class PassageContractTest(unittest.TestCase):
         accepted=validate_reply(request,reply)
         self.assertEqual(accepted['plan']['goals'][0]['kind'],'explore_passage')
         self.assertEqual(accepted['plan']['goals'][0]['target_ref'],'entry')
+        valid_portal=copy.deepcopy(request);valid_portal['observation']['objects'][-1]['kind']='portal'
+        self.assertEqual(validate_reply(valid_portal,reply)['plan']['goals'][0]['kind'],'explore_passage')
         for change in ({'visible':False},{'kind':'other'},{'kind':'monolith'}):
             invalid=copy.deepcopy(request);invalid['observation']['objects'][-1].update(change)
             with self.subTest(change=change),self.assertRaises(ValueError):validate_reply(invalid,reply)

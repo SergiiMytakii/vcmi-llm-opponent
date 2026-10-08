@@ -4,7 +4,7 @@
 - A player's turn is part of a game day. In classic sequential play the next day begins after all players finish. Day renewal grants movement and owned-town/mine income. A seven-day week adds dwelling growth to recruitment stock on its first day; these creatures still need purchase and delivery.
 - Land movement allowance depends on the slowest creature in the army, plus hero bonuses. Terrain changes travel cost; roads lower it and Pathfinding reduces difficult-terrain penalties. An army entirely native to a terrain avoids its native-terrain penalty. Adventure movement and battle speed are different: a creature-speed artifact need not increase adventure travel.
 - A hero needs a boat for normal water travel. Classic embark/disembark consumes remaining movement.
-- A subterranean gate connects map levels; reaching its entrance does not reveal an unknown exit in advance.
+- A subterranean gate connects map levels; reaching its entrance does not reveal an unknown exit in advance. Monolith portals can connect positions on the same level: one-way entrances have no implied return path; two-way portals permit exit selection. An observed random exit does not prove it is the only exit.
 - Occupied neutral garrisons block their passage tile; empty posts are passable. Roaming neutrals can guard adjacent tiles. An encounter-required connection is not open; a guard beside the final hero/town does not itself prevent direct attack. Encounters may result in battle, flight or joining.
 
 ## Applicability and exceptions

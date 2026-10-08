@@ -1,5 +1,6 @@
 #pragma once
 #include "json/JsonNode.h"
+#include "ObservedPassages.h"
 #include "constants/EntityIdentifiers.h"
 #include "pathfinder/CGPathNode.h"
 #include <deque>
@@ -27,6 +28,19 @@ struct KnownLandTile
     std::vector<std::string> neutralGuards;
     std::vector<int64_t> movementCosts; // Visible road/base terrain cost, parallel to neighbors.
 };
+// Observed random exits are possible enemy approaches, never guaranteed own travel.
+inline void addKnownPassageEdges(std::vector<KnownLandTile> & land,const JsonNode & positions,const JsonNode & links,int64_t movementCost)
+{
+    if(!validObservedPassages(links) || movementCost<0) return;
+    for(const auto & link:links.Vector()) {
+        auto cell=[&](const JsonNode & p) { return size_t(std::find(positions.Vector().begin(),positions.Vector().end(),p)-positions.Vector().begin()); };
+        const auto from=cell(link["from"]),to=cell(link["to"]);
+        if(from>=land.size() || to>=land.size()) continue;
+        auto connect=[&](size_t a,size_t b) { land[a].neighbors.push_back(b);land[a].movementCosts.push_back(movementCost); };
+        connect(from,to);
+        if(passageLinkFrom(link,link["to"])) connect(to,from);
+    }
+}
 // Occupancy is a current physical constraint, not a predicted arrival.
 // Neutral encounters stay closed: yielding never authorizes a battle.
 inline bool knownLandConnection(const std::vector<KnownLandTile> & tiles,size_t source,size_t target,
@@ -100,7 +114,7 @@ inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_
             for(size_t i=0;i<tiles[at].neighbors.size();++i)
             {
                 const auto next=tiles[at].neighbors[i];const auto step=tiles[at].movementCosts[i];
-                if(next>=tiles.size() || step<=0 || step>dailyPoints
+                if(next>=tiles.size() || step<0 || step>dailyPoints
                     || (next!=target && !tiles[next].neutralGuards.empty())) continue;
                 Cost cost=spent+step<=dailyPoints ? Cost{turn,spent+step} : Cost{turn+1,step};
                 if(cost<costs[next]) { costs[next]=cost;pending.emplace(cost.first,cost.second,next); }
@@ -112,7 +126,7 @@ inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_
             scenario["turns"].Integer()=costs[target].first+1;
             scenario["daily_points"].Integer()=dailyPoints;
             scenario["status"].String()="conditional_direct_land_approach";
-            scenario["assumptions"].String()="Full turns at the fastest configured standard land allowance, no terrain penalty, visible road and diagonal costs. Direct travel without battles, other armies, detours or special movement. Private remaining movement, bonuses, intent and unseen alternatives are unknown; actual arrival can be earlier or later. Not an ETA or safety bound.";
+            scenario["assumptions"].String()="Full turns at the fastest configured standard land allowance, no terrain penalty, visible road and diagonal costs. Direct travel through known land and observed gate/portal connections without battles, other armies or detours. Random portal exits describe a possible approach, not a guaranteed arrival. Private remaining movement, bonuses, intent and unseen alternatives are unknown; actual arrival can be earlier or later. Not an ETA or safety bound.";
         }
     }
     // One example connection, not a claim that every listed guard is unavoidable.
@@ -153,7 +167,7 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
     result["status"].String()="unknown";
     result["enemy_movement_unknown"].Bool()=true;
     result["basis"].String()="Own current-turn stop only when the player-scoped ordinary route matches the native route; interruption, replanning and later orders can change it. Visible land connections respect directional entrances but ignore other armies; fog, water, spells and neutral battle outcomes remain unknown.";
-    result["coverage"].String()="At most three closest currently visible enemy heroes on the stop's level; other enemies and unseen movement remain unknown. Distances are not movement bounds or attack probabilities.";
+    result["coverage"].String()="At most three closest currently visible enemy heroes on the stop level or connected through observed passages; other enemies and unseen movement remain unknown. Distances are not movement bounds or attack probabilities.";
     if(!ordinaryRoute) return result;
     auto stop=origin;
     for(const auto & node:nodes.Vector())
@@ -174,7 +188,11 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
     {
         if(enemy["kind"].String()!="hero" || std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),enemy["owner"])==world["enemy_players"].Vector().end()) continue;
         const auto & position=enemy["position"];
-        if(position.Vector().size()!=3 || position[2]!=stop[2]) continue;
+        if(position.Vector().size()!=3) continue;
+        if(position[2]!=stop[2]) {
+            const auto from=cell(position),to=cell(stop);
+            if(from>=land.size() || to>=land.size() || knownLandApproach(land,from,to)["status"].String()=="no_complete_visible_land_connection") continue;
+        }
         JsonNode threat;threat["enemy_ref"]=enemy["ref"];threat["position"]=position;
         threat["tile_distance"].Integer()=std::max(std::abs(position[0].Integer()-stop[0].Integer()),std::abs(position[1].Integer()-stop[1].Integer()));
         threat["army_interval"]=enemy["army_interval"];
@@ -184,10 +202,10 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
         if(first["tile_distance"]!=second["tile_distance"]) return first["tile_distance"].Integer()<second["tile_distance"].Integer();
         return first["enemy_ref"].String()<second["enemy_ref"].String();
     });
-    result["visible_enemy_count_on_stop_level"].Integer()=threats.size();
+    result["visible_enemy_count_in_coverage"].Integer()=threats.size();
     result["omitted_visible_enemy_count"].Integer()=!allThreats && threats.size()>3 ? threats.size()-3 : 0;
     if(!allThreats && threats.size()>3) threats.resize(3);
-    if(allThreats) result["coverage"].String()="All currently visible enemy heroes on the stop level; unseen movement remains unknown.";
+    if(allThreats) result["coverage"].String()="All currently visible enemy heroes on the stop level or connected through observed passages; unseen movement remains unknown.";
     for(auto & threat:threats)
     {
         const auto from=cell(threat["position"]),to=cell(stop);

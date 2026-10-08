@@ -206,7 +206,7 @@ def validate_selected(request, selected, current=False):
         else:
             if target is None or actor is None or value != 0:raise ValueError('invalid strategic action predicate')
             if not current:
-                kind_expected=('subterranean_gate',) if kind=='passage_explored' else ('scholar','treasure_chest','obelisk','artifact','keymaster_tent','border_guard','border_gate')
+                kind_expected=('subterranean_gate','portal') if kind=='passage_explored' else ('scholar','treasure_chest','obelisk','artifact','keymaster_tent','border_guard','border_gate')
                 if actor not in heroes or objects.get(target,{}).get('kind') not in kind_expected:
                     raise ValueError('unsupported strategic action target')
     if any(c['milestone_id'] not in milestones for c in selected['reconsider_when']):
@@ -259,7 +259,7 @@ def reply_schema(request):
         'scout_area':[a['ref'] for a in world.get('scouting_options',[])],'preserve_force':town_refs,
         'visit_site':[o['ref'] for o in objects if visit_site_available(o)]
             +[g['target_ref'] for g in (request.get('campaign') or {}).get('goals',[]) if g['kind']=='visit_site' and world.get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'],
-        'explore_passage':[o['ref'] for o in objects if o.get('kind')=='subterranean_gate' and o.get('visible') is True]}
+        'explore_passage':[o['ref'] for o in objects if o.get('kind') in ('subterranean_gate','portal') and o.get('visible') is True]}
     supported_buildings = sorted({b['id'] for t in world['towns'] for b in t.get('building_options',[]) if b.get('supported') is True})
     completions = {'hire_helper':['helper_hired'],'develop_town':['building_present'],'secure_resource':['target_owned','reserve_at_least'],
                    'reinforce_hero':['army_at_least'],
@@ -462,7 +462,7 @@ def validate_reply(request, reply, wire=False):
             role=g['helper_role']
             valid=(role=='defender' and g['job_ref'] in own_towns
                    or role=='reinforcement' and g['job_ref'] in own_heroes
-                   or role=='scout' and (g['job_ref'] in known_scout or target.get('kind') in ('subterranean_gate','scholar','obelisk','treasure_chest'))
+                   or role=='scout' and (g['job_ref'] in known_scout or target.get('kind') in ('subterranean_gate','portal','scholar','obelisk','treasure_chest'))
                    or role=='collector' and target.get('kind') in ('mine','resource','treasure_chest'))
             if not valid:raise ValueError('helper_role_job_mismatch')
     if any(cost>available for cost,available in zip(hiring_costs,request['observation']['resources'])):

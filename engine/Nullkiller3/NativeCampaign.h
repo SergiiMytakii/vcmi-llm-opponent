@@ -23,7 +23,7 @@ namespace nullkiller3
 // not task completion, loss of the turn or a reason to lock the survivor.
 struct ExecutionReplanAfterCombat : std::exception
 {
-    const char * what() const noexcept override { return "Own combat result invalidated the current native task"; }
+    const char * what() const noexcept override { return "New own combat or passage observation invalidated the current native task"; }
 };
 // The one native planner owns intentions, observations and the transient
 // association of freshly built tasks with those intentions. No task is saved.
@@ -53,7 +53,7 @@ class NativeCampaign
     std::vector<int> completedResourceVisits;
     // Execution context is copied on the planner thread; callbacks use only
     // these mutex-protected values, never mutable campaign/persisted JSON.
-    JsonNode activePassageGoal;
+    JsonNode activePassageGoal, activeObservedPassages;
     int activePassageActor=-1, activePassageEntry=-1, activePassageDay=0;
     std::map<int, JsonNode> passageVisits;
     std::vector<JsonNode> completedPassageVisits;
@@ -65,7 +65,7 @@ class NativeCampaign
     void applySiteObservations(NK2AI::Nullkiller & ai);
     std::vector<JsonNode> completedBattles;
     void applyBattleObservations();
-    void applyPassageObservations();
+    void applyPassageObservations(NK2AI::Nullkiller & ai);
     std::atomic<int64_t> acceptedRevision{0};
     std::atomic<double> acceptedLossRatio{1};
     std::atomic<bool> replanAfterCombat{false};
@@ -135,6 +135,7 @@ public:
     NK2AI::Goals::TGoalVec generate(NK2AI::Nullkiller & ai, bool priorityPass, bool stabilizationOnly = false);
     float priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const;
     void reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2AI::Goals::TGoalVec & tasks);
+    void checkPassageMove(const CGHeroInstance * hero) const;
     void checkAutomaticMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target);
     std::string heroHireReason(const NK2AI::Nullkiller & ai, const CGTownInstance * town, const CGHeroInstance * candidate, const std::string & goalID = {}) const;
     void recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstance * town,const CGHeroInstance * candidate,const std::string & goalID);

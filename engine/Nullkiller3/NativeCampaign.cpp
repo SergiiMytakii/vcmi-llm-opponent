@@ -299,6 +299,9 @@ std::string objectKind(const CGObjectInstance * object)
     case Obj::RESOURCE: return "resource";
     case Obj::ARTIFACT: return "artifact";
     case Obj::SUBTERRANEAN_GATE: return "subterranean_gate";
+    case Obj::MONOLITH_ONE_WAY_ENTRANCE:
+    case Obj::MONOLITH_TWO_WAY: return "portal";
+    case Obj::MONOLITH_ONE_WAY_EXIT: return "portal_exit";
     case Obj::KEYMASTER: return "keymaster_tent";
     case Obj::BORDERGUARD: return "border_guard";
     case Obj::BORDER_GATE: return "border_gate";
@@ -461,6 +464,9 @@ JsonNode projectVisibleObject(const NK2AI::Nullkiller & ai,const CGObjectInstanc
     item["ref"].String() = ref;
     item["id"].Integer() = alias;
     item["kind"].String() = objectKind(object);
+    if(object->ID==Obj::MONOLITH_TWO_WAY) item["portal_direction"].String()="two_way";
+    else if(object->ID==Obj::MONOLITH_ONE_WAY_ENTRANCE) item["portal_direction"].String()="one_way_entrance";
+    else if(object->ID==Obj::MONOLITH_ONE_WAY_EXIT) item["portal_direction"].String()="exit_only";
     item["visible"].Bool()=true;
     item["last_seen_day"].Integer()=ai.cc->getCalendar().getCurrentDay();
     if(object->ID==Obj::TOWN)
@@ -564,7 +570,9 @@ NativeCampaign::NativeCampaign(const JsonNode & saved,const JsonNode & returnNam
             if(goal["kind"].String()=="explore_passage" && campaign.statuses()[goal["id"].String()]["state"].String()=="completed")
             {
                 const auto & receipt=static_cast<const JsonNode &>(persisted)["native_campaign"]["passage_completions"][goal["id"].String()];
-                recordObservedPassage(persisted["observed_passages"],receipt["from"],receipt["to"]);
+                if(receipt["kind"].String()=="portal")
+                    recordObservedPortal(persisted["observed_passages"],receipt["from"],receipt["to"],receipt["bidirectional"].Bool(),receipt["selectable"].Bool());
+                else recordObservedPassage(persisted["observed_passages"],receipt["from"],receipt["to"]);
             }
     restoreArbiter();
 }
@@ -758,9 +766,16 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
             }
             siteVisits[actor]=event;
         }
-        if(object && object->ID==Obj::SUBTERRANEAN_GATE)
+        if(object && (object->ID==Obj::SUBTERRANEAN_GATE || object->ID==Obj::MONOLITH_TWO_WAY || object->ID==Obj::MONOLITH_ONE_WAY_ENTRANCE))
         {
             JsonNode receipt;receipt["from"]=coordinate(object->visitablePos());
+            receipt["actor_id"].Integer()=actor;
+            receipt["channel"].Integer()=dynamic_cast<const CGTeleport *>(object)->channel.getNum();
+            if(object->ID!=Obj::SUBTERRANEAN_GATE) {
+                receipt["kind"].String()="portal";
+                receipt["bidirectional"].Bool()=object->ID==Obj::MONOLITH_TWO_WAY;
+                receipt["selectable"].Bool()=object->ID==Obj::MONOLITH_TWO_WAY;
+            }
             if(actor==activePassageActor && object->id.getNum()==activePassageEntry && !activePassageGoal.isNull())
             { receipt["goal"]=activePassageGoal;receipt["day"].Integer()=activePassageDay; }
             passageVisits[actor]=receipt;
@@ -792,10 +807,12 @@ void NativeCampaign::resourceVisit(const CGHeroInstance * hero, const CGObjectIn
         const auto passage=passageVisits.find(actor);
         if(passage!=passageVisits.end())
         {
-            if(passage->second["from"][2].Integer()!=hero->visitablePos().z)
+            if(passage->second["from"]!=coordinate(hero->visitablePos()))
             {
                 auto receipt=passage->second;receipt["to"]=coordinate(hero->visitablePos());
+                receipt["new_connection"].Bool()=!observedPassageKnown(activeObservedPassages,receipt["from"],receipt["to"]);
                 completedPassageVisits.push_back(receipt);
+                if(receipt["new_connection"].Bool()) replanAfterCombat=true; // Unwind the chain at the existing movement boundary.
             }
             passageVisits.erase(passage);
         }
@@ -830,13 +847,29 @@ void NativeCampaign::applySiteObservations(NK2AI::Nullkiller & ai)
     }
     endedSiteVisits.clear();
 }
-void NativeCampaign::applyPassageObservations()
+void NativeCampaign::applyPassageObservations(NK2AI::Nullkiller & ai)
 {
     std::lock_guard lock(visitMutex);
     for(const auto & receipt:completedPassageVisits)
     {
-        recordObservedPassage(persisted["observed_passages"],receipt["from"],receipt["to"]);
-        if(receipt["goal"].isStruct()) persisted["passage_receipts"][receipt["goal"]["id"].String()]=receipt;
+        const auto & pos=receipt["to"];
+        const int3 destination(pos[0].Integer(),pos[1].Integer(),pos[2].Integer());
+        if(!ai.cc->isVisible(destination)) continue;
+        bool confirmed=false;
+        for(const auto * object:ai.cc->getVisitableObjs(destination))
+            if(const auto * exit=dynamic_cast<const CGTeleport *>(object);exit && exit->isExit()
+                && exit->channel.getNum()==receipt["channel"].Integer()) confirmed=true;
+        if(!confirmed) continue;
+        if(receipt["kind"].String()=="portal")
+            recordObservedPortal(persisted["observed_passages"],receipt["from"],receipt["to"],receipt["bidirectional"].Bool(),receipt["selectable"].Bool());
+        else recordObservedPassage(persisted["observed_passages"],receipt["from"],receipt["to"]);
+        auto review=receipt;review.Struct().erase("actor_id");review.Struct().erase("channel");
+        review["day"].Integer()=ai.cc->getCalendar().getCurrentDay();
+        review["sequence"].Integer()=++persisted["passage_review_sequence"].Integer();
+        review["campaign_revision"]=campaign.plan()["revision"];
+        if(receipt["new_connection"].Bool())
+            persisted["passage_reviews"][std::to_string(receipt["actor_id"].Integer())]=review;
+        if(receipt["goal"].isStruct()) persisted["passage_receipts"][receipt["goal"]["id"].String()]=review;
     }
     completedPassageVisits.clear();
 }
@@ -1146,7 +1179,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
         completedResourceVisits.clear();
     }
     applySiteObservations(ai);
-    applyPassageObservations();
+    applyPassageObservations(ai);
     observeIntentProgress(); // Old exact-goal receipts must reach the course before pruning.
     world["confirmed_resource_pickups"].Vector();
     for(const auto & [ref, day] : persisted["confirmed_resource_pickups"].Struct())
@@ -1189,7 +1222,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     for(const auto * cap : {"teleport", "fly", "water_walk", "town_portal", "dimension_door"})
         world["unsupported_capabilities"].Vector().emplace_back(cap);
     world["movement_support"]["water"].String()="Current visible boats, known water tiles and legal embark/disembark. New sailing boats require an owned visible shipyard with all potential launch tiles visible, a current placement quote and available funds under the active goal. Summon/scuttle boat, airships, whirlpools and unobserved routes are unsupported.";
-    world["movement_support"]["passages"].String()="Observed_passages records real own subterranean crossings. Offered whole routes may cross these learned pairs only while both ends are visible gates; their arrival/loss estimates cover the entire offered known route. explore_passage may visit a visible entrance with an unknown exit; an entry-only quote does not estimate that unknown exit or onward travel. Unlearned channels, other teleport types and teleport spells remain unsupported.";
+    world["movement_support"]["passages"].String()="Observed_passages records own gate/portal crossings; portal links retain direction and exit choice support. Offered whole routes may cross these learned pairs only while both ends are visible compatible entrances/exits; their arrival/loss estimates cover the entire offered known route. explore_passage may visit a visible gate/portal entrance with an unknown exit; an entry-only quote does not estimate that unknown exit or onward travel. Observed random one-way exits are possible enemy routes, not guaranteed own routes. A newly observed connection/exit requires a fresh decision before further travel. Whirlpools and teleport spells remain unsupported.";
     // Complete own lists and visible sorting preserve aliases independently
     // of gaps or insertions in global hidden object IDs. Only this owner writes
     // the alias table; projections receive resolved identities and const facts.
@@ -1400,6 +1433,20 @@ VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & 
                     if(dx && dy) cost=static_cast<int64_t>(cost*std::sqrt(2.0));
                     land[id].movementCosts.push_back(cost);
                 }
+    JsonNode usablePassages;usablePassages.Vector();
+    for(const auto & link:world["observed_passages"].Vector()) {
+        auto visibleEndpoint=[&](const JsonNode & position,bool entrance) {
+            return std::any_of(world["visible_objects"].Vector().begin(),world["visible_objects"].Vector().end(),[&](const auto & object) {
+                if(object["position"]!=position || !object["visible"].Bool()) return false;
+                if(link["kind"].isNull()) return object["kind"].String()=="subterranean_gate";
+                if(link["bidirectional"].Bool()) return object["kind"].String()=="portal" && object["portal_direction"].String()=="two_way";
+                return entrance ? object["portal_direction"].String()=="one_way_entrance"
+                    : object["portal_direction"].String()=="exit_only";
+            });
+        };
+        if(visibleEndpoint(link["from"],true) && visibleEndpoint(link["to"],false)) usablePassages.Vector().push_back(link);
+    }
+    addKnownPassageEdges(land,graph.positions,usablePassages,0);
     return graph;
 }
 JsonNode ordinaryStopExposure(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target,
@@ -1452,7 +1499,7 @@ JsonNode enemyApproaches(const JsonNode & world,const VisibleLandGraph & graph)
             if(target==index.end()) continue;
             auto approach=knownLandApproach(land,source->second,target->second,graph.dailyMovement);
             approach["source_ref"]=enemy["ref"];approach["target_ref"]=asset["ref"];
-            approach["assumptions"].String()="Currently visible land connectivity with native directional entrances; other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
+            approach["assumptions"].String()="Currently visible land connectivity with native directional entrances; other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Observed gate/portal links are included; random exits describe possibilities. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
             result.Vector().push_back(approach);
         }
     }
@@ -1649,7 +1696,7 @@ void NativeCampaign::persist(NK2AI::Nullkiller & ai)
     // Publish confirmed crossings before any ordinary save can observe an
     // acknowledged task with its pending intent already removed.
     applySiteObservations(ai);
-    applyPassageObservations();
+    applyPassageObservations(ai);
     applyBattleObservations();
     applyForceObservations();
     observeIntentProgress();
@@ -2396,6 +2443,14 @@ JsonNode NativeCampaign::automaticMoveReview(const NK2AI::Nullkiller & ai,const 
         return found==aliases.end() ? std::string() : externalai::objectReference(found->second);
     };
     const auto ref=refOf(hero);
+    const auto & crossing=static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())];
+    if(crossing.isStruct()) {
+        JsonNode review;review["hero_ref"].String()=ref;review["target_position"]=coordinate(target);
+        review["reason"].String()="passage_crossing_requires_fresh_decision";
+        review["crossing"]=crossing;review["position"]=coordinate(hero->visitablePos());
+        review["review_day"]=world["day"]; // A failed wait may be reconsidered next turn, never retried in a loop.
+        return review;
+    }
     bool helper=ai.heroManager->getHeroRoleOrDefaultInefficient(hero)==NK2AI::HeroRole::SCOUT;
     for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector())
         if(assignment["hero_ref"].String()==ref) helper=assignment["role"].String()!="main";
@@ -2428,9 +2483,17 @@ void NativeCampaign::reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2
     };
     for(const auto & task:tasks) inspect(task,0);
 }
+void NativeCampaign::checkPassageMove(const CGHeroInstance * hero) const
+{
+    if(hero && static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())].isStruct())
+        throw NK2AI::cannotFulfillGoalException("Passage crossing requires an admitted fresh decision before movement");
+}
 void NativeCampaign::checkAutomaticMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target)
 {
-    if(!executingGoal().empty()) return;
+    if(!hero) return;
+    // Crossing reviews apply to named operations as well as automatic moves.
+    const auto & crossing=static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())];
+    if(!executingGoal().empty() && !crossing.isStruct()) return;
     // Own movement can reveal enemies between nodes of the same chain.
     if(ai.playerView) ai.playerView->refresh();
     observe(ai);
@@ -2443,6 +2506,17 @@ void NativeCampaign::checkAutomaticMove(NK2AI::Nullkiller & ai,const CGHeroInsta
 }
 float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
 {
+    std::function<bool(const NK2AI::Goals::TSubgoal &,int)> crossingPending=[&](const auto & item,int depth) {
+        if(depth>16) return true;
+        if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
+            for(const auto & child:composition->decompose(nullptr)) if(crossingPending(child,depth+1)) return true;
+        if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
+            for(const auto & node:chain->getPath().nodes)
+                if(node.targetHero && static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(node.targetHero->id.getNum())].isStruct()) return true;
+        return false;
+    };
+    const auto & passageReviews=static_cast<const JsonNode &>(persisted)["passage_reviews"];
+    if(!passageReviews.isNull() && !passageReviews.Struct().empty() && crossingPending(task,0)) return 0;
     if(task->strategicGoalID.empty())
     {
         std::function<bool(const NK2AI::Goals::TSubgoal &,int)> automaticAllowed=[&](const auto & item,int depth) {
@@ -2790,6 +2864,7 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
     }
     {
         std::lock_guard lock(visitMutex);
+        activeObservedPassages=observedPassages();
         activePassageGoal=JsonNode();activePassageActor=activePassageEntry=-1;activePassageDay=0;
         activeSiteGoal=JsonNode();activeSiteActor=activeSiteObject=-1;activeSiteDay=0;
         activeArtifactVisit=JsonNode();
@@ -2828,7 +2903,7 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
             {
                 const auto * actor=dynamic_cast<const CGHeroInstance *>(resolve(ai,item["actor_ref"]));
                 const auto * entry=resolve(ai,item["target_ref"]);
-                if(actor && actor->getOwner()==ai.playerID && entry && entry->ID==Obj::SUBTERRANEAN_GATE
+                if(actor && actor->getOwner()==ai.playerID && entry && (entry->ID==Obj::SUBTERRANEAN_GATE || entry->ID==Obj::MONOLITH_TWO_WAY || entry->ID==Obj::MONOLITH_ONE_WAY_ENTRANCE)
                     && ai.cc->isVisible(entry->visitablePos()))
                 {
                     activePassageGoal=item;activePassageActor=actor->id.getNum();activePassageEntry=entry->id.getNum();
@@ -2871,7 +2946,7 @@ void NativeCampaign::beginExecution(NK2AI::Nullkiller & ai,const NK2AI::Goals::T
 void NativeCampaign::endExecution(NK2AI::Nullkiller & ai,const std::string & acknowledgment)
 {
     applySiteObservations(ai); // Consume own pickup evidence before pending intent is removed.
-    applyPassageObservations();
+    applyPassageObservations(ai);
     observeIntentProgress();
     const auto pending=persisted["pending_native_task"];
     if(!pending.isNull())

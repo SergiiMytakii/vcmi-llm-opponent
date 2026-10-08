@@ -170,13 +170,14 @@ current routes, protected floors, legal packing and confirmed handoff.
 - secure_resource: mine uses target_owned value=observation.player. A pile uses
   reserve_at_least: confirmed pickup of that target AND gold at least value;
   value=0 means no additional gold floor. Piles disappear rather than become owned.
-- explore_passage: visible subterranean_gate, owned actor and quoted entrance arrival;
+- explore_passage: visible subterranean_gate or portal entrance, owned actor and quoted entrance arrival;
   building_id=-1, required_capabilities=["land"]. passage_explored value=0 needs
   this goal/actor's crossing receipt. Entrance arrival does not confirm crossing.
-  Exit/danger/onward routes are unknown. observed_passages records own crossings;
-  quotes may use learned connections while both ends are visible, including full
-  route costs/losses. Two visible gates do not establish a connection. Other
-  teleporter types and global teleport/spell planning remain unsupported.
+  observed_passages stores confirmed gate pairs or directed portal links. Selectable
+  known exits support own routes; random observed exits support possible threats only.
+  A new connection/exit requires an admitted fresh decision before further movement, including
+  named operations. Unavailable/failed review keeps movement blocked. Unknown links
+  do not establish safety. Whirlpools and teleport spells remain unsupported.
 - hire_helper: owned town's hiring_options candidate with can_recruit=true.
   Set candidate_ref, helper_role and known job_ref: scout for frontier/viewpoint/
   site/gate, collector for mine/resource/chest, reinforcement for owned hero,

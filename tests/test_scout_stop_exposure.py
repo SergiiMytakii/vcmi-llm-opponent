@@ -32,6 +32,39 @@ int main() {
             self.assertEqual(compiled.returncode,0,compiled.stderr)
             subprocess.run([str(binary)],check=True,capture_output=True,text=True)
 
+    def test_directed_portal_and_gate_connections_expose_cross_level_enemy(self):
+        self.proof(r'''
+JsonNode positions=json("[[0,0,0],[1,0,0],[1,0,1],[2,0,1]]");
+std::vector<KnownLandTile> land(4);
+land[0].neighbors={1};land[0].movementCosts={100};
+land[1].neighbors={0};land[1].movementCosts={100};
+land[2].neighbors={3};land[2].movementCosts={100};
+land[3].neighbors={2};land[3].movementCosts={100};
+JsonNode links;
+require(recordObservedPortal(links,positions[2],positions[1],false,false));
+require(validObservedPassages(links));
+require(!passageLinkFrom(links[0],positions[1]));
+require(observedPassageKnown(links,positions[2],positions[1]));
+require(!observedPassageKnown(links,positions[1],positions[2]));
+require(!passageLinkFrom(links[0],positions[2],true));
+addKnownPassageEdges(land,positions,links,0);
+require(knownLandApproach(land,3,0)["status"].String()=="no_visible_neutral_barrier_on_known_land_connection");
+require(knownLandApproach(land,0,3)["status"].String()=="no_complete_visible_land_connection");
+auto world=json(R"({"enemy_players":[1],"visible_objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[2,0,1],"army_interval":{"lower":30000}}]})");
+auto exposure=scoutStopExposure(positions[1],json("[{\"position\":[0,0,0],\"turn\":0,\"interaction\":false}]"),true,world,land,positions);
+require(exposure["visible_threats"].Vector().size()==1);
+require(exposure["visible_threats"][0]["enemy_ref"].String()=="enemy");
+JsonNode gates;require(recordObservedPassage(gates,positions[1],positions[2]));
+require(validObservedPassages(gates));
+require(observedPassageKnown(gates,positions[2],positions[1]));
+require(!observedPassageKnown(gates,positions[2],positions[0]));
+require(passageLinkFrom(gates[0],positions[1],true));require(passageLinkFrom(gates[0],positions[2],true));
+JsonNode portals;require(recordObservedPortal(portals,positions[0],positions[1],true,true));
+require(recordObservedPortal(portals,positions[0],positions[3],true,true));
+require(portals.Vector().size()==2); // One observed exit never erases another.
+require(passageLinkFrom(portals[0],positions[1],true));
+''')
+
     def test_helper_approach_needs_a_model_choice_but_collection_away_stays_automatic(self):
         self.proof(r'''
 std::vector<KnownLandTile> land(13);
@@ -120,7 +153,7 @@ auto positions=json("[[0,0,0],[1,0,0],[2,0,0],[1,1,0]]");
 std::vector<KnownLandTile> land(4);land[0].neighbors={1};land[1].neighbors={0,2};land[2].neighbors={1};
 land[1].neutralGuards={"neutral"};
 auto result=scoutStopExposure(json("[0,0,0]"),json("[]"),true,world,land,positions);
-require(result["visible_enemy_count_on_stop_level"].Integer()==4);
+require(result["visible_enemy_count_in_coverage"].Integer()==4);
 require(result["omitted_visible_enemy_count"].Integer()==1);
 require(result["visible_threats"].Vector().size()==3);
 require(result["visible_threats"][0]["enemy_ref"].String()=="disconnected");

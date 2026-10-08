@@ -401,13 +401,15 @@ index 02b0d31bf..f2406d5d9 100644
  		if(obj && obj->tempOwner == playerID)
  			ret.push_back(obj);
  	}
-@@ -1065,6 +1243,7 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
+@@ -1065,6 +1243,9 @@ std::vector<const CGObjectInstance *> AIGateway::getFlaggedObjects() const
  
  bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  {
 +	checkStrategicTurn();
  	if(!heroPtr.isVerified())
  		throw cannotFulfillGoalException("Hero was lost!");
++	if(nullkiller->strategicCampaign)
++		nullkiller->strategicCampaign->checkPassageMove(heroPtr.get());
  
 @@ -1079,6 +1258,9 @@ bool AIGateway::moveHeroToTile(const int3 dst, const HeroPtr & heroPtr)
  	auto afterMovementCheck = [&]() -> void

@@ -79,7 +79,7 @@ class CampaignState
                 && integer(value[0],0,100000) && integer(value[1],0,100000) && integer(value[2],0,255);
         };
         return receipt.isStruct() && sameGoal(receipt["goal"],goal) && integer(receipt["day"],1,goal["deadline_day"].Integer())
-            && position(receipt["from"]) && position(receipt["to"]) && receipt["from"][2]!=receipt["to"][2];
+            && position(receipt["from"]) && position(receipt["to"]) && receipt["from"]!=receipt["to"];
     }
     static bool siteProved(const JsonNode & goal,const JsonNode & receipt)
     {

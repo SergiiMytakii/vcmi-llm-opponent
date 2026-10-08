@@ -1124,6 +1124,23 @@ int main(int argc,char ** argv)
         require(restoredDelivery.statuses()["deliver"]["state"].String()=="completed","confirmed handoff was lost on load");
         auto forgedDelivery=guardedDelivery.save(); forgedDelivery.Struct().erase("delivery_completions");
         require(nullkiller3::CampaignState(forgedDelivery).plan().isNull(),"saved delivery completion without a handoff was replayed");
+        {
+            auto passageWorld=json(R"({"day":1,"player":0,"resources":[0,0,0,0,0,0,0],"capabilities":["land"],"heroes":[{"ref":"main","army_value":1000}],"towns":[],"objects":[{"ref":"entry","kind":"portal","owner":-2,"visible":true,"position":[1,1,0]}],"forecasts":{"routes":[]}})");
+            auto passagePlan=json(R"({"version":3,"revision":1,"approach":"scouting","horizon_days":3,"goals":[{"id":"cross","kind":"explore_passage","actor_ref":"main","target_ref":"entry","deadline_day":3,"priority":100,"building_id":-1,"min_army_value":1000,"depends_on":[],"required_capabilities":["land"],"complete_when":{"kind":"passage_explored","value":0}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":false,"critical_towns":[]}})");
+            nullkiller3::CampaignState crossing;std::string failure;
+            require(crossing.accept(passagePlan,passageWorld,failure),failure.c_str());
+            JsonNode proof;proof["goal"]=passagePlan["goals"][0];proof["day"].Integer()=1;
+            proof["from"]=json("[1,1,0]");proof["to"]=json("[8,8,0]");
+            proof["kind"].String()="portal";proof["bidirectional"].Bool()=true;proof["selectable"].Bool()=true;
+            passageWorld["confirmed_passage_explorations"].Vector().push_back(proof);
+            crossing.review(passageWorld,false);
+            require(crossing.statuses()["cross"]["state"].String()=="completed","same-level portal crossing did not complete");
+            nullkiller3::CampaignState restoredCrossing(crossing.save());
+            require(restoredCrossing.statuses()["cross"]["state"].String()=="completed","portal receipt was lost on restore");
+            passageWorld["objects"][0]["kind"].String()="portal_exit";
+            nullkiller3::CampaignState exitOnly;
+            require(!exitOnly.accept(passagePlan,passageWorld,failure),"exit-only portal admitted as an entrance");
+        }
         std::cout << "NK3 dependency, conflict, reserves and save/load proof passed\n";
         return 0;
     }

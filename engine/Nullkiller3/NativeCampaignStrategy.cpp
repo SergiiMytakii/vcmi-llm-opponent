@@ -140,6 +140,11 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
+    for(const auto * hero:ai.cc->getHeroesInfo())
+        if(static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())].isStruct()) {
+            const auto review=automaticMoveReview(ai,hero,hero->visitablePos());
+            automaticSafetyReviews[review["hero_ref"].String()]=review;
+        }
     world["automatic_safety_reviews"].Vector();
     for(const auto & [ref,review]:automaticSafetyReviews.Struct())
     {
@@ -150,7 +155,8 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         const auto fresh=actor ? automaticMoveReview(ai,actor,int3(target[0].Integer(),target[1].Integer(),target[2].Integer())) : JsonNode();
         if(fresh.isNull()) continue;
         world["automatic_safety_reviews"].Vector().push_back(fresh);
-        result.push_back({"automatic_safety:"+ref,fresh.toCompactString(),true,true,actionable,false});
+        result.push_back({"automatic_safety:"+ref,fresh.toCompactString(),true,true,actionable,
+            fresh["reason"].String()=="passage_crossing_requires_fresh_decision"});
     }
     const auto intentSignals=strategicIntentSignals(persisted["strategic_intent"],world,actionable);
     result.insert(result.end(),intentSignals.begin(),intentSignals.end());
@@ -278,7 +284,8 @@ bool NativeCampaign::reviewIdleArmy(NK2AI::Nullkiller & ai)
     ai.updateState();
     world["main_army_idle"]=mainArmyIdle(campaign,world);
     logAi->info("NK3_IDLE %s",world["main_army_idle"].toCompactString());
-    if(!automaticSafetyReviews.isNull() && !automaticSafetyReviews.Struct().empty()) return reviewStrategy(ai,true);
+    if((!automaticSafetyReviews.isNull() && !automaticSafetyReviews.Struct().empty())
+        || (!persisted["passage_reviews"].isNull() && !persisted["passage_reviews"].Struct().empty())) return reviewStrategy(ai,true);
     if(!idleArmyNeedsReview(world["main_army_idle"])) return false;
     if(repairOwnHeroObstruction(ai)) return true;
     return reviewStrategy(ai,true);
@@ -454,6 +461,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
                 if(defense["status"].String()=="unbounded_opposition"
                     || defense["status"].String()=="insufficient_current_force")
                     arbiter.resolved(defenseSignal(defense,true));
+            // Only a successfully admitted response releases the crossing barrier.
+            persisted["passage_reviews"]=JsonNode();
             automaticSafetyReviews=JsonNode();
             recordCheckpointBaseline(); // New goals/reserves own the next review's comparison.
         }

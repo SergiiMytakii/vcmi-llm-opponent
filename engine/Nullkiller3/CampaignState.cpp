@@ -108,7 +108,7 @@ bool CampaignState::helperJobSupported(const JsonNode & goal,const JsonNode & wo
     if(role=="scout") return contains(world["frontiers"],goal["job_ref"])
         || !find(world,"scouting_options",goal["job_ref"]).isNull()
         || (!object.isNull() && object["visible"].Bool() && (object["kind"].String()=="scholar"
-            || object["kind"].String()=="obelisk" || object["kind"].String()=="treasure_chest" || object["kind"].String()=="subterranean_gate"));
+            || object["kind"].String()=="obelisk" || object["kind"].String()=="treasure_chest" || object["kind"].String()=="subterranean_gate" || object["kind"].String()=="portal"));
     return false;
 }
 
@@ -355,7 +355,7 @@ bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, st
         }
         else if(kind == "explore_passage")
         {
-            if(hero.isNull() || object.isNull() || object["kind"].String()!="subterranean_gate"
+            if(hero.isNull() || object.isNull() || (object["kind"].String()!="subterranean_gate" && object["kind"].String()!="portal")
                 || !object["visible"].Bool()) return reject("unknown_visible_passage");
         }
         else if(kind == "preserve_force")

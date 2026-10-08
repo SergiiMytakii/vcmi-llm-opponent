@@ -4,7 +4,7 @@
     {
       "id": "day_and_week",
       "title": "Day, week and movement",
-      "applicability": "Calendar, movement, roads/terrain, boats, neutral passage guards and weekly recruitment stock.",
+      "applicability": "Calendar, movement, roads/terrain, boats, gate/portal direction and exits, neutral passage guards and weekly recruitment stock.",
       "file": "rules/day_and_week.md",
       "enabled": true
     },

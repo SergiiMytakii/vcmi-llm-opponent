@@ -55,24 +55,26 @@ std::vector<ObjectInstanceID> PlayerView::getTeleportChannelExits(TeleportChanne
     std::vector<ObjectInstanceID> exits;
     const auto owner=source.getPlayerID();
     if(!owner || (player!=PlayerColor::UNFLAGGABLE && player!=*owner) || !observedPassages.isVector()) return exits;
-    auto gateAt=[&](const JsonNode & p) -> const CGTeleport * {
+    auto portalAt=[&](const JsonNode & p) -> const CGTeleport * {
         if(!passagePosition(p)) return nullptr;
         const int3 position(p[0].Integer(),p[1].Integer(),p[2].Integer());
         if(!source.isInTheMap(position) || !source.isVisible(position)) return nullptr;
         const auto * tile=source.getTile(position,false);
         if(!tile) return nullptr;
         for(const auto objectID:tile->visitableObjects)
-            if(const auto * object=source.getObj(objectID,false);object && object->ID==Obj::SUBTERRANEAN_GATE)
+            if(const auto * object=source.getObj(objectID,false);object && (object->ID==Obj::SUBTERRANEAN_GATE
+                || object->ID==Obj::MONOLITH_TWO_WAY || object->ID==Obj::MONOLITH_ONE_WAY_ENTRANCE || object->ID==Obj::MONOLITH_ONE_WAY_EXIT))
                 return dynamic_cast<const CGTeleport *>(object);
         return nullptr;
     };
-    // Pairing comes from a real own crossing, not the map's global channel
-    // table. Seeing two entrances alone does not establish their connection.
-    for(const auto & link:observedPassages.Vector())
-    {
-        if(!link.isStruct()) continue;
-        const auto * from=gateAt(link["from"]), *to=gateAt(link["to"]);
-        if(!from || !to || from->channel!=id || to->channel!=id) continue;
+    // No global channel table: only own observations. Random one-way exits
+    // remain threat possibilities; they cannot establish a chosen own route.
+    for(const auto & link:observedPassages.Vector()) {
+        const auto * from=portalAt(link["from"]), *to=portalAt(link["to"]);
+        if(!from || !to || from->channel!=id || to->channel!=id || !passageLinkFrom(link,link["from"],true)) continue;
+        if(link["kind"].isNull()) {
+            if(from->ID!=Obj::SUBTERRANEAN_GATE || to->ID!=Obj::SUBTERRANEAN_GATE) continue;
+        } else if(from->ID!=Obj::MONOLITH_TWO_WAY || to->ID!=Obj::MONOLITH_TWO_WAY) continue;
         for(const auto endpoint:{from->id,to->id})
             if(std::find(exits.begin(),exits.end(),endpoint)==exits.end()) exits.push_back(endpoint);
     }
@@ -129,7 +131,7 @@ void restrictToSupportedMovement(PathfinderOptions & options)
 {
     options.useFlying = options.useWaterWalking = false;
     options.useEmbarkAndDisembark = true;
-    // PlayerView admits only actually observed, currently visible gate pairs.
+    // PlayerView admits observed visible gates and selectable monolith exits.
     options.useTeleportTwoWay = true;
     options.useTeleportOneWay = options.useTeleportOneWayRandom = false;
     options.useTeleportWhirlpool = options.forceUseTeleportWhirlpool = options.useCastleGate = false;
