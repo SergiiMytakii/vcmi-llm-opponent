@@ -330,6 +330,39 @@ def reply_schema(request):
     return _object(properties)
 
 
+def validate_rejection(request, reply):
+    """Recognize only a current, resource-backed protocol diagnostic."""
+    if (request.get('protocol') != 2 or not isinstance(reply, dict)
+            or set(reply) != {'protocol', 'request_id', 'identity', 'failure', 'usage'}):
+        raise ValueError('invalid strategic rejection fields')
+    if type(reply['protocol']) is not int or reply['protocol'] != 2:
+        raise ValueError('unsupported strategic rejection protocol')
+    if reply['request_id'] != request['request_id']:
+        raise ValueError('stale strategic rejection request_id')
+    identity = reply['identity']
+    if (not isinstance(identity, dict) or set(identity) != set(request['identity'])
+            or any(type(identity[k]) is not type(value) or identity[k] != value
+                   for k, value in request['identity'].items())):
+        raise ValueError('stale strategic rejection identity')
+    failure = reply['failure']
+    if (not isinstance(failure, dict) or set(failure) != {'code', 'required', 'available'}
+            or failure['code'] != 'resource_commitments_exceed_available_funds'):
+        raise ValueError('unsupported strategic rejection')
+    for name in ('required', 'available'):
+        values = failure[name]
+        if not isinstance(values, list) or len(values) != 7 or any(type(v) is not int or v < 0 for v in values):
+            raise ValueError('invalid strategic rejection resources')
+    if (failure['available'] != request['observation']['resources']
+            or not any(required > available for required, available in zip(failure['required'], failure['available']))):
+        raise ValueError('strategic rejection resources differ from request')
+    usage = reply['usage']
+    if (not isinstance(usage, dict) or set(usage) != {'known', 'input_tokens', 'output_tokens'}
+            or type(usage['known']) is not bool
+            or any(type(usage[k]) is not int or usage[k] < 0 for k in ('input_tokens', 'output_tokens'))):
+        raise ValueError('invalid strategic rejection usage')
+    return reply
+
+
 def validate_reply(request, reply, wire=False):
     usage = None
     if wire:
@@ -363,7 +396,7 @@ def validate_reply(request, reply, wire=False):
     _validate_shape(shape_reply, byte_schema)
     exposed = any(front.get('town_ref') in {t['ref'] for t in request['observation']['towns']}
                   and front.get('threats') and front.get('status') in
-                  ('insufficient_current_force','unbounded_opposition')
+                  ('insufficient_current_force','unbounded_opposition','observed_threat_timing_unknown')
                   for front in request['observation'].get('forecasts',{}).get('defenses',[]))
     if exposed and not any(option['approach']=='defense' for option in reply['alternatives']):
         raise ValueError('exposed town requires a defense comparison, not a mandatory defense decision')
@@ -476,7 +509,10 @@ def validate_reply(request, reply, wire=False):
                 raise ValueError('force_reserve_not_available')
             resource_totals = [a+b for a,b in zip(resource_totals, reserve['resources'])]
         if any(total > available for total, available in zip(resource_totals, request['observation']['resources'])):
-            raise ValueError('resource_commitments_exceed_available_funds')
+            error = ValueError('resource_commitments_exceed_available_funds')
+            error.required = resource_totals
+            error.available = list(request['observation']['resources'])
+            raise error
     assigned = {a['hero_ref']:a for a in reply['assignments']}
     if len(assigned) != len(reply['assignments']) or sum(a['role']=='main' for a in assigned.values())>1:
         raise ValueError('conflicting strategic roles')

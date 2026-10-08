@@ -17,6 +17,7 @@ class ThreatForecastTest(unittest.TestCase):
 #include "Global.h"
 #include "Forecasts.h"
 #include "KnownLandApproach.h"
+#include "StrategicDecision.h"
 #include <stdexcept>
 using namespace nullkiller3;
 JsonNode json(const std::string & text) { JsonParsingSettings p; p.strict=true; p.mode=JsonParsingSettings::JsonFormatMode::JSON; return JsonNode(text.data(),text.size(),p,"threat forecast proof"); }
@@ -33,6 +34,16 @@ int main() {
             self.assertEqual(compiled.returncode,0,compiled.stderr)
             result=subprocess.run([str(binary)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_closing_approach_changes_defense_question_without_daily_repetition(self):
+        self.proof(r'''
+auto defense=json(R"({"town_ref":"town","status":"insufficient_current_force","scenario_deadline_day":12,"threats":[{"source_ref":"enemy","army_interval":{"lower":10000,"upper":15000},"movement_scenario":{"turns":3}}]})");
+const auto distant=defenseSignal(defense,true);
+defense["scenario_deadline_day"].Integer()=13;
+require(defenseSignal(defense,true).facts==distant.facts);
+defense["threats"][0]["movement_scenario"]["turns"].Integer()=1;
+require(defenseSignal(defense,true).facts!=distant.facts);
+''')
 
     def test_unflaggable_monsters_screen_a_visible_enemy_without_forcing_a_hold(self):
         self.proof(r'''
@@ -94,9 +105,10 @@ require(world["forecasts"]["threats"][0]["assessment"].String()=="observed_open_
 require(world["forecasts"]["threats"][0]["advance_scenario_day"].isNull());
 require(world["forecasts"]["threats"][0]["earliest_possible_day"].isNull());
 CampaignState campaign;auto result=forecastDefenses(world,campaign);
-require(result[0]["status"].String()=="no_observed_front");
+require(result[0]["status"].String()=="observed_threat_timing_unknown");
 require(result[0]["scenario_deadline_day"].isNull());
-require(result[0]["unconfirmed_threats"].Vector().size()==1);
+require(result[0]["threats"].Vector().size()==1);
+require(result[0]["opposing_upper_sum"].Integer()==10000);
 ''')
 
     def test_adjacent_legal_enemy_approach_keeps_local_defense(self):
@@ -113,6 +125,20 @@ world["forecasts"]["threats"]=forecastThreats(world);
 require(forecastDefenses(world,campaign)[0]["status"].String()=="unbounded_opposition");
 ''')
 
+    def test_direct_approach_days_compare_with_own_return_without_inventing_an_eta(self):
+        self.proof(r'''
+auto world=json(R"({"day":10,"enemy_players":[1],"objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[30,0,0],"last_seen_day":10,"army_interval":{"upper":10000}}],"towns":[{"ref":"town","position":[0,0,0],"defense_value":200}],"heroes":[{"ref":"main","army_value":20000}],"enemy_approaches":[{"source_ref":"enemy","target_ref":"town","status":"no_visible_neutral_barrier_on_known_land_connection","known_land_steps":30,"movement_scenario":{"turns":2,"daily_points":2000}}],"forecasts":{"routes":[{"target_ref":"town","own_arrivals":[{"hero_ref":"main","day":12,"army_value":20000,"army_loss_estimate":0}]}]}})");
+world["visible_objects"]=world["objects"];world["forecasts"]["threats"]=forecastThreats(world);
+const auto & threat=world["forecasts"]["threats"][0];
+require(threat["advance_scenario_day"].Integer()==11);
+require(threat["earliest_possible_day"].isNull()); // Conditional full-turn scenario, not a guaranteed ETA.
+CampaignState campaign;auto defense=forecastDefenses(world,campaign);
+require(defense[0]["status"].String()=="insufficient_current_force");
+require(defense[0]["own_arrivals"].Vector().empty()); // Day12 is too late for the day11 scenario.
+world["forecasts"]["routes"][0]["own_arrivals"][0]["day"].Integer()=11;
+require(forecastDefenses(world,campaign)[0]["status"].String()=="conditional_force_available");
+''')
+
     def test_open_approach_length_excludes_a_shorter_guarded_shortcut(self):
         self.proof(r'''
 std::vector<KnownLandTile> tiles(5);
@@ -121,6 +147,21 @@ tiles[2].neighbors={4};tiles[4].neighbors={3};
 auto approach=knownLandApproach(tiles,0,3);
 require(approach["status"].String()=="no_visible_neutral_barrier_on_known_land_connection");
 require(approach["known_land_steps"].Integer()==3);
+''')
+
+    def test_visible_movement_costs_produce_one_two_three_turn_scenarios(self):
+        self.proof(r'''
+std::vector<KnownLandTile> land(7);
+for(size_t i=0;i<6;++i) { land[i].neighbors={i+1};land[i].movementCosts={100}; }
+require(knownLandApproach(land,0,2,200)["movement_scenario"]["turns"].Integer()==1);
+require(knownLandApproach(land,0,4,200)["movement_scenario"]["turns"].Integer()==2);
+require(knownLandApproach(land,0,6,200)["movement_scenario"]["turns"].Integer()==3);
+for(size_t i=0;i<6;++i) land[i].movementCosts={50};
+require(knownLandApproach(land,0,6,200)["movement_scenario"]["turns"].Integer()==2);
+land[3].neutralGuards={"screen"};
+require(knownLandApproach(land,0,6,200)["movement_scenario"].isNull());
+land[3].neutralGuards.clear();land[3].movementCosts.clear();
+require(knownLandApproach(land,0,6,200)["movement_scenario"].isNull());
 ''')
 
 if __name__=="__main__": unittest.main()

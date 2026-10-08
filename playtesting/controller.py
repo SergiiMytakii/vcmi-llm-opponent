@@ -1,4 +1,4 @@
-"""Record the one-shot ExternalAI protocol without putting diagnostics on stdout."""
+"""Record one-shot ExternalAI replies and bounded protocol-2 rejections."""
 import json
 import os
 from pathlib import Path
@@ -36,6 +36,9 @@ def kill_controller(child, own_group=False):
 def validate_reply(request, raw):
     reply = json.loads(raw)
     if request.get('protocol') == 2:
+        if isinstance(reply, dict) and 'failure' in reply:
+            from controller.native_strategy import validate_rejection
+            return validate_rejection(request, reply)
         from controller.native_strategy import validate_reply as validate_native
         return validate_native(request,reply,wire=True)
     fields = {"protocol", "request_id", "action_id"}
@@ -155,8 +158,11 @@ def exchange(run, raw, engine_owned=False, postgame=False):
             output = (directory / "stdout.bin").read_bytes()
             try:
                 reply = validate_reply(request, output)
-                result.update(status="reply_valid", action_id=reply.get("action_id"))
-                if request['protocol'] == 2:
+                if request['protocol'] == 2 and 'failure' in reply:
+                    result.update(status='reply_rejected', rejection_reason=reply['failure']['code'], usage=reply['usage'])
+                else:
+                    result.update(status="reply_valid", action_id=reply.get("action_id"))
+                if request['protocol'] == 2 and 'failure' not in reply:
                     plan = reply.get('plan') or request.get('campaign')
                     result.update(strategy_revision=plan['revision'], strategic_decision=reply['decision'], usage=reply['usage'])
             except (ValueError, KeyError, TypeError) as error:
@@ -199,7 +205,7 @@ def main():
     try:
         raw = sys.stdin.buffer.read(INPUT_LIMIT + 1)
         output, result = exchange(os.environ["VCMI_PLAYTEST_RUN"], raw, engine_owned=True)
-        if result["status"] != "reply_valid":
+        if result["status"] not in ("reply_valid", "reply_rejected"):
             print("playtest controller: " + result["status"], file=sys.stderr)
             sys.exit(75 if result["status"] == "timeout" else 1)
         sys.stdout.buffer.write(output)

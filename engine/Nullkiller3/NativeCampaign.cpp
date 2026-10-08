@@ -38,6 +38,9 @@
 #include "../../lib/entities/hero/CHero.h"
 #include "../../lib/battle/CombatValue.h"
 #include "../../lib/mapping/CMap.h"
+#include "../../lib/RoadHandler.h"
+#include "../../lib/TerrainHandler.h"
+#include "../../lib/IGameSettings.h"
 #include "../TransportJSON/TransportJSON.h"
 #include <fstream>
 #include <cmath>
@@ -110,7 +113,7 @@ void NativeCampaign::recordLearningTurn(NK2AI::Nullkiller & ai,const std::string
         option["arrival_day"]=route["day"];option["route"]=route;
         bool defenseConflict=false;
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
-            if(defense["critical"].Bool() && defense["scenario_deadline_day"].Integer()<=route["day"].Integer())
+            if(defense["critical"].Bool() && defense["scenario_deadline_day"].isNumber() && defense["scenario_deadline_day"].Integer()<=route["day"].Integer())
                 for(const auto & actor:defense["allocated_hero_refs"].Vector()) defenseConflict |= actor==route["hero_ref"];
         option["available"].Bool()=!defenseConflict;
         option["constraints_checked"].Bool()=!defenseConflict;
@@ -162,7 +165,7 @@ void NativeCampaign::recordLearningTurn(NK2AI::Nullkiller & ai,const std::string
         const auto floor=campaign.exchangeForce(route["hero_ref"].String(),world,helperSources());
         bool defending=false;
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
-            if(defense["critical"].Bool() && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1)
+            if(defense["critical"].Bool() && defense["scenario_deadline_day"].isNumber() && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1)
                 for(const auto & actor:defense["allocated_hero_refs"].Vector()) defending |= actor==route["hero_ref"];
         if(!defending && army>0 && loss<=army*campaign.plan()["policy"]["max_loss_ratio"].Float()
             && loss<=army && army-loss>=floor && route["expected_new_tiles"].Integer()>0)
@@ -1178,6 +1181,7 @@ void NativeCampaign::observe(NK2AI::Nullkiller & ai)
     });
     for(const auto & [id,receipt]:receipts) world["confirmed_deliveries"].Vector().push_back(receipt);
 
+    world["decision_feedback"]=static_cast<const JsonNode &>(persisted)["memory"]["decision_feedback"];
     externalai::observeStrategicRules(*ai.cc, ai.playerID, world);
     for(const auto * name : GameConstants::RESOURCE_NAMES) world["resource_order"].Vector().emplace_back(name);
     for(const auto * cap : {"land", "water", "build_boat", "build", "transfer"}) world["capabilities"].Vector().emplace_back(cap);
@@ -1345,6 +1349,7 @@ struct VisibleLandGraph
     std::map<int3,size_t> index;
     std::vector<KnownLandTile> land;
     JsonNode positions;
+    int64_t dailyMovement=0;
 };
 VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & world,
     const std::function<std::string(const CGObjectInstance *)> & objectReference)
@@ -1353,6 +1358,8 @@ VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & 
     auto & index=graph.index;auto & land=graph.land;
     const auto size=ai.cc->getMapSize();
     const auto & view=ai.gameInfo();
+    const auto movement=view.getSettings().getVector(EGameSettings::HEROES_MOVEMENT_POINTS_LAND);
+    if(!movement.empty()) graph.dailyMovement=*std::max_element(movement.begin(),movement.end());
     for(int z=0;z<size.z;++z) for(int y=0;y<size.y;++y) for(int x=0;x<size.x;++x)
     {
         const int3 position(x,y,z);
@@ -1384,7 +1391,15 @@ VisibleLandGraph visibleLandGraph(const NK2AI::Nullkiller & ai,const JsonNode & 
                 if(const auto next=index.find(position+int3(dx,dy,0));next!=index.end()
                     && view.checkForVisitableDir(position,next->first)
                     && view.checkForVisitableDir(next->first,position))
+                {
                     land[id].neighbors.push_back(next->second);
+                    const auto * from=view.getTile(position,false), *to=view.getTile(next->first,false);
+                    const auto base=view.getSettings().getInteger(EGameSettings::HEROES_MOVEMENT_COST_BASE);
+                    int64_t cost=from->hasRoad() && to->hasRoad() ? from->getRoad()->movementCost
+                        : std::min<int64_t>(base,from->getTerrain()->moveCost);
+                    if(dx && dy) cost=static_cast<int64_t>(cost*std::sqrt(2.0));
+                    land[id].movementCosts.push_back(cost);
+                }
     return graph;
 }
 JsonNode ordinaryStopExposure(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target,
@@ -1435,7 +1450,7 @@ JsonNode enemyApproaches(const JsonNode & world,const VisibleLandGraph & graph)
             const auto & where=asset["position"];
             const auto target=index.find(int3(where[0].Integer(),where[1].Integer(),where[2].Integer()));
             if(target==index.end()) continue;
-            auto approach=knownLandApproach(land,source->second,target->second);
+            auto approach=knownLandApproach(land,source->second,target->second,graph.dailyMovement);
             approach["source_ref"]=enemy["ref"];approach["target_ref"]=asset["ref"];
             approach["assumptions"].String()="Currently visible land connectivity with native directional entrances; other armies are ignored. Interior visible neutral guard zones and occupied neutral garrisons require an encounter on that connection; guards on the final attack tile alone provide no shield. Fog, water, spells, neutral encounter outcomes and enemy intent remain unknown.";
             result.Vector().push_back(approach);
@@ -1853,7 +1868,7 @@ NK2AI::Goals::TGoalVec NativeCampaign::generate(NK2AI::Nullkiller & ai, bool pri
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
         {
             if(!defense["critical"].Bool() || defense["status"].String()!="insufficient_current_force"
-                || defense["scenario_deadline_day"].Integer()>world["day"].Integer()+1) continue;
+                || !defense["scenario_deadline_day"].isNumber() || defense["scenario_deadline_day"].Integer()>world["day"].Integer()+1) continue;
             const auto * town=dynamic_cast<const CGTownInstance *>(resolve(ai,defense["town_ref"]));
             if(!town || town->getOwner()!=ai.playerID) continue;
             const auto required=std::max<int64_t>(0,std::ceil(defense["opposing_upper_sum"].Integer()*ai.settings->getSafeAttackRatio())
@@ -2291,7 +2306,7 @@ std::string NativeCampaign::heroHireReason(const NK2AI::Nullkiller & ai, const C
     if(alias!=persisted["object_ids"].Struct().end())
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
             if(defense["town_ref"].String()==externalai::objectReference(alias->second)
-                && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1
+                && defense["scenario_deadline_day"].isNumber() && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1
                 && defense["status"].String()=="insufficient_current_force"
                 && candidate->estimateCombatValue()>=static_cast<uint64_t>(
                     defense["opposing_upper_sum"].Integer()-defense["conditional_force_value"].Integer()))
@@ -2372,7 +2387,7 @@ void NativeCampaign::recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstanc
             return;
         }
 }
-JsonNode NativeCampaign::helperMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const
+JsonNode NativeCampaign::automaticMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const
 {
     if(!hero) return JsonNode();
     const auto & aliases=static_cast<const JsonNode &>(persisted)["object_ids"].Struct();
@@ -2384,10 +2399,10 @@ JsonNode NativeCampaign::helperMoveReview(const NK2AI::Nullkiller & ai,const CGH
     bool helper=ai.heroManager->getHeroRoleOrDefaultInefficient(hero)==NK2AI::HeroRole::SCOUT;
     for(const auto & assignment:persisted["strategy_metadata"]["assignments"].Vector())
         if(assignment["hero_ref"].String()==ref) helper=assignment["role"].String()!="main";
-    if(!helper) return JsonNode();
     const auto graph=visibleLandGraph(ai,world,refOf);
     const auto exposure=ordinaryStopExposure(ai,hero,target,world,graph,true);
-    auto review=helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions);
+    auto review=helper ? helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions) : JsonNode();
+    if(review.isNull()) review=townStopReview(ref,coordinate(hero->visitablePos()),exposure,world,graph.land,graph.positions);
     if(!review.isNull()) { review["hero_ref"].String()=ref;review["target_position"]=coordinate(target); }
     return review;
 }
@@ -2403,27 +2418,27 @@ void NativeCampaign::reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2
         if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
             for(const auto & node:chain->getPath().nodes)
             {
-                const auto review=helperMoveReview(ai,node.targetHero,node.coord);
+                const auto review=automaticMoveReview(ai,node.targetHero,node.coord);
                 if(!review.isNull())
                 {
-                    auto & current=helperSafetyReviews[review["hero_ref"].String()];
+                    auto & current=automaticSafetyReviews[review["hero_ref"].String()];
                     if(current.isNull() || review.toCompactString()<current.toCompactString()) current=review;
                 }
             }
     };
     for(const auto & task:tasks) inspect(task,0);
 }
-void NativeCampaign::checkHelperMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target)
+void NativeCampaign::checkAutomaticMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target)
 {
     if(!executingGoal().empty()) return;
     // Own movement can reveal enemies between nodes of the same chain.
     if(ai.playerView) ai.playerView->refresh();
     observe(ai);
-    const auto review=helperMoveReview(ai,hero,target);
+    const auto review=automaticMoveReview(ai,hero,target);
     if(!review.isNull())
     {
-        helperSafetyReviews[review["hero_ref"].String()]=review;
-        throw NK2AI::cannotFulfillGoalException("Automatic helper approach requires a strategic choice");
+        automaticSafetyReviews[review["hero_ref"].String()]=review;
+        throw NK2AI::cannotFulfillGoalException("Automatic movement requires a strategic choice");
     }
 }
 float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
@@ -2437,7 +2452,7 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
                 for(const auto & child:composition->decompose(nullptr)) if(!automaticAllowed(child,depth+1)) return false;
             if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
                 for(const auto & node:chain->getPath().nodes)
-                    if(!helperMoveReview(ai,node.targetHero,node.coord).isNull()) return false;
+                    if(!automaticMoveReview(ai,node.targetHero,node.coord).isNull()) return false;
             return true;
         };
         if(!automaticAllowed(task,0)) return 0;
@@ -2528,7 +2543,7 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
         for(const auto & defense:world["forecasts"]["defenses"].Vector())
             if(defense["town_ref"].String()==task->strategicEmergencyTown && defense["critical"].Bool()
                 && defense["status"].String()=="insufficient_current_force"
-                && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1) return 110000.0f;
+                && defense["scenario_deadline_day"].isNumber() && defense["scenario_deadline_day"].Integer()<=world["day"].Integer()+1) return 110000.0f;
     // A timely native defense of an explicitly critical town can preempt an
     // economic/offensive commitment even when its hero is otherwise assigned.
     std::function<bool(const NK2AI::Goals::TSubgoal &,int)> urgent = [&](const auto & item,int depth) {

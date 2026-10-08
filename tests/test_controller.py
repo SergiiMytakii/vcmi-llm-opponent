@@ -11,6 +11,65 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ControllerTest(unittest.TestCase):
+    def test_resource_rejection_retains_usage_and_reaches_the_next_model_request(self):
+        from codex_fixture import codex_fixture
+        from test_nullkiller3_controller import strategic_request
+        from test_strategy_guide import MODEL, final_reply
+        request = strategic_request()
+        rejected = final_reply(request)
+        second_goal = dict(rejected['plan']['goals'][0], id='second-guild')
+        rejected['plan']['goals'].append(second_goal)
+        rejected['plan']['reserves'] = [dict(goal_id='guild', force_value=0,
+                                            resources=[6, 0, 0, 0, 0, 0, 0]),
+                                       dict(goal_id='second-guild', force_value=0,
+                                            resources=[15, 0, 0, 0, 0, 0, 0])]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            env = {**os.environ, **codex_fixture(root, MODEL), 'CAPTURE': folder,
+                   'FINAL_REPLY': json.dumps(rejected), 'VCMI_EXPERIENCE_MODE': 'off',
+                   'VCMI_STRATEGY_GUIDE_MODE': 'off', 'VCMI_GAME_RULES_MODE': 'off'}
+            for number in (1, 2):
+                directory = root / f'decision-{number}'
+                directory.mkdir()
+                result = subprocess.run([sys.executable, str(ROOT / 'controller/main.py')],
+                    input=json.dumps(request), text=True, capture_output=True, timeout=10,
+                    env={**env, 'VCMI_PLAYTEST_DECISION_DIR': str(directory)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                reply = json.loads(result.stdout)
+                self.assertEqual(reply, dict(protocol=2, request_id=request['request_id'],
+                    identity=request['identity'], failure=dict(
+                        code='resource_commitments_exceed_available_funds',
+                        required=[21, 0, 0, 0, 0, 0, 0], available=[10, 10, 10, 10, 10, 10, 10000]),
+                    usage=dict(known=True, input_tokens=120, output_tokens=40)))
+                metadata = json.loads(result.stderr)
+                self.assertEqual(metadata['failure_kind'], 'invalid_reply')
+                self.assertEqual(metadata['reason'], 'resource_commitments_exceed_available_funds')
+                self.assertEqual(json.loads((directory / 'reply.json').read_text()), reply)
+                request['memory']['recent_results'] = [dict(player=0, day=1, outcome='refused',
+                    reason='resource_commitments_exceed_available_funds')]
+            self.assertEqual(len(list(root.glob('call-*.json'))), 2, 'one model call per native request')
+            second = json.loads((root / 'call-2.json').read_text())['request']
+            self.assertEqual(second['memory']['recent_results'], request['memory']['recent_results'])
+
+    def test_resource_rejection_reports_unknown_usage_without_fabricating_tokens(self):
+        from codex_fixture import codex_fixture
+        from test_nullkiller3_controller import strategic_request
+        from test_strategy_guide import MODEL, final_reply
+        request = strategic_request()
+        rejected = final_reply(request)
+        rejected['plan']['reserves'] = [dict(goal_id='guild', force_value=0,
+                                            resources=[21, 0, 0, 0, 0, 0, 0])]
+        with tempfile.TemporaryDirectory() as folder:
+            model = MODEL.replace("'input_tokens':120,'output_tokens':40", "'input_tokens':120")
+            env = {**os.environ, **codex_fixture(Path(folder), model), 'CAPTURE': folder,
+                   'FINAL_REPLY': json.dumps(rejected), 'VCMI_PLAYTEST_DECISION_DIR': folder,
+                   'VCMI_EXPERIENCE_MODE': 'off', 'VCMI_STRATEGY_GUIDE_MODE': 'off', 'VCMI_GAME_RULES_MODE': 'off'}
+            result = subprocess.run([sys.executable, str(ROOT / 'controller/main.py')],
+                input=json.dumps(request), text=True, capture_output=True, timeout=10, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['usage'], dict(known=False, input_tokens=0, output_tokens=0))
+
+
     def test_direct_launch_records_each_request_and_reply_by_default(self):
         request={"protocol":1,"request_id":"recorded","observation":{},
                  "actions":[{"id":"finish","kind":"end_turn"}]}

@@ -36,7 +36,7 @@ may be conditional; operative movement still needs native admission. Hidden
 rewards and quest exchanges are unsupported. Urgent defense stays with native code.
 
 # Decision procedure and reference triggers
-1. Review accepted-plan feedback, recent_results, commitments and current course.
+1. Review accepted-plan feedback, decision_feedback, commitments and current course.
    strategy_rejected means not installed: use installed_revision/current campaign
    and correct the reported native reason/proposed_goals. strategy_accepted means
    installation only. Preserve viable funded goals; identify blocked conditions.
@@ -93,11 +93,11 @@ is a grant for that named goal only. Explain a higher local grant in its reason.
 loss_estimate components/count sensitivity are conditional heuristics, not win
 probabilities or exact casualties.
 
-forecasts.threats.assessment distinguishes observed_open_approach (the only kind
-with an advance scenario), historical_sighting, guarded_approach and
-unconfirmed_approach. defenses.unconfirmed_threats is reconnaissance context, not
-an attacker/deadline. Scenarios are not proven hostile advances. Known missing or
-blocked paths prove neither urgency nor safety. For scouts, end_turn_exposure is
+forecasts.threats distinguishes observed_open_approach from historical, guarded
+and unconfirmed approaches. movement_scenario gives conditional direct-travel
+turns under stated assumptions; advance_scenario_day is not a proven ETA.
+observed_threat_timing_unknown still means a visible open threat. Separate
+threat evidence from timing; unknown timing establishes neither urgency nor safety. For scouts, end_turn_exposure is
 separate from route losses; stop_positions assumes the quoted route is unchanged.
 Zero route losses or missing exposure data does not prove overnight safety.
 Visible distances/connections establish no enemy movement, abilities or intent.
@@ -126,7 +126,8 @@ normally use force_value=0 and bound losses with policy.max_loss_ratio;
 only combat goals may override it through goal.risk. Future reinforcement uses
 min_army_value/army_at_least and separately quoted resource reserves; future defense
 cannot reserve projected force before recruitment. Do not add target_owned goals
-for already-owned mines/towns. Goals spend their own reserves; others release only
+for already-owned mines/towns. Resource reserves cannot exceed current funds,
+even for future construction. Goals spend their own reserves; others release only
 on observed completion, cancellation or confirmed deadline/ownership failure.
 
 Fund construction/recruitment/hiring from current quotes. resource_calendar shares
@@ -217,7 +218,7 @@ supporting facts; reconsider_when gives supported typed conditions. Explain supp
 tasks in reason. Keep each explanation within 160 characters, using complete short
 sentences without truncation. Output no commands, code, hidden facts or private reasoning.
 
-For an insufficient_current_force/unbounded_opposition front, include a defense
+For an insufficient_current_force/unbounded_opposition/observed_threat_timing_unknown front, include a defense
 alternative and explain protection or the concrete gain worth its loss risk in
 reason. Protection requires executable goals/dependencies/floors; critical_towns
 or prose alone issues no defense command. A defender role/completed preparation

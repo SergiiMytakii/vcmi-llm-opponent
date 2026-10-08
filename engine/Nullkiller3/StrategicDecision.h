@@ -8,14 +8,44 @@
 
 namespace nullkiller3
 {
+inline JsonNode controllerFailureFeedback(const JsonNode & reply,const JsonNode & request)
+{
+    auto shape=[](const JsonNode & value,std::initializer_list<const char *> keys) {
+        if(!value.isStruct() || value.Struct().size()!=keys.size()) return false;
+        for(const auto * key:keys) if(!value.Struct().count(key)) return false;
+        return true;
+    };
+    auto integer=[](const JsonNode & value) { return value.getType()==JsonNode::JsonType::DATA_INTEGER && value.Integer()>=0; };
+    if(!shape(reply,{"protocol","request_id","identity","failure","usage"}) || !integer(reply["protocol"])
+        || reply["protocol"].Integer()!=2 || !reply["request_id"].isString() || reply["request_id"]!=request["request_id"]
+        || reply["identity"]!=request["identity"] || !reply["identity"].isStruct()) return JsonNode();
+    for(const auto & [key,value]:request["identity"].Struct())
+        if(reply["identity"][key].getType()!=value.getType()) return JsonNode();
+    const auto & failure=reply["failure"], &usage=reply["usage"];
+    if(!shape(failure,{"code","required","available"}) || !failure["code"].isString()
+        || failure["code"].String()!="resource_commitments_exceed_available_funds"
+        || !shape(usage,{"known","input_tokens","output_tokens"}) || !usage["known"].isBool()
+        || !integer(usage["input_tokens"]) || !integer(usage["output_tokens"])) return JsonNode();
+    if(!failure["required"].isVector() || !failure["available"].isVector()
+        || failure["required"].Vector().size()!=7 || failure["available"].Vector().size()!=7
+        || failure["available"]!=request["observation"]["resources"]) return JsonNode();
+    bool exceeded=false;
+    for(int i=0;i<7;++i)
+    {
+        if(!integer(failure["required"][i]) || !integer(failure["available"][i])) return JsonNode();
+        exceeded |= failure["required"][i].Integer()>failure["available"][i].Integer();
+    }
+    return exceeded ? failure : JsonNode();
+}
 // Policy changes alone do not create new enemy evidence. Both callers use
-// this same identity; new enemy refs or strength intervals still trigger review.
+// this same identity; new enemy refs, strength or approach turns trigger review.
 inline StrategicSignal defenseSignal(const JsonNode & defense,bool actionable)
 {
     std::string facts=defense["status"].String()+":";
     for(const auto & threat:defense["threats"].Vector())
     {
         facts+=threat["source_ref"].String()+":"+threat["army_interval"].toCompactString()+";";
+        facts+=threat["movement_scenario"]["turns"].toCompactString()+";";
         if(!threat["neutral_screen"].isNull())
             facts+=threat["neutral_screen"]["status"].String()+":"+threat["neutral_screen"]["example_guard_refs"].toCompactString()+";";
     }

@@ -8,7 +8,7 @@ Read actual income, stock/growth, buildings, funds, army pools, threats, deliver
 
 ## Alternatives to compare
 - Compare departure, funded garrison, interception and holding.
-- Leave enough stationary force to deter observed weak raiders while preserving the strike army.
+- Before departure, check the force left behind and open enemy approaches. Retain protection against weak raiders; weigh stronger threats against interception, return and offensive gain.
 - For a base trade, compare income, recruitment, fortifications and development time. Unknown benefits of the new base do not offset confirmed losses of the main base. The trade should shorten the path to victory.
 
 ## Benefits, costs and risks

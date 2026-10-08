@@ -9,6 +9,9 @@
 #include <set>
 #include <vector>
 #include <string>
+#include <queue>
+#include <tuple>
+#include <limits>
 
 namespace nullkiller3
 {
@@ -22,6 +25,7 @@ struct KnownLandTile
 {
     std::vector<size_t> neighbors;
     std::vector<std::string> neutralGuards;
+    std::vector<int64_t> movementCosts; // Visible road/base terrain cost, parallel to neighbors.
 };
 // Occupancy is a current physical constraint, not a predicted arrival.
 // Neutral encounters stay closed: yielding never authorizes a battle.
@@ -54,7 +58,7 @@ inline bool yieldOpensKnownConnection(const std::vector<KnownLandTile> & tiles,s
 // A neutral zone on the target asset alone does not shield that hero/town.
 // Visible land connectivity is an overapproximation: no private enemy movement,
 // no unseen tiles, no water/spells, no claim that a guard can or cannot be beaten.
-inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_t source,size_t target)
+inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_t source,size_t target,int64_t dailyPoints=0)
 {
     auto walk=[&](bool avoidGuards) {
         std::vector<int64_t> parents(tiles.size(),-1);std::deque<size_t> queue;
@@ -78,6 +82,39 @@ inline JsonNode knownLandApproach(const std::vector<KnownLandTile> & tiles,size_
     for(size_t at=target;at!=source;at=parents[at])
     { ++steps;guards.insert(tiles[at].neutralGuards.begin(),tiles[at].neutralGuards.end()); }
     result["known_land_steps"].Integer()=steps;
+    if(unguarded[target]>=0 && dailyPoints>0)
+    {
+        // Pack visible step costs into full turns. No private hero movement is read.
+        using Cost=std::pair<int64_t,int64_t>; // completed turns, points used this turn
+        const Cost infinity{std::numeric_limits<int64_t>::max(),0};
+        std::vector<Cost> costs(tiles.size(),infinity);
+        using Entry=std::tuple<int64_t,int64_t,size_t>;
+        std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> pending;
+        costs[source]={0,0};pending.emplace(0,0,source);
+        while(!pending.empty())
+        {
+            const auto [turn,spent,at]=pending.top();pending.pop();
+            if(costs[at]!=Cost{turn,spent}) continue;
+            if(at==target) break;
+            if(tiles[at].movementCosts.size()!=tiles[at].neighbors.size()) continue;
+            for(size_t i=0;i<tiles[at].neighbors.size();++i)
+            {
+                const auto next=tiles[at].neighbors[i];const auto step=tiles[at].movementCosts[i];
+                if(next>=tiles.size() || step<=0 || step>dailyPoints
+                    || (next!=target && !tiles[next].neutralGuards.empty())) continue;
+                Cost cost=spent+step<=dailyPoints ? Cost{turn,spent+step} : Cost{turn+1,step};
+                if(cost<costs[next]) { costs[next]=cost;pending.emplace(cost.first,cost.second,next); }
+            }
+        }
+        if(costs[target]!=infinity)
+        {
+            auto & scenario=result["movement_scenario"];
+            scenario["turns"].Integer()=costs[target].first+1;
+            scenario["daily_points"].Integer()=dailyPoints;
+            scenario["status"].String()="conditional_direct_land_approach";
+            scenario["assumptions"].String()="Full turns at the fastest configured standard land allowance, no terrain penalty, visible road and diagonal costs. Direct travel without battles, other armies, detours or special movement. Private remaining movement, bonuses, intent and unseen alternatives are unknown; actual arrival can be earlier or later. Not an ETA or safety bound.";
+        }
+    }
     // One example connection, not a claim that every listed guard is unavoidable.
     if(unguarded[target]<0) for(const auto & ref:guards) result["example_guard_refs"].Vector().emplace_back(ref);
     return result;
@@ -187,6 +224,45 @@ inline JsonNode helperStopReview(const JsonNode & origin,uint64_t ownStrength,co
         review["origin"]=origin;review["own_strength"].Integer()=ownStrength;
         review["reason"].String()="automatic_helper_approaches_stronger_visible_enemy";
         return review;
+    }
+    return JsonNode();
+}
+
+inline JsonNode townStopReview(const std::string & heroRef,const JsonNode & origin,const JsonNode & exposure,
+    const JsonNode & world,const std::vector<KnownLandTile> & land,const JsonNode & positions)
+{
+    if(exposure["status"].String()!="conditional_unchanged_route" || exposure["stop_positions"].Vector().empty()) return JsonNode();
+    auto cell=[&](const JsonNode & p) { return size_t(std::find(positions.Vector().begin(),positions.Vector().end(),p)-positions.Vector().begin()); };
+    const auto start=cell(origin),stop=cell(exposure["stop_positions"][0]);
+    if(start>=land.size() || stop>=land.size()) return JsonNode();
+    auto local=[&](size_t from,size_t town) {
+        if(from>=land.size()) return false;
+        const auto path=knownLandApproach(land,from,town);
+        return path["status"].String()=="no_visible_neutral_barrier_on_known_land_connection" && path["known_land_steps"].Integer()<=1;
+    };
+    for(const auto & town:world["towns"].Vector())
+    {
+        const auto target=cell(town["position"]);
+        if(target>=land.size() || !local(start,target) || local(stop,target)) continue;
+        int64_t retained=town["army_holder_ref"].String()==heroRef ? 0 : town["defense_value"].Integer();
+        for(const auto & hero:world["heroes"].Vector())
+            if(hero["ref"].String()!=heroRef && hero["ref"]!=town["army_holder_ref"] && local(cell(hero["position"]),target))
+                retained+=hero["army_value"].Integer();
+        for(const auto & enemy:world["visible_objects"].Vector())
+        {
+            const auto from=cell(enemy["position"]);
+            if(enemy["kind"].String()!="hero" || from>=land.size()
+                || std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),enemy["owner"])==world["enemy_players"].Vector().end()
+                || !enemy["army_interval"]["lower"].isNumber() || enemy["army_interval"]["lower"].Integer()<=retained) continue;
+            const auto path=knownLandApproach(land,from,target);
+            if(path["status"].String()!="no_visible_neutral_barrier_on_known_land_connection") continue;
+            JsonNode review;review["reason"].String()="automatic_departure_exposes_town";
+            review["town_ref"]=town["ref"];review["enemy_ref"]=enemy["ref"];
+            review["remaining_local_force"].Integer()=retained;review["enemy_army_interval"]=enemy["army_interval"];
+            review["known_land_approach"]=path;review["end_turn_exposure"]=exposure;
+            review["limits"].String()="A strategic comparison is needed, not a proven defeat. Local army estimates exclude fortification/combat bonuses; enemy arrival and intent remain conditional.";
+            return review;
+        }
     }
     return JsonNode();
 }

@@ -80,6 +80,22 @@ require(result["visible_threats"][0]["army_interval"]["lower"].Integer()==500);
 require(result["enemy_movement_unknown"].Bool());
 ''')
 
+    def test_automatic_departure_reviews_the_town_left_without_protection(self):
+        self.proof(r'''
+std::vector<KnownLandTile> land(7);JsonNode positions;positions.Vector();
+for(size_t i=0;i<7;++i) { positions.Vector().push_back(json("["+std::to_string(i)+",0,0]"));
+ if(i) land[i].neighbors.push_back(i-1);if(i+1<7) land[i].neighbors.push_back(i+1); }
+auto world=json(R"({"enemy_players":[1],"towns":[{"ref":"town","position":[0,0,0],"defense_value":100}],"heroes":[{"ref":"main","position":[1,0,0],"army_value":2000}],"visible_objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[6,0,0],"army_interval":{"lower":1000}}]})");
+auto origin=json("[1,0,0]");auto exposure=scoutStopExposure(origin,json(R"([{"position":[3,0,0],"turn":0}])"),true,world,land,positions,true);
+require(!townStopReview("main",origin,exposure,world,land,positions).isNull());
+world["towns"][0]["defense_value"].Integer()=1500;
+require(townStopReview("main",origin,exposure,world,land,positions).isNull());
+world["towns"][0]["defense_value"].Integer()=100;land[4].neutralGuards={"screen"};
+require(townStopReview("main",origin,exposure,world,land,positions).isNull());
+land[4].neutralGuards.clear();world["heroes"].Vector().push_back(json(R"({"ref":"defender","position":[0,0,0],"army_value":1500})"));
+require(townStopReview("main",origin,exposure,world,land,positions).isNull());
+''')
+
     def test_same_day_arrival_and_waiting_keep_stop_but_never_claim_safety(self):
         self.proof(r'''
 auto world=json(R"({"enemy_players":[1],"visible_objects":[]})");

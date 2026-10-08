@@ -440,6 +440,73 @@ print(json.dumps({'protocol':1, 'request_id':request['request_id'], 'action_id':
         record=json.loads(next((self.run_dir/'decisions').glob('*/result.json')).read_text())
         self.assertEqual(record['status'],'reply_valid')
 
+    def test_resource_rejection_reaches_native_without_a_synthetic_execution(self):
+        from codex_fixture import codex_fixture
+        from test_nullkiller3_controller import strategic_request
+        from test_strategy_guide import MODEL, final_reply
+        request = strategic_request()
+        reply = final_reply(request)
+        reply['plan']['reserves'] = [dict(goal_id='guild', force_value=0,
+                                         resources=[21, 0, 0, 0, 0, 0, 0])]
+        self.settings['controller'] = [sys.executable, str(ROOT / 'controller/main.py')]
+        self.prepare()
+        env = {**os.environ, **codex_fixture(self.root, MODEL), 'CAPTURE': str(self.root),
+               'FINAL_REPLY': json.dumps(reply), 'VCMI_PLAYTEST_RUN': str(self.run_dir)}
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/playtest_controller.py')],
+            input=json.dumps(request), text=True, capture_output=True, timeout=10, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        envelope = json.loads(result.stdout)
+        self.assertEqual(envelope['failure'], dict(code='resource_commitments_exceed_available_funds',
+            required=[21, 0, 0, 0, 0, 0, 0], available=[10, 10, 10, 10, 10, 10, 10000]))
+        directory = next((self.run_dir / 'decisions').iterdir())
+        record = json.loads((directory / 'result.json').read_text())
+        self.assertEqual(record['status'], 'reply_rejected')
+        self.assertEqual(record['rejection_reason'], 'resource_commitments_exceed_available_funds')
+        self.assertEqual(record['execution'], 'unconfirmed')
+        self.assertEqual(record['usage'], dict(known=True, input_tokens=120, output_tokens=40))
+        self.assertNotIn('strategic_decision', record)
+        self.assertNotIn('strategy_revision', record)
+        self.assertEqual((directory / 'stdout.bin').read_text(), result.stdout)
+        self.assertEqual(len(list(self.root.glob('call-*.json'))), 1)
+
+    def test_malformed_resource_rejections_are_not_forwarded_to_native(self):
+        import copy
+        from test_nullkiller3_controller import strategic_request
+        request = strategic_request()
+        envelope = dict(protocol=2, request_id=request['request_id'], identity=request['identity'],
+            failure=dict(code='resource_commitments_exceed_available_funds',
+                required=[21, 0, 0, 0, 0, 0, 0], available=[10, 10, 10, 10, 10, 10, 10000]),
+            usage=dict(known=True, input_tokens=120, output_tokens=40))
+        invalid = []
+        def changed(mutate):
+            value = copy.deepcopy(envelope)
+            mutate(value)
+            invalid.append(value)
+        changed(lambda e: e.update(request_id='stale'))
+        for key, value in [('instance','stale'), ('generation','stale'), ('player',True), ('day',True), ('revision',1)]:
+            changed(lambda e, key=key, value=value: e['identity'].update({key:value}))
+        changed(lambda e: e['identity'].update(extra='value'))
+        changed(lambda e: e.update(plan=None))
+        changed(lambda e: e.update(protocol=True))
+        changed(lambda e: e['failure'].update(code='another_failure'))
+        changed(lambda e: e['failure'].update(extra='value'))
+        for key, value in [('required',[21]), ('required',[-1,0,0,0,0,0,0]),
+                           ('required',[False,0,0,0,0,0,0]), ('required',[10,0,0,0,0,0,0]),
+                           ('available',[9,10,10,10,10,10,10000]), ('available',[True,10,10,10,10,10,10000])]:
+            changed(lambda e, key=key, value=value: e['failure'].update({key:value}))
+        for key, value in [('known',1), ('input_tokens',-1), ('output_tokens',True), ('extra',0)]:
+            changed(lambda e, key=key, value=value: e['usage'].update({key:value}))
+        for number, value in enumerate(invalid):
+            with self.subTest(number=number):
+                self.run_dir = self.root / f'rejected-{number}'
+                self.settings['controller'] = [sys.executable, '-c', 'print('+repr(json.dumps(value))+')']
+                self.prepare()
+                result = self.hook(request)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+                record = json.loads(next((self.run_dir / 'decisions').glob('*/result.json')).read_text())
+                self.assertEqual(record['status'], 'invalid_reply')
+
     def test_strategic_output_limit_rejects_one_byte_more_and_bounds_evidence(self):
         from test_nullkiller3_controller import strategic_request
         script=self.root/'oversized-course.py'

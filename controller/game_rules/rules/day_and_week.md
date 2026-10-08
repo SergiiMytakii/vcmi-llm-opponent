@@ -14,6 +14,6 @@
 - Use day, days_in_week, movement, movement_per_day, daily_income, resource_calendar, movement_support and own_arrival. Quotes govern actual arrival and interaction costs. Known gates need an observed connection; fog remains unknown. Changing troops can change later travel estimates.
 
 ## Executor boundary
-- Use quoted arrival/interaction costs under the common route and exposure contract; refresh travel estimates after troop changes.
+- Own arrival quotes use current own movement. Enemy movement_scenario assumes full turns at the fastest configured standard land allowance, no terrain penalty and visible road/diagonal costs. Enemy bonuses, remaining movement and intent are unknown; it is a conditional direct approach, not an exact ETA.
 
 Source: NWC/3DO 1999 manual, pp. 13, 15-16, 45; VCMI `6a1ca68e`.

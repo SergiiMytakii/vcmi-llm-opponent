@@ -377,7 +377,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
         {
             bool supported=false;
             for(const auto & [id,goal]:goals)
-                if((*goal)["actor_ref"]==assignment["hero_ref"] && ((*goal)["kind"].String()=="capture_target" || (*goal)["kind"].String()=="secure_resource")
+                if((*goal)["actor_ref"]==assignment["hero_ref"] && ((*goal)["kind"].String()=="capture_target" || (*goal)["kind"].String()=="intercept_hero" || (*goal)["kind"].String()=="secure_resource")
                     && trial.statuses()[id]["state"].String()=="ready") supported=true;
             if(!supported)
             {
@@ -406,6 +406,13 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
             || !approaches.count(alternative["approach"].String()) || !compared.insert(alternative.toCompactString()).second
             || !text(alternative["benefit"],640) || !text(alternative["cost"],640) || !text(alternative["uncertainty"],640))
             return reject("invalid_strategic_alternative");
+    bool defenseCompared=false;
+    for(const auto & alternative:alternatives.Vector()) defenseCompared |= alternative["approach"].String()=="defense";
+    for(const auto & defense:freshWorld["forecasts"]["defenses"].Vector())
+        if(!defense["threats"].Vector().empty() && !defenseCompared
+            && (defense["status"].String()=="insufficient_current_force" || defense["status"].String()=="unbounded_opposition"
+                || defense["status"].String()=="observed_threat_timing_unknown"))
+            return reject("exposed_town_without_defense_comparison");
     const auto & conditions = reply["reconsider_when"];
     if(!conditions.isVector() || conditions.Vector().empty() || conditions.Vector().size() > 12)
         return reject("missing_reconsideration_conditions");

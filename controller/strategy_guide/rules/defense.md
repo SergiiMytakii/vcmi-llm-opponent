@@ -4,12 +4,12 @@
 When town exposure or defenders change; protecting valuable/last bases or allocating several fronts.
 
 ## Facts and unknowns
-Check town income, stock/buildings, walls, troops, role, remaining bases/victory, separate threats and own return routes. critical_towns is policy. Bought troops or a conditional returning main do not prove lasting stationary defense. A force shortfall against summed enemy armies does not prove defense impossible. Compare individual threats, fortifications, reinforcement and counterattack. Unknown ETA implies neither safety nor indefinite holding.
+Check town income, stock/buildings, walls, troops, role, remaining bases/victory, separate threats and own return routes. critical_towns is policy. Bought troops or a conditional returning main do not prove lasting stationary defense. A force shortfall against summed enemy armies does not prove defense impossible. Compare individual threats, fortifications, reinforcement and counterattack. Unknown ETA does not remove a visible open threat or justify indefinite holding.
 
 ## Alternatives to compare
 - Before recall, splitting or departure compare stationary defense, consolidation/counterattack and continued offense.
 - Compare funded recruitment, detachment, other defenders and supported return/interception. For late delivery, compare a nearer recipient's meeting and arrival quotes.
-- Compare visible threat and town value with achievable protection, main diversion cost and a concrete offensive gain or justified base trade.
+- Compare conditional enemy approach days with own return/interception quotes. If return is later, choose protection, interception or an offensive gain worth losing the base.
 
 ## Benefits, costs and risks
 - Size stationary defense for observed weak raiders; weigh exposure to the enemy main against offensive gain instead of requiring a garrison that defeats it.

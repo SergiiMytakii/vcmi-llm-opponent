@@ -587,16 +587,23 @@ JsonNode forecastThreats(const JsonNode & world)
             threat["latest_possible_day"]=JsonNode();
             threat["advance_scenario_day"]=JsonNode();
             threat["delay_scenario_day"]=JsonNode();
-            // A legal adjacent approach proves local exposure without guessing enemy movement.
-            // An open distant route supplies no defensive deadline.
-            if(visible && age==0 && open && approach["known_land_steps"].isNumber()
+            // A direct movement scenario can be compared with own native returns.
+            // It remains conditional, not a proven enemy ETA.
+            threat["movement_scenario"]=approach["movement_scenario"];
+            if(visible && age==0 && open && approach["movement_scenario"]["turns"].isNumber()
+                && approach["movement_scenario"]["turns"].Integer()>0)
+            {
+                threat["advance_scenario_day"].Integer()=world["day"].Integer()+approach["movement_scenario"]["turns"].Integer()-1;
+                threat["delay_scenario_day"].Integer()=threat["advance_scenario_day"].Integer()+1;
+            }
+            else if(visible && age==0 && open && approach["known_land_steps"].isNumber()
                 && approach["known_land_steps"].Integer()<=1)
             {
                 threat["advance_scenario_day"]=world["day"];
                 threat["delay_scenario_day"].Integer()=world["day"].Integer()+1;
             }
             threat["redirect_scenario_day"]=JsonNode();
-            threat["assumptions"].String()="Only a currently visible enemy on a legal adjacent unguarded land connection receives a local advance/delay scenario. Distant open connections have unknown timing and do not impose urgent defense. This is not an ETA, movement bound or attack intent. Historical, guarded and unconfirmed approaches require new evidence, not preventive main-army holding. Fog, water and spells remain unknown.";
+            threat["assumptions"].String()="Observed open approaches remain threats. Direct full-turn movement scenarios use visible travel costs and an explicit standard allowance; they are not proven ETA, movement bounds or attack intent. No scenario means timing unknown, not safety. Guarded/historical approaches, water, spells and unseen alternatives remain uncertain.";
             result.Vector().push_back(threat);
         }
     }
@@ -605,7 +612,7 @@ JsonNode forecastThreats(const JsonNode & world)
 
 JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign)
 {
-    struct Front { const JsonNode * town; int64_t day, required; bool critical, bounded; JsonNode threats, unconfirmed; };
+    struct Front { const JsonNode * town; int64_t day, required; bool critical, bounded; JsonNode threats, unconfirmed; bool timed=false; };
     std::vector<Front> fronts;
     std::set<std::string> allocated;
     const auto today=world["day"].Integer();
@@ -619,9 +626,10 @@ JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign
         for(const auto & threat:world["forecasts"]["threats"].Vector())
             if(threat["town_ref"]==town["ref"])
             {
-                if(!threat["advance_scenario_day"].isNumber())
+                if(threat["assessment"].String()!="observed_open_approach")
                 { front.unconfirmed.Vector().push_back(threat);continue; }
-                front.day=std::min(front.day,threat["advance_scenario_day"].Integer());
+                if(threat["advance_scenario_day"].isNumber())
+                { front.day=front.timed ? std::min(front.day,threat["advance_scenario_day"].Integer()) : threat["advance_scenario_day"].Integer();front.timed=true; }
                 front.bounded &= threat["army_interval"]["upper"].isNumber();
                 front.required+=threat["army_interval"]["upper"].Integer();
                 front.threats.Vector().push_back(threat);
@@ -644,7 +652,7 @@ JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign
         JsonNode estimate;
         estimate["town_ref"]=town["ref"];
         estimate["critical"].Bool()=front.critical;
-        if(front.threats.Vector().empty()) estimate["scenario_deadline_day"]=JsonNode();
+        if(!front.timed) estimate["scenario_deadline_day"]=JsonNode();
         else estimate["scenario_deadline_day"].Integer()=front.day;
         estimate["garrison_value"]=town["defense_value"];
         estimate["allocated_hero_refs"].Vector();
@@ -658,7 +666,7 @@ JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign
         for(const auto & route:world["forecasts"]["routes"].Vector()) if(route["target_ref"]==town["ref"])
             for(const auto & arrival:route["own_arrivals"].Vector())
             {
-                if(arrival["day"].Integer()>front.day || allocated.count(arrival["hero_ref"].String())) continue;
+                if(!front.timed || arrival["day"].Integer()>front.day || allocated.count(arrival["hero_ref"].String())) continue;
                 for(const auto & hero:world["heroes"].Vector()) if(hero["ref"]==arrival["hero_ref"])
                 {
                     const auto value=std::min(hero["army_value"].Integer(),arrival["army_value"].Integer());
@@ -687,6 +695,7 @@ JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign
         }
         estimate["conditional_force_value"].Integer()=capacity;
         estimate["status"].String()=front.threats.Vector().empty() ? "no_observed_front"
+            : !front.timed ? "observed_threat_timing_unknown"
             : !front.bounded ? "unbounded_opposition" : capacity>=front.required ? "conditional_force_available" : "insufficient_current_force";
         estimate["assumptions"].String()="Current owned garrison and single-hero permitted land/boat arrivals, including presently funded owned shipyard quotes, by the earliest advance scenario; each pool is allocated once. Visible enemy upper bounds are summed as a conservative joint front. Opponent route, intent and combat bonuses remain unknown. Hero diversion costs are listed. No battle win, recruit stock, future meeting or fortification bonus is assumed.";
         result.Vector().push_back(estimate);

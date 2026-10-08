@@ -34,8 +34,8 @@ class NativeCampaign
     std::atomic<bool> terminalRecorded{false};
     JsonNode activeExecutionContext, activeBattleContext; // Transient, copied at battle start.
     JsonNode world;
-    JsonNode helperSafetyReviews; // Transient blocked automatic choices, keyed by own hero.
-    JsonNode helperMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const;
+    JsonNode automaticSafetyReviews; // Transient blocked automatic choices, keyed by own hero.
+    JsonNode automaticMoveReview(const NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target) const;
     CampaignState campaign;
     std::string spendingGoal;
     std::string deliveryGoal;
@@ -135,7 +135,7 @@ public:
     NK2AI::Goals::TGoalVec generate(NK2AI::Nullkiller & ai, bool priorityPass, bool stabilizationOnly = false);
     float priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const;
     void reviewAutomaticTasks(const NK2AI::Nullkiller & ai,const NK2AI::Goals::TGoalVec & tasks);
-    void checkHelperMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target);
+    void checkAutomaticMove(NK2AI::Nullkiller & ai,const CGHeroInstance * hero,const int3 & target);
     std::string heroHireReason(const NK2AI::Nullkiller & ai, const CGTownInstance * town, const CGHeroInstance * candidate, const std::string & goalID = {}) const;
     void recordHelperHire(NK2AI::Nullkiller & ai,const CGTownInstance * town,const CGHeroInstance * candidate,const std::string & goalID);
     TResources reservedResources(const TResources & currentFunds) const;

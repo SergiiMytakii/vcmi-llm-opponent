@@ -23,6 +23,35 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==1 || (argc==2 && std::string(argv[1])=="--weaker-main-intercept"))
+        {
+            auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":10000},{"ref":"stronger","army_value":15000}],"towns":[],"objects":[{"ref":"enemy","kind":"hero","owner":1,"visible":true}],"enemy_players":[1],"forecasts":{"routes":[{"target_ref":"enemy","own_arrivals":[{"hero_ref":"main","day":5,"army_value":10000,"army_loss_estimate":1000}]}]}})");
+            auto plan=json(R"({"version":3,"revision":1,"approach":"offense","horizon_days":3,"goals":[{"id":"intercept","kind":"intercept_hero","actor_ref":"main","target_ref":"enemy","deadline_day":7,"priority":90,"building_id":-1,"min_army_value":10000,"depends_on":[],"required_capabilities":[],"complete_when":{"kind":"enemy_engaged","value":0}}],"reserves":[],"policy":{"max_loss_ratio":0.2,"allow_route_repair":true,"allow_helper_replacement":true,"critical_towns":[]}})");
+            auto request=json(R"({"request_id":"fresh","identity":{"generation":"fresh"},"evidence_refs":["observation:day"],"campaign":null,"signals":[]})");
+            auto reply=json(R"({"protocol":2,"request_id":"fresh","identity":{"generation":"fresh"},"decision":"revise","reason":"The weaker hero can intercept the visible enemy","evidence_refs":["observation:day"],"victory_method":"Conquest","assignments":[{"hero_ref":"main","role":"main"},{"hero_ref":"stronger","role":"defender"}],"alternatives":[{"approach":"offense","benefit":"Engage enemy","cost":"Army losses","uncertainty":"Enemy movement"},{"approach":"defense","benefit":"Preserve army","cost":"Lose initiative","uncertainty":"Enemy target"}],"reconsider_when":[{"goal_id":"intercept","kind":"route_not_established"}],"plan":null,"usage":{"input_tokens":100,"output_tokens":20,"known":true}})");
+            reply["plan"]=plan;
+            initialCourseFixture(request,reply,world);
+            nullkiller3::CampaignState current,candidate;std::string reason;
+            const bool accepted=nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason);
+            require(accepted,("ready supported interception rejected weaker main: "+reason).c_str());
+            require(candidate.statuses()["intercept"]["state"].String()=="ready","supported interception was not ready");
+            for(const auto * unsupported:{"missing_route","other_actor","excess_loss","late_arrival"})
+            {
+                auto blocked=world;
+                auto & arrivals=blocked["forecasts"]["routes"][0]["own_arrivals"];
+                if(std::string(unsupported)=="missing_route") arrivals.Vector().clear();
+                if(std::string(unsupported)=="other_actor") arrivals[0]["hero_ref"].String()="stronger";
+                if(std::string(unsupported)=="excess_loss") arrivals[0]["army_loss_estimate"].Integer()=3000;
+                if(std::string(unsupported)=="late_arrival") arrivals[0]["day"].Integer()=8;
+                require(!nullkiller3::validateStrategicDecision(reply,request,blocked,current,candidate,reason)
+                    && reason=="weaker_main_without_supported_offense","unsupported interception admitted weaker main");
+            }
+            auto hidden=world;hidden["objects"][0]["visible"].Bool()=false;
+            require(!nullkiller3::validateStrategicDecision(reply,request,hidden,current,candidate,reason)
+                && reason=="unknown_visible_enemy_hero","unseen interception target admitted");
+            std::cout << "Ready interception supports weaker main; route, loss, deadline and visibility admission preserved\n";
+            if(argc==2) return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--income")
         {
             // Current Koniczyna income on impossible: 4350 base -> 6525 gold.
@@ -1031,7 +1060,7 @@ int main(int argc,char ** argv)
         economyWorld["day"].Integer() = 7;
         forecast = nullkiller3::forecastBranches(economyWorld,json("[0,0,0,0,0,0,1000]"));
         require(forecast["weekly_growth_day"].Integer() == 8,"growth calendar skipped week boundary");
-        auto defenseWorld=json(R"({"day":1,"heroes":[{"ref":"courier","army_value":1000}],"towns":[{"ref":"town_a","army_holder_ref":"town_a","defense_value":200},{"ref":"town_b","army_holder_ref":"town_b","defense_value":200}],"forecasts":{"threats":[{"town_ref":"town_a","source_ref":"enemy_a","advance_scenario_day":1,"army_interval":{"upper":1000}},{"town_ref":"town_b","source_ref":"enemy_b","advance_scenario_day":1,"army_interval":{"upper":1000}}],"routes":[{"target_ref":"town_a","own_arrivals":[{"hero_ref":"courier","day":1,"army_value":1000,"army_loss_estimate":0}]},{"target_ref":"town_b","own_arrivals":[{"hero_ref":"courier","day":1,"army_value":1000,"army_loss_estimate":0}]}]}})");
+        auto defenseWorld=json(R"({"day":1,"heroes":[{"ref":"courier","army_value":1000}],"towns":[{"ref":"town_a","army_holder_ref":"town_a","defense_value":200},{"ref":"town_b","army_holder_ref":"town_b","defense_value":200}],"forecasts":{"threats":[{"town_ref":"town_a","source_ref":"enemy_a","assessment":"observed_open_approach","advance_scenario_day":1,"army_interval":{"upper":1000}},{"town_ref":"town_b","source_ref":"enemy_b","assessment":"observed_open_approach","advance_scenario_day":1,"army_interval":{"upper":1000}}],"routes":[{"target_ref":"town_a","own_arrivals":[{"hero_ref":"courier","day":1,"army_value":1000,"army_loss_estimate":0}]},{"target_ref":"town_b","own_arrivals":[{"hero_ref":"courier","day":1,"army_value":1000,"army_loss_estimate":0}]}]}})");
         auto defenses=nullkiller3::forecastDefenses(defenseWorld,initial);
         require(defenses[0]["conditional_force_value"].Integer()==1200 && defenses[1]["conditional_force_value"].Integer()==200,"one mobile army was promised to simultaneous fronts twice");
         defenseWorld["forecasts"]["routes"][0]["own_arrivals"][0]["day"].Integer()=2;

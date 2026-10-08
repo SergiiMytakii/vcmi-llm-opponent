@@ -1,4 +1,4 @@
-"""ExternalAI stdin/stdout entrypoint. Diagnostics never share the reply channel."""
+"""ExternalAI entrypoint: game replies or a bounded protocol-2 rejection."""
 import json
 import os
 from pathlib import Path
@@ -62,9 +62,13 @@ def main():
         if request['protocol'] == 2:
             metadata['failure_kind'] = 'invalid_reply' if isinstance(error,(ValueError,TypeError)) else 'controller_error'
             if getattr(error,'usage',None) is not None:metadata['usage'] = error.usage
+            if (isinstance(error, ValueError) and str(error) == 'resource_commitments_exceed_available_funds'
+                    and hasattr(error, 'required') and hasattr(error, 'available')):
+                reply = dict(protocol=2, request_id=request['request_id'], identity=request['identity'],
+                             failure=dict(code=str(error), required=error.required, available=error.available))
     if experience:
         try:
-            if reply is not None:
+            if reply is not None and 'failure' not in reply:
                 if metadata['provider']=='fallback':experience.record_fallback(request,reply)
                 else:experience.record_decision(request,reply)
             metadata['experience']={'collection_only':True,'episodes_assessed':0,'lessons_updated':0,'lessons_supplied':0}
