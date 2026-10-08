@@ -856,6 +856,14 @@ int main(int argc,char ** argv)
         nullkiller3::CampaignState initial, modelCandidate;
         require(nullkiller3::validateStrategicDecision(reply, request, world, initial, modelCandidate, reason), reason.c_str());
         require(modelCandidate.plan()["revision"].Integer() == 1, "model intention was not installed");
+        auto fourOptions = reply;
+        fourOptions["alternatives"].Vector().push_back(json(R"({"approach":"expansion","benefit":"Capture then recruit","cost":"Travel and losses","uncertainty":"Enemy response"})"));
+        fourOptions["alternatives"].Vector().push_back(json(R"({"approach":"offense","benefit":"Reinforce then attack","cost":"Delivery delay","uncertainty":"Fresh attack route"})"));
+        require(nullkiller3::validateStrategicDecision(fourOptions, request, world, initial, modelCandidate, reason), "four strategic continuations rejected");
+        auto fiveOptions = fourOptions;
+        fiveOptions["alternatives"].Vector().push_back(json(R"({"approach":"scouting","benefit":"Open passage then reassess","cost":"Movement","uncertainty":"Exit safety"})"));
+        require(!nullkiller3::validateStrategicDecision(fiveOptions, request, world, initial, modelCandidate, reason)
+            && reason == "missing_strategic_alternatives", "unbounded strategic alternatives accepted");
         auto stale = reply; stale["identity"]["generation"].String() = "old";
         require(!nullkiller3::validateStrategicDecision(stale, request, world, initial, modelCandidate, reason), "stale generation accepted");
         auto inconsistent = reply; inconsistent["assignments"].Vector().clear();

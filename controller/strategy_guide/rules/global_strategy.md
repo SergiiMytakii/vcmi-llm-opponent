@@ -7,7 +7,7 @@ Choose or materially reconsider the saved victory course.
 Check victory conditions, map size/coverage, bases, forces, income, production and native travel times. Known coordinates alone do not establish reachability.
 
 ## Alternatives to compare
-- Compare 2-3 supported victory courses by gain, time, preparation and loss risk; choose the shortest credible winning course, not merely the earliest fight.
+- Compare supported victory courses by time to victory, usable force, losses and exposed bases. Prefer the shortest credible winning course.
 - When victory is not immediately feasible, compare early offense with economic expansion: useful mines/towns, production and delivery of a stronger army. Large maps/long travel prompt comparison; a nearby vulnerable base may still favor attack.
 
 ## Benefits, costs and risks

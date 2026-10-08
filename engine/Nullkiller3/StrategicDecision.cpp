@@ -397,7 +397,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
             if(!roles.count(actor)) return reject("goal_actor_has_no_role");
         }
     const auto & alternatives = reply["alternatives"];
-    if(!alternatives.isVector() || alternatives.Vector().size() < 2 || alternatives.Vector().size() > 3)
+    if(!alternatives.isVector() || alternatives.Vector().size() < 2 || alternatives.Vector().size() > 4)
         return reject("missing_strategic_alternatives");
     const std::set<std::string> approaches{"economy", "expansion", "offense", "defense", "scouting"};
     std::set<std::string> compared;

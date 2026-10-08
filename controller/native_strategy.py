@@ -313,7 +313,7 @@ def reply_schema(request):
                   'victory_method':text,
                   'assignments':array(_object({'hero_ref':owned_hero,
                                                'role':{'type':'string','enum':list(ROLES)}}),0,16),
-                  'alternatives':array(_object({'approach':approach,'benefit':text,'cost':text,'uncertainty':text}),2,3),
+                  'alternatives':array(_object({'approach':approach,'benefit':text,'cost':text,'uncertainty':text}),2,4),
                   'reconsider_when':array(_object({'goal_id':label,'kind':{'type':'string','enum':
                                               ['executor_lost','deadline_missed','route_not_established']}}),1),
                   'plan':{'anyOf':[{'type':'null'},plan]},

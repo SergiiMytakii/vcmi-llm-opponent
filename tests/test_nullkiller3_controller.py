@@ -56,6 +56,15 @@ class NativeStrategyControllerTest(unittest.TestCase):
             return with_intent(request,reply)
         validate_reply(request,answer('prepare_garrison','object:1','garrison_at_least',1000))
         validate_reply(request,answer('intercept_hero','object:2','enemy_engaged',0))
+        four_options=answer('intercept_hero','object:2','enemy_engaged',0)
+        four_options['alternatives'].extend([
+            dict(approach='expansion',benefit='Capture then recruit',cost='Travel and losses',uncertainty='Enemy response'),
+            dict(approach='offense',benefit='Reinforce then attack',cost='Delivery delay',uncertainty='Fresh attack route')])
+        validate_reply(request,four_options)
+        five_options=json.loads(json.dumps(four_options))
+        five_options['alternatives'].append(
+            dict(approach='scouting',benefit='Open a passage then reassess',cost='Movement',uncertainty='Exit safety'))
+        with self.assertRaises(ValueError):validate_reply(request,five_options)
         for bad in [answer('prepare_garrison','object:0','garrison_at_least',1000),
                     answer('prepare_garrison','object:1','garrison_at_least',0),
                     answer('intercept_hero','object:2','target_owned',0)]:

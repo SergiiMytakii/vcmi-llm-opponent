@@ -48,7 +48,7 @@ rewards and quest exchanges are unsupported. Urgent defense stays with native co
    integrate the new material rather than restart planning. Reuse cards already read. Routine continuation of a checked viable plan, no matching
    card or an unavailable guide needs no consultation.
    - Initial/materially reconsidered course: global_strategy.
-   - Initial operation: opening; next conquest objective: offensive_operation.
+   - Initial operation: opening; next conquest objective or changed options after a passage opens, capture, substantial losses or reinforcement: offensive_operation.
    - Economic bottleneck: development; stalled execution: main_army_idle.
    - Confirmed helper loss before another scout/collector/hire_helper assignment:
      exploration; commander loss or rebuilding: recovery.
@@ -210,7 +210,7 @@ continuous preservation nor actual loss.
 
 # Output contract
 Follow the supplied schema and supplied evidence/review-condition kinds.
-Compare 2-3 distinct alternatives: victory courses on initial/material course
+Compare 2-4 distinct alternatives: victory courses on initial/material course
 revision; immediate operations on ordinary keep. They may share approach but must
 differ in content. Allocate explanations once: reason states the deciding tradeoff;
 alternatives gives each option's benefit/cost/uncertainty; evidence_refs cites
