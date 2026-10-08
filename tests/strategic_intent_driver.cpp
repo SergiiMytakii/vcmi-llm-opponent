@@ -2,6 +2,7 @@
 #include "StrategicIntent.h"
 #include "NativePersistence.h"
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 
 JsonNode json(const std::string & value)
@@ -10,11 +11,25 @@ JsonNode json(const std::string & value)
     return JsonNode(value.data(),value.size(),settings,"strategic intent proof");
 }
 void require(bool value,const char * message) { if(!value) throw std::runtime_error(message); }
-int main()
+int main(int argc,char ** argv)
 {
     using namespace nullkiller3;
     try
     {
+        if(argc==2)
+        {
+            std::ifstream input(argv[1]);require(bool(input),"recorded request unavailable");
+            const auto request=json(std::string(std::istreambuf_iterator<char>(input),{}));
+            JsonNode projection;projection["stalls"]=strategicStalls(request["strategic_intent"],request["observation"]);
+            projection["signals"].Vector();
+            for(const auto & signal:strategicIntentSignals(request["strategic_intent"],request["observation"],true))
+            {
+                JsonNode item;item["question"].String()=signal.question;item["facts"].String()=signal.facts;
+                item["critical"].Bool()=signal.critical;projection["signals"].Vector().push_back(item);
+            }
+            std::cout << projection.toCompactString() << '\n';
+            return 0;
+        }
         auto world=json(R"({"day":1,"player":0,"heroes":[{"ref":"hero","army_value":50}],"towns":[{"ref":"home","kind":"town","buildings":[]}],"objects":[{"ref":"far","kind":"town","visible":true,"owner":1},{"ref":"site","kind":"scholar","visible":true},{"ref":"gate","kind":"subterranean_gate","visible":true}]})");
         auto selected=json(R"({"objective":"Capture the enemy bases","selection_reason":"Known towns offer a route to victory","assumptions":[],"milestones":[{"id":"capture","description":"Take the far town","depends_on":[],"complete_when":{"kind":"target_owned","target_ref":"far","actor_ref":null,"value":0}},{"id":"visit","description":"Learn from the scholar","depends_on":["capture"],"complete_when":{"kind":"site_visited","target_ref":"site","actor_ref":"hero","value":0}},{"id":"army","description":"Reach sufficient army strength","depends_on":[],"complete_when":{"kind":"army_at_least","target_ref":null,"actor_ref":"hero","value":100}}],"reconsider_when":[{"kind":"milestone_completed","milestone_id":"visit","reason":"Choose the next operation"},{"kind":"no_progress","milestone_id":"capture","reason":"Review a stalled route"}]})");
         auto goal=json(R"({"id":"old","kind":"visit_site","actor_ref":"hero","target_ref":"site","deadline_day":5,"complete_when":{"kind":"site_visited","value":0}})");
@@ -28,6 +43,39 @@ int main()
         require(validateStrategicIntentUpdate(reply,request,world,plan,JsonNode(),intent,reason),reason.c_str());
         bindStrategicOperation(intent,reply["operation_focus"],plan,JsonNode());
         require(validSavedStrategicIntent(intent),"initial course cannot restore");
+        // Completed preparation must not hide a stalled capture when the model
+        // attached no_progress only to the army milestone.
+        auto stalledCourse=intent;
+        stalledCourse["reconsider_when"]=json(R"([{"kind":"no_progress","milestone_id":"army","reason":"Review preparation"}])");
+        auto stalledWorld=world;stalledWorld["day"].Integer()=4;
+        stalledWorld["heroes"][0]["army_value"].Integer()=100;
+        observeStrategicIntent(stalledCourse,stalledWorld);
+        const auto captureSignals=strategicIntentSignals(stalledCourse,stalledWorld,true);
+        require(captureSignals.size()==1 && captureSignals[0].question=="strategy:no_progress:capture",
+            "completed army preparation hid stalled capture");
+        require(strategicStalls(stalledCourse,stalledWorld)[0]["days_without_progress"].Integer()==3,
+            "stall duration did not reach the request observation");
+        auto nextDay=stalledWorld;nextDay["day"].Integer()=5;
+        const auto nextSignals=strategicIntentSignals(stalledCourse,nextDay,true);
+        RequestArbiter stallArbiter;stallArbiter.beginTurn(4,{280000,120000,0});
+        const auto firstReview=stallArbiter.consider(captureSignals);require(firstReview.request,"stalled capture not admitted");
+        stallArbiter.dispatched(firstReview);stallArbiter.finished(1000,1);
+        stallArbiter.beginTurn(5,{280000,120000,0});
+        require(!stallArbiter.consider(nextSignals).request,"elapsed day repeated unchanged capture review");
+        require(strategicStalls(stalledCourse,nextDay)[0]["days_without_progress"].Integer()==4,
+            "model-facing delay did not advance independently of deduplication");
+        auto premature=stalledWorld;premature["day"].Integer()=3;
+        require(strategicStalls(stalledCourse,premature).Vector().empty(),"early capture incorrectly stalled");
+        auto dependent=stalledCourse;
+        dependent["milestones"][0]["depends_on"].Vector().emplace_back("army");
+        dependent["progress"]["army"]["state"].String()="needs_confirmation";
+        require(strategicStalls(dependent,stalledWorld).Vector().empty(),"unfinished preparation stalled future capture");
+        auto owned=stalledCourse;owned["progress"]["capture"]["state"].String()="completed";
+        require(strategicStalls(owned,stalledWorld).Vector().empty(),"historical capture mistaken for unfinished capture");
+        auto configured=stalledCourse;configured["reconsider_when"].Vector().push_back(
+            json(R"({"kind":"no_progress","milestone_id":"capture","reason":"Review conquest"})"));
+        require(strategicIntentSignals(configured,stalledWorld,true).size()==1,"automatic review duplicated configured condition");
+
         auto cyclic=reply;cyclic["strategy_update"]["selected"]["milestones"][0]["depends_on"].Vector().emplace_back("visit");
         auto narrowed=request;narrowed["observation"]["objects"].Vector().erase(narrowed["observation"]["objects"].Vector().begin());
         JsonNode rejected;require(!validateStrategicIntentUpdate(reply,narrowed,world,plan,JsonNode(),rejected,reason),"unoffered native-only alias accepted");

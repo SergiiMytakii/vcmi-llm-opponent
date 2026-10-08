@@ -53,6 +53,8 @@ def evidence(request):
     if 'map_overview' in request['observation']:
         refs.append('observation:map_overview')
         refs.extend('target:' + ref for ref in strategic_objects(request))
+    if 'strategy_stalls' in request['observation']:
+        refs.append('observation:strategy_stalls')
     refs.extend(request.get('evidence_refs', []))
     return sorted(set(refs))
 

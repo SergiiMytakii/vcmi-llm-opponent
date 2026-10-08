@@ -337,11 +337,44 @@ inline std::set<std::string> strategicIntentTargetRefs(const JsonNode & intent)
         if(milestone["complete_when"]["target_ref"].isString()) result.insert(milestone["complete_when"]["target_ref"].String());
     return result;
 }
+inline JsonNode strategicStalls(const JsonNode & intent,const JsonNode & world)
+{
+    JsonNode result;result.Vector();
+    if(intent.isNull()) return result;
+    for(const auto & milestone:intent["milestones"].Vector())
+    {
+        const auto & predicate=milestone["complete_when"];
+        const auto & progress=intent["progress"][milestone["id"].String()];
+        if(predicate["kind"].String()!="target_owned" || progress["state"].String()=="completed") continue;
+        const auto & object=intentObject(world,predicate["target_ref"]);
+        if(object["kind"].String()!="town" && progress["own_facts"]["target_kind"].String()!="town") continue;
+        bool ready=true;
+        for(const auto & dependency:milestone["depends_on"].Vector())
+            ready &= intent["progress"][dependency.String()]["state"].String()=="completed";
+        const auto elapsed=world["day"].Integer()-progress["last_progress_day"].Integer();
+        if(!ready || elapsed<3) continue;
+        JsonNode stall;stall["milestone_id"]=milestone["id"];stall["target_ref"]=predicate["target_ref"];
+        stall["days_without_progress"].Integer()=elapsed;
+        result.Vector().push_back(stall);
+    }
+    return result;
+}
 inline std::vector<StrategicSignal> strategicIntentSignals(const JsonNode & intent,const JsonNode & world,bool actionable)
 {
     if(intent.isNull()) return {{"initial_strategy","no_selected_course",true,true,actionable,false}};
     std::vector<StrategicSignal> result;
-    for(const auto & condition:intent["reconsider_when"].Vector())
+    auto conditions=intent["reconsider_when"];
+    // Ready town captures need review even when the selected course only
+    // watches preparation. Keep elapsed days out of deduplicated signal facts.
+    const auto stalls=strategicStalls(intent,world);
+    for(const auto & stall:stalls.Vector())
+        if(std::none_of(conditions.Vector().begin(),conditions.Vector().end(),[&](const auto & condition)
+            { return condition["kind"].String()=="no_progress" && condition["milestone_id"]==stall["milestone_id"]; }))
+        {
+            JsonNode condition;condition["kind"].String()="no_progress";condition["milestone_id"]=stall["milestone_id"];
+            conditions.Vector().push_back(condition);
+        }
+    for(const auto & condition:conditions.Vector())
     {
         const auto & milestone=intentMilestone(intent,condition["milestone_id"]);const auto & predicate=milestone["complete_when"];
         const auto & progress=intent["progress"][condition["milestone_id"].String()];const auto & kind=condition["kind"].String();

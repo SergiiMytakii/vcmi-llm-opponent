@@ -8,6 +8,13 @@ from fixtures.strategic_intent import with_intent
 
 
 class GlobalStrategyControllerTest(unittest.TestCase):
+    def test_stalled_capture_is_available_as_reply_evidence(self):
+        request=strategic_request()
+        request['observation']['strategy_stalls']=[dict(milestone_id='capture',target_ref='object:1',days_without_progress=34)]
+        reply=final_reply(request)
+        reply['evidence_refs']=['observation:strategy_stalls']
+        self.assertIs(validate_reply(request,reply),reply)
+
     def test_initial_course_and_operation_are_accepted_together(self):
         request=strategic_request();request['strategic_intent']=None
         reply=with_intent(request,final_reply(request))

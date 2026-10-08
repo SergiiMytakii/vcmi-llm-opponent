@@ -283,6 +283,8 @@ Read strategic_intent and native progress every time. For an initial course or
 material reconsideration, consult global_strategy within the existing 1-3-card
 Guide allowance; compare 2-3 admissible victory courses in alternatives and keep
 only the selected course. On ordinary keep, compare immediate operations instead.
+observation.strategy_stalls reports days without native progress on ready town
+capture stages; handle its review signal through the same reply contract.
 A null course requires strategy_update.decision=revise. keep uses the current
 base_revision with selected/change_reason=null; revise supplies selected and a
 nonempty change_reason.

@@ -323,6 +323,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
             || signal.question.starts_with("critical_town:") || signal.question.starts_with("defense:")
             || signal.question.starts_with("checkpoint:") || signal.question.starts_with("stagnation:");
     request["observation"] = strategicCandidateView(world,campaign.plan(),request["strategic_intent"]);
+    request["observation"]["strategy_stalls"]=strategicStalls(request["strategic_intent"],world);
     request["observation"]["map_overview"]=strategicMapOverview(world,request["strategic_intent"],detailedOverview);
     // Retain must echo the exact accepted roles, including order. Expose the
     // same saved owner used by admission; rejected proposals never replace it.
@@ -339,7 +340,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     // Every strategic request gets a fresh token limit. Saved walltime and
     // addressed facts still gate admission; the token ledger only tracks usage.
     request["budget"]["tokens"].Integer() = strategicRequestTokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview"})
+    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview","strategy_stalls"})
         request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
     for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
     for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
