@@ -14,6 +14,7 @@ Check offensive_preparation, current/reinforced arrivals, sources/meetings, comm
 
 ## Benefits, costs and risks
 - Choose the shortest credible winning continuation, including enemy gains during delay. Expansion must repay its travel and holding costs through usable troops or income.
+- Before a town capture or clearing a neutral screen, compare enemy approach times with holding, interception and own return. Without supported protection, the offensive gain must outweigh the expected base loss.
 - A costly full assault does not rule out a supported intermediate breakthrough or position. Compare its own losses, enemy reply and useful next step; missing quotes leave feasibility unknown.
 - Use the strongest viable strike army. A weaker commander needs a concrete advantage; compare reported mana/combat capabilities as well as force value.
 - Helpers scout, collect or provide limited defense. Preserve the operation their work supports.
