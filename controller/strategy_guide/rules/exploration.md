@@ -9,8 +9,9 @@ When an operation lacks information/routes, or before another scout/collector/hi
 - After loss, compare the own battle receipt, current actor/job and offered route. Loss origin stays unknown unless explicitly supplied.
 
 ## Alternatives to compare
-- Prioritize a feasible key/border opening that may reveal a region or enable an objective. Prefer a suitable helper for safe collection/opening.
-- Compare another viewpoint/site, shorter route, added protection/force, passages and onward operations through learned connections.
+- Prioritize useful key/border openings; prefer a suitable helper. Compare viewpoints/sites, shorter routes, protection, passages and onward operations.
+- Match border key_color to known tents; for another level, compare admitted entrances first. Confirm each crossing/visit, then requote onward routes.
+- Empty quotes require a blocker or reachable intermediate step; physical impossibility and future access remain unproved.
 - Before repeating an outing, identify changed route, protection, force or concrete information value; otherwise choose an existing alternative.
 
 ## Benefits, costs and risks

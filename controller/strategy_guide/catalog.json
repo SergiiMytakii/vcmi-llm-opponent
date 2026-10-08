@@ -60,7 +60,7 @@
     {
       "id": "exploration",
       "title": "Exploration",
-      "applicability": "What information or passage is needed for the next decision? Read when routes or useful facts are missing, choosing keys/borders/passages, or reassigning scouts/collectors or hiring a helper after confirmed helper loss.",
+      "applicability": "How can missing town access be opened? Read for blocked conquest/expansion, targets on another level, key/border/passage prerequisites, scouting or collector assignments, and helper replacement after confirmed loss.",
       "file": "rules/exploration.md",
       "enabled": true
     },
