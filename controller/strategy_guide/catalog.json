@@ -4,70 +4,70 @@
     {
       "id": "opening",
       "title": "Opening",
-      "applicability": "Initial operation: commander, reachable expansion, scouting and construction.",
+      "applicability": "How should the campaign start? Read when choosing initial expansion, commanders, scouting and construction before an operation is settled.",
       "file": "rules/opening.md",
       "enabled": true
     },
     {
       "id": "global_strategy",
       "title": "Global strategy",
-      "applicability": "Choosing or revising the victory course, measurable stages and readiness; stalled conquest.",
+      "applicability": "Which course and measurable stages lead to victory fastest? Read when choosing or revising the course, assessing readiness or reviewing stalled conquest.",
       "file": "rules/global_strategy.md",
       "enabled": true
     },
     {
       "id": "development",
       "title": "Development",
-      "applicability": "Economic expansion or income, production, recruitment, delivery and readiness bottlenecks in the saved course/operation.",
+      "applicability": "How can income, production, recruitment or delivery unlock the next operation? Read when choosing economic expansion or resolving a resource or reinforcement bottleneck.",
       "file": "rules/development.md",
       "enabled": true
     },
     {
       "id": "offensive_operation",
       "title": "Offensive operation",
-      "applicability": "Choosing a conquest target or breakthrough; compare continuations, actors and base exposure before acting and after passage opening, capture, losses or reinforcement.",
+      "applicability": "Which conquest or breakthrough and follow-up should come next? Read before choosing an offensive operation and after passage opening, capture, substantial losses or reinforcement; compare actors and base exposure.",
       "file": "rules/offensive_operation.md",
       "enabled": true
     },
     {
       "id": "main_army_idle",
       "title": "Main army idle",
-      "applicability": "Main army has movement without progress; blocked routes, deadlines or goals.",
+      "applicability": "Why is the main army making no useful progress, and what can unblock it? Read when movement remains unused, routes or goals are blocked, or execution misses a deadline.",
       "file": "rules/main_army_idle.md",
       "enabled": true
     },
     {
       "id": "recovery",
       "title": "Recovery",
-      "applicability": "Restoring combat readiness after loss, retreat/surrender or rebuilding; comparing low-mana attack with recovery.",
+      "applicability": "How should lost combat readiness be restored? Read after army or commander loss, retreat/surrender, or when low mana may justify recovery before battle.",
       "file": "rules/recovery.md",
       "enabled": true
     },
     {
       "id": "defense",
       "title": "Defense",
-      "applicability": "Protection affected by recall, departure, transfers or opening enemy access; return/interception timing, uncertain threats and several fronts.",
+      "applicability": "How can a threatened base be protected? Read when threats or protection change, including before recall, departure, troop transfers or opening enemy access.",
       "file": "rules/defense.md",
       "enabled": true
     },
     {
       "id": "town_after_capture",
       "title": "Town after capture",
-      "applicability": "Departure after capture/completed hold, renewed holding or base trade.",
+      "applicability": "How should a captured town be used, and when can the army leave? Read after capture or when choosing departure, extending a hold or trading bases.",
       "file": "rules/town_after_capture.md",
       "enabled": true
     },
     {
       "id": "exploration",
       "title": "Exploration",
-      "applicability": "Missing information or routes, keys/borders/passages; scout/collector/helper assignment after confirmed helper loss.",
+      "applicability": "What information or passage is needed for the next decision? Read when routes or useful facts are missing, choosing keys/borders/passages, or reassigning scouts/collectors or hiring a helper after confirmed helper loss.",
       "file": "rules/exploration.md",
       "enabled": true
     },
     {
       "id": "endgame",
       "title": "Finish the game",
-      "applicability": "Decisive attack versus minor targets/waiting; elimination and recapture prevention.",
+      "applicability": "How can the advantage become a confirmed victory? Read when comparing a decisive attack with minor targets or waiting, or planning elimination and recapture prevention.",
       "file": "rules/endgame.md",
       "enabled": true
     }
