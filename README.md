@@ -7,7 +7,7 @@ When upgrading VCMI, update the pin, reapply the small integration patch, rebuil
 before releasing our matching build. Installed VCMI and existing saves must remain separate.
 
 The working implementation calls Codex CLI through a ChatGPT subscription using `gpt-5.6-terra`
-with reasoning effort `none`. The adapter offers construction, troop recruitment, town-tavern hero hiring, hero destinations,
+with reasoning effort `low` for Nullkiller3 background preparation and `none` for other gameplay requests. The adapter offers construction, troop recruitment, town-tavern hero hiring, hero destinations,
 exploration, attacks and end-turn; VCMI executes routes and battles. Real Codex construction and
 recruitment, scripted movement, and mixed ExternalAI/Nullkiller2 assignment have local runtime proof.
 The [two-player land scenario](docs/land-duel.md) supplies the initial calibration map.
@@ -66,7 +66,7 @@ required engine, profile, controller and source paths.
 | `save_resource` | Optional save resource | Loads a compatible save instead of starting the map from zero. |
 | `max_seconds` | Required positive number | Maximum session duration; review pauses are excluded. |
 | `review_interval_days` | `0` (off); integer `1..365` | Pauses at review checkpoints every N game days; continue with `continue --run RUN --completed-day DAY`. |
-| `decision_timeout_seconds` | `130`; positive, at most `130` | Recorder deadline for each controller response. Native exchange and the controller also enforce their own limits. |
+| `decision_timeout_seconds` | `70`; positive, at most `70` | Recorder deadline for each controller response. Native exchange and the controller also enforce their own limits. |
 
 **Open map is the default.** The shipped `openMap` setting is `true` at all five
 AI difficulty levels. Each AI reveals its team's map at the beginning of its
@@ -111,8 +111,10 @@ initialization; changing a terminal variable does not alter a running process.
 | `analysis_mine_turns` | `2`; `1..30` | Mine-related analysis threshold. |
 | `analysis_scouting_turns` | `3`; `1..30` | Scouting-related analysis threshold. |
 
-The gameplay controller currently uses `gpt-5.6-terra` / `none`, defined in
-`controller/codex.py`. The match JSON's `model` and `reasoning_effort` fields do
+The gameplay controller currently uses `gpt-5.6-terra`, defined in
+`controller/codex.py`. Only protocol-2 `prepare_next_turn` requests use reasoning
+effort `low`; other gameplay requests use `none`. Each model call has a 60-second
+limit. The match JSON's `model` and `reasoning_effort` fields do
 **not** override those gameplay constants. Native-only mode avoids gameplay
 model requests; also set `experience_mode: "off"` to avoid analyst model calls.
 The full configuration is read by [the runner](playtesting/runs.py).

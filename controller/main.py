@@ -8,7 +8,7 @@ import subprocess
 import sqlite3
 import uuid
 
-from codex import choose, validate_request, MODEL, REASONING_EFFORT, TIMEOUT, LEGACY_TIMEOUT
+from codex import choose, validate_request, MODEL, reasoning_effort, TIMEOUT, LEGACY_TIMEOUT
 from experience import Experience
 
 
@@ -79,7 +79,7 @@ def main():
     if experience_error:
         metadata['experience_error'] = experience_error
     metadata['requested_model'] = MODEL
-    metadata['requested_reasoning_effort'] = REASONING_EFFORT
+    metadata['requested_reasoning_effort'] = reasoning_effort(request)
     metadata['decision_timeout_seconds'] = (min(TIMEOUT, request['budget']['wait_ms']/1000 - 2)
                                             if request['protocol'] == 2 else LEGACY_TIMEOUT)
     metadata['request_bytes'] = len(raw)

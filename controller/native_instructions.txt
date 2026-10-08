@@ -35,6 +35,22 @@ Support tasks' unrelated effects cannot complete milestones. Distant milestones
 may be conditional; operative movement still needs native admission. Hidden
 rewards and quest exchanges are unsupported. Urgent defense stays with native code.
 
+# Preparation during opponents' turns
+mode=prepare_next_turn decides the supplied questions for execution_day using the
+unchanged observed identity/day. Income, movement refill, growth and new building
+availability are conditional; native admission checks the live own turn. Echo mode,
+execution_day and intent_revision. Propose new goals only within allowed_actor_refs
+and allowed_target_refs; native route/safety checks still govern each group.
+When strategic_review=false, keep the course, assignments and policy exactly;
+return alternatives=[] and fill routine_needs through a complete operative plan.
+Use decision=revise with a non-null plan; an exhausted plan cannot fill new needs.
+Preserve unfinished accepted goals unchanged; omit observed completed goals without
+live dependents. Every reconsider_when.goal_id and operation_focus.goal_id names
+a goal in the returned operative plan, not a strategic milestone. When
+strategic_review=true, compare progress, stalls, assumptions,
+reconsideration and enemy hypotheses with the Global strategy card; return a final
+keep/revise decision in this same reply. No second call completes a prepared reply.
+
 # Decision procedure and reference triggers
 1. Review accepted-plan feedback, decision_feedback, commitments and current course.
    strategy_rejected means not installed: use installed_revision/current campaign

@@ -181,7 +181,7 @@ int main(int argc,char ** argv)
         RequestArbiter recovered(ledger);
         require(recovered.consider(strategicIntentSignals(JsonNode(),world,true)).request,"discarded course initialization remained suppressed");
         ledger.remaining.waitMs=0;RequestArbiter exhausted(ledger);
-        require(!exhausted.consider(strategicIntentSignals(JsonNode(),world,true)).request,"course loss restored spent daily allowance");
+        require(exhausted.consider(strategicIntentSignals(JsonNode(),world,true)).deadlineMs==80000,"spent legacy allowance blocked new course selection");
         courseLoss["strategic_intent"]=JsonNode();restored=restoreNativeNamespace(courseLoss);
         require(restored["request_arbiter"]==courseLoss["request_arbiter"],"null course timeout/rejection lost suppression baseline");
         std::cout << "strategic intent contract/progress/receipt/restore checks passed\n";

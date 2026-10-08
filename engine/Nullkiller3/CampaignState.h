@@ -156,7 +156,7 @@ public:
     const JsonNode & plan() const { return state["plan"]; }
     JsonNode save() const { return state; }
 
-    bool accept(const JsonNode & proposal, const JsonNode & world, std::string & reason);
+    bool accept(const JsonNode & proposal, const JsonNode & world, std::string & reason, int64_t executionDay=0);
 
     // Facts for model correction, not a shortlist restricting strategic goals.
     // Every option is an offered native route; no private map facts are added.

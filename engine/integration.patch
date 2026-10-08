@@ -145,10 +145,16 @@ index 02b0d31bf..f2406d5d9 100644
  	asyncTasks->run([this]()
  	{
  		ScopedThreadName guard("NK2AI::AIGateway::makingTurn");
-@@ -572,6 +623,15 @@ void AIGateway::yourTurn(QueryID queryID)
+@@ -572,6 +623,21 @@ void AIGateway::yourTurn(QueryID queryID)
  	});
  }
  
++void AIGateway::playerStartsTurn(PlayerColor player)
++{
++	if(player!=playerID && nullkiller && nullkiller->isStrategicMode())
++		nullkiller->strategicCampaign->startBackground();
++}
++
 +void AIGateway::playerEndsTurn(PlayerColor player)
 +{
 +	if(player != playerID || !nullkiller->isStrategicMode()) return;
@@ -484,6 +490,15 @@ index 02b0d31bf..f2406d5d9 100644
  					cc->trade(m->getObjInstanceID(), EMarketMode::RESOURCE_RESOURCE, res, GameResID(g.resID), toGive);
  					acquiredResources = static_cast<int>(toGet * (it->resVal / toGive));
  					logAi->debug("Traded %d of %s for %d of %s at %s", toGive, res, acquiredResources, g.resID, obj->getObjectNameTextID());
+@@ -1357,6 +1546,8 @@ void AIGateway::endTurn()
+ 	logAi->debug("Resources at the end of turn: %s", cc->getResourceAmount().toString());
+ 
++	if(nullkiller->strategicCampaign) nullkiller->strategicCampaign->prepareNextTurn(*nullkiller);
++
+ 	if(cc->getPlayerStatus(playerID) != EPlayerStatus::INGAME)
+ 	{
+ 		logAi->info("Ending turn is not needed because we already lost");
+ 		return;
 @@ -1364,6 +1553,7 @@ void AIGateway::endTurn()
  
  	do
@@ -625,10 +640,11 @@ index 687770636..c094f5f29 100644
  	~AIGateway();
  
  	//TODO: extract to appropriate goals
-@@ -91,6 +91,7 @@ public:
+@@ -91,6 +91,8 @@ public:
  
  	void initGameInterface(std::shared_ptr<Environment> env, std::shared_ptr<CCallback> callback) override;
  	void yourTurn(QueryID queryID) override;
++	void playerStartsTurn(PlayerColor player) override;
 +	void playerEndsTurn(PlayerColor player) override;
  
  	void heroGotLevel(const CGHeroInstance * hero, PrimarySkill pskill, std::vector<SecondarySkill> & skills, QueryID queryID) override; //pskill is gained primary skill, interface has to choose one of given skills and call callback with selection id
@@ -1015,7 +1031,7 @@ index 0ba7df246..d8b6cb94d 100644
 +add_library(Nullkiller2 OBJECT ${Nullkiller2_SRCS} ${Nullkiller2_HEADERS} ../Nullkiller3/PlayerView.cpp
 +    ../Nullkiller3/NativeCampaign.cpp ../Nullkiller3/NativeCampaignStrategy.cpp
 +    ../Nullkiller3/Forecasts.cpp ../Nullkiller3/CampaignState.cpp
-+    ../Nullkiller3/StrategicDecision.cpp)
++    ../Nullkiller3/StrategicDecision.cpp ../Nullkiller3/BackgroundPlanning.cpp)
  target_compile_definitions(Nullkiller2 PRIVATE VCMI_DLL=1)
  
  target_include_directories(Nullkiller2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1413,7 +1429,7 @@ index c2adab572..27fe95829 100644
  			if(hasUnlockedHeroWithMovement())
  				logAi->debug("Pass %d: No worthwhile task was found at full scan depth. AI turn is complete.", pass);
  			else
-@@ -763,21 +843,41 @@ void Nullkiller::makeTurn()
+@@ -763,21 +843,44 @@ void Nullkiller::makeTurn()
  		}
  
  		for(const auto * heroInfo : cc->getHeroesInfo())
@@ -1433,6 +1449,7 @@ index c2adab572..27fe95829 100644
  	updateState();
 +	if(strategicCampaign)
 +	{
++		strategicCampaign->captureTurnQuestions(*this);
 +		// Complete bounded urgent purchases and safe survivor moves before any
 +		// external wait. The same native decomposer and command gates execute them.
 +		for(int attempt=0; attempt<settings->getMaxPriorityPass(); ++attempt)
@@ -1443,8 +1460,10 @@ index c2adab572..27fe95829 100644
 +			auto immediate=choseBestTask(tempResults);
 +			if(immediate->priority<=0 || !executeTask(immediate)) break;
 +			updateState();
++			strategicCampaign->captureTurnQuestions(*this);
 +		}
 +		tempResults.clear();
++		strategicCampaign->admitBackground(*this);
 +		strategicCampaign->reviewStrategy(*this);
 +	}
  

@@ -70,3 +70,12 @@ target_include_directories(strategic-intent-driver PRIVATE
     "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
 target_link_libraries(strategic-intent-driver PRIVATE "${VCMI_LIBRARY}")
 add_test(NAME strategic-intent COMMAND strategic-intent-driver)
+add_executable(background-planning-driver ../background_planning_driver.cpp
+    ../../engine/Nullkiller3/BackgroundPlanning.cpp ../../engine/Nullkiller3/Forecasts.cpp
+    ../../engine/Nullkiller3/CampaignState.cpp ../../engine/Nullkiller3/StrategicDecision.cpp)
+target_compile_features(background-planning-driver PRIVATE cxx_std_20)
+target_compile_definitions(background-planning-driver PRIVATE VCMI_DLL=1 BOOST_ALL_DYN_LINK)
+target_include_directories(background-planning-driver PRIVATE
+    ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
+    "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
+target_link_libraries(background-planning-driver PRIVATE "${VCMI_LIBRARY}")

@@ -7,13 +7,14 @@ Choose or materially reconsider the saved victory course.
 Check victory conditions, map size/coverage, bases, forces, income, production and native travel times. Known coordinates alone do not establish reachability.
 
 ## Alternatives to compare
+- Separate observed enemy facts from uncertain intent hypotheses; choose a supported countermeasure or explain its absence through reason/evidence, assumptions and alternatives in this reply.
 - Compare supported victory courses by time to victory, usable force, losses and exposed bases. Prefer the shortest credible winning course.
 - Compare early offense with useful mines and neutral towns for income/recruits or staging: access, losses, holding and onward routes. Compare army production/delivery; long travel favors comparison, while a nearby vulnerable base may favor attack.
 
 ## Benefits, costs and risks
 - Work backward from victory into 3-6 measurable stages grouped by game week. For a multiweek course, detail the current week and make later weeks conditional on supported forecasts.
-- Each week names target mines/towns or barriers, buildings and their purpose, recruitable troops and delivery to a commander, and the operation they unlock. State resource needs, readiness, base protection and the review point; identify missing evidence.
-- Record week and outcome in milestone descriptions, link stages through depends_on, and execute the next steps through operational goals. Explain postponing a useful nearby mine or attack by its concrete blocker and how to remove it.
+- Name weekly targets/barriers, buildings/purpose, recruits/delivery and the operation unlocked. State resources, readiness, base protection, review point and missing evidence.
+- Record weeks/outcomes in milestones linked by depends_on; execute through goals. Explain any postponed useful nearby mine or attack: concrete blocker and its removal.
 - Compare acting now with waiting: own improvement, enemy gains and the condition that makes the next operation feasible.
 - Compare supported recurring income/recruitable growth over several weeks with holding, delivery and enemy gains. Beyond supplied forecasts remains conditional; wealth matters through usable military advantage.
 

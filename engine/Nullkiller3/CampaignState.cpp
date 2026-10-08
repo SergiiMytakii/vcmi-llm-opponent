@@ -230,7 +230,7 @@ CampaignState::CampaignState(const JsonNode & saved)
     restoreError.clear();
 }
 
-bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, std::string & reason)
+bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, std::string & reason, int64_t executionDay)
 {
     auto reject = [&](const char * why) { reason = why; return false; };
     if(!fields(proposal, {"version", "revision", "approach", "horizon_days", "goals", "reserves", "policy"})
@@ -243,7 +243,7 @@ bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, st
     if(!goals.isVector() || goals.Vector().empty() || goals.Vector().size() > 12) return reject("invalid_goal_count");
     std::map<std::string, const JsonNode *> byID;
     std::set<std::string> hiredCandidates;
-    const int64_t day = world["day"].Integer();
+    const int64_t day = executionDay ? executionDay : world["day"].Integer();
     for(const auto & goal : goals.Vector())
     {
         if(!(goal["kind"].String()=="hire_helper"

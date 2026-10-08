@@ -7,7 +7,8 @@
 #include <functional>
 #include <thread>
 #include <system_error>
-#ifdef __APPLE__
+#include <mutex>
+#ifndef _WIN32
 #include <cerrno>
 #include <fcntl.h>
 #endif
@@ -53,8 +54,21 @@ Reply exchange(const std::string & executable, const std::vector<std::string> & 
 	const auto deadline = std::chrono::steady_clock::now() + timeout;
 	try
 	{
+        // Pipe creation and spawn are short; transport waits remain independent.
+        // Without CLOEXEC, a concurrent child can inherit another request's
+        // writer and keep its stdin/stdout alive until that unrelated child exits.
+        static std::mutex spawnMutex;
+        std::unique_lock spawnLock(spawnMutex);
 		asio::io_context io;
 		bp::async_pipe source(io), sink(io);
+        #ifndef _WIN32
+        for(const int descriptor:{source.native_source(),source.native_sink(),sink.native_source(),sink.native_sink()})
+        {
+            const auto flags=::fcntl(descriptor,F_GETFD);
+            if(flags==-1 || ::fcntl(descriptor,F_SETFD,flags|FD_CLOEXEC)==-1)
+                throw std::system_error(errno,std::generic_category(),"protect concurrent controller pipes");
+        }
+        #endif
 		#ifdef __APPLE__
 		if(::fcntl(source.native_sink(), F_SETNOSIGPIPE, 1) == -1)
 			throw std::system_error(errno, std::generic_category(), "protect controller stdin");
@@ -70,6 +84,7 @@ Reply exchange(const std::string & executable, const std::vector<std::string> & 
 		bp::child child(executable, bp::args(arguments), group,
 			bp::std_in < source, bp::std_out > sink, bp::std_err > bp::null);
 		#endif
+        spawnLock.unlock();
 		asio::steady_timer timer(io);
 		std::array<char, 4096> buffer{};
 		bool closed = false;

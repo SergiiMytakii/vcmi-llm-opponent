@@ -127,8 +127,8 @@ def prepare(config_path, out):
         if type(value) is not int or not 1<=value<=maximum:raise ValueError(f'{name} must be an integer from 1 to {maximum}')
     for name,default,maximum in (('analysis_timeout_seconds',60,120),('analysis_interval_seconds',5,60)):
         finite_positive(config.setdefault(name,default),name,maximum)
-    config.setdefault("decision_timeout_seconds", 130)
-    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 130)
+    config.setdefault("decision_timeout_seconds", 70)
+    finite_positive(config["decision_timeout_seconds"], "decision_timeout_seconds", 70)
     controller = config["controller"]
     if not isinstance(controller, list) or not controller or any(not isinstance(a, str) for a in controller):
         raise ValueError("controller must be an argv array, without a shell")

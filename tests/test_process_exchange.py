@@ -14,6 +14,18 @@ DRIVER = Path(os.environ.get("EXCHANGE_DRIVER", ROOT / ".build" / "exchange-driv
 
 
 class ProcessExchangeTest(unittest.TestCase):
+    def test_pending_background_does_not_delay_foreground_eof_or_destruction(self):
+        driver=DRIVER.parent/('background-exchange-driver.exe' if os.name=='nt' else 'background-exchange-driver')
+        with tempfile.TemporaryDirectory() as folder:
+            slow=Path(folder)/'slow.py';fast=Path(folder)/'fast.py'
+            slow.write_text('import sys,time\nsys.stdin.read()\ntime.sleep(30)\n')
+            fast.write_text('import sys,time\ntime.sleep(.2)\nsys.stdin.read()\nprint("foreground")\n')
+            result=subprocess.run([str(driver),sys.executable,str(slow),str(fast)],
+                                  text=True,capture_output=True,timeout=5)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('foreground completed without waiting',result.stdout)
+            self.assertIn('fresh foreground transport after spent time and spawn failure, without callback',result.stdout)
+
     def test_controller_json_is_minified_without_changing_escaped_strings(self):
         driver = DRIVER.parent / ('json-transport-driver.exe' if os.name == 'nt' else 'json-transport-driver')
         facts = {'values':[1, True, None, [], {}], 'text':'Привет \" герой \\ путь\n\t',

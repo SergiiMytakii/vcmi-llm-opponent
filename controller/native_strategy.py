@@ -36,7 +36,7 @@ def goal_objects(request):
 
 def strategic_objects(request):
     world = request['observation']
-    overview = world.get('map_overview', {})
+    overview = world.get('map_overview') or {}
     result = {}
     for key in ('heroes','towns','objects','visible_objects'):
         for item in world.get(key, []):
@@ -99,6 +99,25 @@ def validate_request(request):
         selected = {key:intent[key] for key in ('objective','selection_reason','assumptions','milestones','reconsider_when') if key in intent}
         validate_selected(request, selected, current=True)
     if not references(request) or not evidence(request): raise ValueError('no supported strategic evidence')
+    if 'mode' in request:
+        if request['mode'] != 'prepare_next_turn':raise ValueError('unsupported strategic mode')
+        validate_preparation(request)
+
+
+def validate_preparation(request):
+    world=request['observation'];intent=request['strategic_intent']
+    if type(request.get('execution_day')) is not int or request['execution_day'] != world['day']+1:
+        raise ValueError('invalid next own execution day')
+    if intent is None or type(request.get('intent_revision')) is not int or request['intent_revision'] != intent['revision']:
+        raise ValueError('stale preparation intent revision')
+    if type(request.get('strategic_review')) is not bool or not request.get('campaign'):
+        raise ValueError('missing preparation scope')
+    for name,known in (('allowed_actor_refs',{h['ref'] for h in world['heroes']}),
+                       ('allowed_target_refs',references(request))):
+        values=request.get(name)
+        if not isinstance(values,list) or len(values)!=len(set(values)) or any(not isinstance(v,str) or v not in known for v in values):
+            raise ValueError('invalid preparation refs')
+
 
 
 def same_goal(left, right):
@@ -225,7 +244,7 @@ def reply_schema(request):
     world = request['observation']
     intent = request.get('strategic_intent')
     intent_revision = intent['revision'] if intent else 0
-    day = world['day']
+    day = request['execution_day'] if request.get('mode')=='prepare_next_turn' else world['day']
     text = {'type': 'string', 'minLength': 1, 'maxLength': 160}
     heroes = sorted(h['ref'] for h in world['heroes'])
     hero = {'type': ['string', 'null'], 'enum': [None, *heroes]}
@@ -301,6 +320,45 @@ def reply_schema(request):
         elif kind in ('defend_area','preserve_force'):predicate_props['value'] = integer(day,day+7)
         variants.append(variant)
     if not variants:raise ValueError('no supported native goal vocabulary for this world')
+    if request.get('mode')=='prepare_next_turn':
+        allowed={'develop_town','secure_resource','reinforce_hero','prepare_garrison','hire_helper','visit_site','capture_target'}
+        narrowed=[]
+        for variant in variants:
+            props=variant['properties'];kind=props['kind']['enum'][0]
+            if kind not in allowed:continue
+            targets=[v for v in props['target_ref']['enum'] if v in request['allowed_target_refs']]
+            actors=[] if props['actor_ref']['type']=='null' else [v for v in props['actor_ref']['enum'] if v in request['allowed_actor_refs']]
+            if not targets or props['actor_ref']['type']!='null' and not actors:continue
+            props['target_ref']['enum']=targets
+            if actors:props['actor_ref']['enum']=actors
+            if kind=='develop_town':
+                for town in world['towns']:
+                    if town['ref'] not in targets:continue
+                    buildings=[b['id'] for b in town.get('building_options',[]) if b.get('supported') is True and b['id'] not in town.get('buildings',[])]
+                    if not buildings:continue
+                    town_variant=copy.deepcopy(variant)
+                    town_variant['properties']['target_ref']['enum']=[town['ref']]
+                    town_variant['properties']['building_id']['enum']=buildings
+                    town_variant['properties']['complete_when']['properties']['value']['enum']=buildings
+                    narrowed.append(town_variant)
+            else:narrowed.append(variant)
+        carried=copy.deepcopy((request.get('campaign') or {}).get('goals',[]))
+        carried=[item for item in carried if world.get('goal_statuses',{}).get(item['id'],{}).get('state')!='completed'
+                 and not (item['kind']=='develop_town' and any(t['ref']==item['target_ref'] and item['building_id'] in t.get('buildings',[]) for t in world['towns']))]
+        for item in carried:item.setdefault('risk',None)
+        for item in carried:
+            old_variant=copy.deepcopy(goal)
+            old_variant['enum']=[item]
+            if item['kind']=='hire_helper':
+                for key in ('candidate_ref','helper_role','job_ref'):
+                    old_variant['properties'][key]={'type':'string','enum':[item[key]]}
+                    old_variant['required'].append(key)
+            if item['kind']=='prepare_garrison':
+                old_variant['properties']['garrison_mode']={'type':'string','enum':[item['garrison_mode']]}
+                old_variant['required'].append('garrison_mode')
+            narrowed.append(old_variant)
+        if not narrowed:raise ValueError('no supported preparation goals')
+        variants=narrowed
     goal = {'anyOf':variants}
     approach = {'type': 'string', 'enum': list(APPROACHES)}
     plan = _object({'version': {**integer(3,3), 'enum':[3]}, 'revision': integer(request['identity']['revision']+1,2147483647),
@@ -313,11 +371,16 @@ def reply_schema(request):
     # Bind deadlines to the model's chosen horizon before generation. Separate
     # branches retain every supported horizon without admitting contradictory plans.
     plans = []
-    for horizon in range(3, 8):
+    minimum_horizon=3
+    if request.get('mode')=='prepare_next_turn' and not request['strategic_review']:
+        for previous in (request.get('campaign') or {}).get('goals',[]):
+            if world.get('goal_statuses',{}).get(previous['id'],{}).get('state')!='completed':
+                minimum_horizon=max(minimum_horizon,previous['deadline_day']-day)
+    for horizon in range(minimum_horizon, 8):
         option = copy.deepcopy(plan)
         option['properties']['horizon_days'] = {**integer(horizon, horizon), 'enum':[horizon]}
         for variant in option['properties']['goals']['items']['anyOf']:
-            variant['properties']['deadline_day'] = integer(day, day+horizon)
+            if 'enum' not in variant:variant['properties']['deadline_day'] = integer(day, day+horizon)
         plans.append(option)
     properties = {'protocol':{**integer(2,2),'enum':[2]},
                   'request_id':{'type':'string','enum':[request['request_id']]},
@@ -343,6 +406,20 @@ def reply_schema(request):
     if needs_defense_exit(request):
         properties['defense_exit']={'anyOf':[{'type':'null'},_object({
             'waiting_for':text,'expected_gain':text,'next_step':text})]}
+    if request.get('mode')=='prepare_next_turn':
+        properties.update(mode={'type':'string','enum':['prepare_next_turn']},
+                          execution_day={**integer(day,day),'enum':[day]},
+                          intent_revision={**integer(intent_revision,intent_revision),'enum':[intent_revision]})
+        if not request['strategic_review']:
+            properties['decision']['enum']=['revise']
+            properties['plan']['anyOf']=plans
+            properties['strategy_update']['properties']['decision']['enum']=['keep']
+            properties['strategy_update']['properties']['selected']={'type':'null'}
+            properties['strategy_update']['properties']['change_reason']={'type':'null'}
+            properties['operation_focus']['properties']['revision']['enum']=[intent_revision]
+            properties['alternatives']=array(properties['alternatives']['items'],0,0)
+            properties['assignments']['enum']=[world.get('strategy_assignments',[])]
+            for option in plans:option['properties']['policy']['enum']=[request['campaign']['policy']]
     return _object(properties)
 
 
@@ -414,7 +491,8 @@ def validate_reply(request, reply, wire=False):
                   and front.get('threats') and front.get('status') in
                   ('insufficient_current_force','unbounded_opposition','observed_threat_timing_unknown')
                   for front in request['observation'].get('forecasts',{}).get('defenses',[]))
-    if exposed and not any(option['approach']=='defense' for option in reply['alternatives']):
+    routine=request.get('mode')=='prepare_next_turn' and not request['strategic_review']
+    if exposed and not routine and not any(option['approach']=='defense' for option in reply['alternatives']):
         raise ValueError('exposed town requires a defense comparison, not a mandatory defense decision')
     plan = reply['plan'] if reply['decision'] == 'revise' else request.get('campaign')
     if reply['decision'] == 'retain':
@@ -507,7 +585,8 @@ def validate_reply(request, reply, wire=False):
                 raise ValueError('resource predicate does not prove goal')
         if kind in ('defend_area','preserve_force') and predicate['value']>g['deadline_day']:
             raise ValueError('holding predicate exceeds deadline')
-    if any(g['deadline_day'] > request['observation']['day']+plan['horizon_days'] for g in goals.values()):
+    execution_day=request['execution_day'] if request.get('mode')=='prepare_next_turn' else request['observation']['day']
+    if any(g['deadline_day'] > execution_day+plan['horizon_days'] for g in goals.values()):
         raise ValueError('goal exceeds horizon')
     if reply['decision'] == 'revise':
         # Match CampaignState's current-force/funds contract before emitting a reply.

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent
 MODEL = 'gpt-5.6-terra'
 REASONING_EFFORT = 'none'
 VERSION = 'codex-cli 0.160.0'
-TIMEOUT = 120  # NK3: recorder 130s, native exchange 140s.
+TIMEOUT = 60  # NK3: recorder 70s, native exchange 80s.
 LEGACY_TIMEOUT = 60  # Deprecated protocol 1 retains its native 70s boundary.
 LIMIT = 1024 * 1024
 DISABLED = '''shell_tool unified_exec shell_snapshot apps plugins remote_plugin memories
@@ -27,6 +27,10 @@ view_image skill_search skill_mcp_dependency_install hooks tool_suggest sleep_to
 workspace_dependencies code_mode code_mode_host code_mode_only unbounded_connection_retries
 realtime_conversation deferred_executor send_message_to_user_async request_permissions_tool
 token_budget current_time_reminder deferred_tool_world_state standalone_web_search'''.split()
+
+
+def reasoning_effort(request):
+    return 'low' if request.get('protocol') == 2 and request.get('mode') == 'prepare_next_turn' else REASONING_EFFORT
 
 
 def validate_request(request):
@@ -187,7 +191,7 @@ def choose(request):
     try:
         answer,metadata=invoke_model(request,schema,instructions,timeout=timeout,deadline=deadline,
             knowledge=knowledge,guide=guide,guide_info=guide_info,game_rules=game_rules,rules_info=rules_info,
-            decision_dir=folder,max_output_bytes=32768)
+            decision_dir=folder,max_output_bytes=32768,effort=reasoning_effort(request))
         answer=validate_reply(request,answer)
     except BaseException as error:
         if not hasattr(error,'usage'):error.usage=metadata.get('usage')

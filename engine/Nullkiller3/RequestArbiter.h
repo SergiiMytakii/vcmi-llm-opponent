@@ -38,7 +38,7 @@ struct ArbiterState
     std::map<std::string, std::string> addressed;
 };
 
-enum class RequestReason { Needed, NoNewDecision, BudgetExhausted, InFlight };
+enum class RequestReason { Needed, NoNewDecision, InFlight };
 
 struct RequestDecision
 {
@@ -87,7 +87,6 @@ public:
     RequestDecision consider(const std::vector<StrategicSignal> & signals) const
     {
         RequestDecision result;
-        bool critical = false;
         // Keep one current fact-set per question; duplicate module signals
         // describe one decision, not multiple model calls.
         std::map<std::string, StrategicSignal> questions;
@@ -107,7 +106,6 @@ public:
         for(const auto & [question, signal] : questions)
         {
             result.signals.push_back(signal);
-            critical |= signal.critical;
         }
         if(result.signals.empty())
             return result;
@@ -116,15 +114,9 @@ public:
             result.reason = RequestReason::InFlight;
             return result;
         }
-        result.deadlineMs = std::max<int64_t>(0,
-            budget.waitMs - (critical ? 0 : budget.criticalReserveMs));
-        // A normal decision needs a useful inference window. Critical events
-        // may still spend the reserved time, including a shorter last window.
-        if(result.deadlineMs == 0 || (!critical && result.deadlineMs < 120000))
-        {
-            result.reason = RequestReason::BudgetExhausted;
-            return result;
-        }
+        // Each question receives a complete transport window. Saved daily
+        // time/token balances are diagnostic and cannot suppress a new choice.
+        result.deadlineMs = 80000;
         result.request = true;
         result.reason = RequestReason::Needed;
         return result;

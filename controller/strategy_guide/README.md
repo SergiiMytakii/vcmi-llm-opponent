@@ -46,8 +46,9 @@ planning call or guide-specific aggregate token admission check.
 
 Each native strategic request advertises an independent 120000-token allowance.
 Cumulative token consumption does not block another new strategic question.
-Elapsed walltime, critical time reserve and fact deduplication remain shared and
-persisted; loading a save never refunds elapsed time. Token usage remains recorded.
+Each needed request receives an independent 60-second model deadline, with 70/80-second
+recorder/native transport guards. Saved time/token usage is diagnostic; fact deduplication
+and one foreground in-flight request still govern admission.
 
 Ordinary protocol 2 starts with the bundled guide. Override the root with
 `VCMI_STRATEGY_GUIDE=/absolute/guide`; set `VCMI_STRATEGY_GUIDE_MODE=off` for a

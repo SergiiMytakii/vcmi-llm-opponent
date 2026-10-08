@@ -312,7 +312,24 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
         request["campaign"]["goals"].Vector().end(),[](const auto & goal) {
             return goal["kind"].String()=="defend_area" || goal["kind"].String()=="preserve_force";
         });
+    const bool background=request["mode"].String()=="prepare_next_turn";
+    const bool routine=background && !request["strategic_review"].Bool();
     auto replyShape=reply;
+    if(background)
+    {
+        for(const auto * key:{"mode","execution_day","intent_revision"})
+        {
+            if(reply[key]!=request[key]) return reject("invalid_preparation_identity");
+            replyShape.Struct().erase(key);
+        }
+        if(reply["identity"]["revision"]!=current.plan()["revision"]
+            || request["intent_revision"]!=request["strategic_intent"]["revision"])
+            return reject("stale_preparation_revision");
+        if(routine && (reply["strategy_update"]["decision"].String()!="keep"
+            || reply["assignments"]!=request["observation"]["strategy_assignments"]
+            || (!reply["plan"].isNull() && reply["plan"]["policy"]!=current.plan()["policy"])))
+            return reject("routine_changed_global_contract");
+    }
     if(previousHold)
     {
         if(!replyShape.Struct().count("defense_exit")) return reject("missing_defense_exit");
@@ -339,7 +356,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
     CampaignState trial = current;
     if(reply["decision"].String() == "revise")
     {
-        if(!trial.accept(reply["plan"], freshWorld, reason)) return false;
+        if(!trial.accept(reply["plan"], freshWorld, reason,background ? request["execution_day"].Integer() : 0)) return false;
         bool unfinished=false;
         for(const auto & [id,status]:trial.statuses().Struct())
             unfinished |= status["state"].String()!="completed";
@@ -397,7 +414,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
             if(!roles.count(actor)) return reject("goal_actor_has_no_role");
         }
     const auto & alternatives = reply["alternatives"];
-    if(!alternatives.isVector() || alternatives.Vector().size() < 2 || alternatives.Vector().size() > 4)
+    if(!alternatives.isVector() || alternatives.Vector().size() < (routine ? 0 : 2) || alternatives.Vector().size() > (routine ? 0 : 4))
         return reject("missing_strategic_alternatives");
     const std::set<std::string> approaches{"economy", "expansion", "offense", "defense", "scouting"};
     std::set<std::string> compared;
@@ -409,7 +426,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
     bool defenseCompared=false;
     for(const auto & alternative:alternatives.Vector()) defenseCompared |= alternative["approach"].String()=="defense";
     for(const auto & defense:freshWorld["forecasts"]["defenses"].Vector())
-        if(!defense["threats"].Vector().empty() && !defenseCompared
+        if(!routine && !defense["threats"].Vector().empty() && !defenseCompared
             && (defense["status"].String()=="insufficient_current_force" || defense["status"].String()=="unbounded_opposition"
                 || defense["status"].String()=="observed_threat_timing_unknown"))
             return reject("exposed_town_without_defense_comparison");

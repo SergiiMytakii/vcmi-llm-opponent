@@ -3,6 +3,7 @@
 #include "CampaignState.h"
 #include "RequestArbiter.h"
 #include "ResourceLedger.h"
+#include "BackgroundExchange.h"
 #include <atomic>
 #include <mutex>
 #include <chrono>
@@ -78,6 +79,12 @@ class NativeCampaign
     std::atomic<bool> exchangeCancelled{false};
     std::string generation;
     bool invalidBudget = false;
+    BackgroundExchange background;
+    JsonNode backgroundRequest, backgroundObservation;
+    int64_t preparedExecutionDay=-1, backgroundAdmissionDay=-1;
+    bool invalidPreparationMarker=false;
+    std::map<std::string,StrategicSignal> unresolvedTurnQuestions;
+    int64_t unresolvedQuestionDay=-1;
     std::mutex learningMutex;
     int64_t learningSequence = 0;
     JsonNode pendingLearningEnd;
@@ -111,8 +118,14 @@ public:
     explicit NativeCampaign(const JsonNode & saved,const JsonNode & returnNamespaces = JsonNode());
     bool reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle = false);
     bool reviewIdleArmy(NK2AI::Nullkiller & ai);
+    void prepareNextTurn(NK2AI::Nullkiller & ai);
+    void startBackground() { std::string requestID; if(background.start(&requestID)) logBackgroundStart(requestID); }
+    void logBackgroundStart(const std::string & requestID) const;
+    void captureTurnQuestions(NK2AI::Nullkiller & ai);
+    void admitBackground(NK2AI::Nullkiller & ai);
     void cancelExchange() { exchangeCancelled = true; }
-    void cancel() { stopping = true; cancelExchange(); }
+    void invalidateBackground() { background.cancel(); }
+    void cancel() { stopping = true; cancelExchange(); invalidateBackground(); }
     bool isStopping() const { return stopping; }
     bool executionWasInterrupted() const { return replanAfterCombat; }
     bool shouldInterruptExecution() const { return executionActive && replanAfterCombat; }
