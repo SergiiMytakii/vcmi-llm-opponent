@@ -155,8 +155,7 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         const auto fresh=actor ? automaticMoveReview(ai,actor,int3(target[0].Integer(),target[1].Integer(),target[2].Integer())) : JsonNode();
         if(fresh.isNull()) continue;
         world["automatic_safety_reviews"].Vector().push_back(fresh);
-        result.push_back({"automatic_safety:"+ref,fresh.toCompactString(),true,true,actionable,
-            fresh["reason"].String()=="passage_crossing_requires_fresh_decision"});
+        result.push_back(automaticSafetySignal(fresh,world["day"].Integer(),actionable));
     }
     const auto intentSignals=strategicIntentSignals(persisted["strategic_intent"],world,actionable);
     result.insert(result.end(),intentSignals.begin(),intentSignals.end());

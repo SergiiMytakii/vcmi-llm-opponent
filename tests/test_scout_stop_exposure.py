@@ -16,6 +16,7 @@ class ScoutStopExposureTest(unittest.TestCase):
         source = r'''
 #include "Global.h"
 #include "KnownLandApproach.h"
+#include "StrategicDecision.h"
 #include <stdexcept>
 using namespace nullkiller3;
 JsonNode json(const std::string & text) { JsonParsingSettings p; p.strict=true; p.mode=JsonParsingSettings::JsonFormatMode::JSON; return JsonNode(text.data(),text.size(),p,"scout exposure proof"); }
@@ -30,7 +31,109 @@ int main() {
             if boost: cmd.append('-I'+str(boost))
             compiled=subprocess.run(cmd+[str(cpp),str(LIBRARY),'-Wl,-rpath,'+str(LIBRARY.parent),'-o',str(binary)],capture_output=True,text=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr)
-            subprocess.run([str(binary)],check=True,capture_output=True,text=True)
+            result=subprocess.run([str(binary)],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_helper_route_progress_does_not_repeat_the_same_safety_question(self):
+        self.proof(r'''
+auto review=json(R"({"hero_ref":"helper","reason":"automatic_helper_approaches_stronger_visible_enemy","status":"conditional_unchanged_route","origin":[0,0,0],"stop_positions":[[3,0,0]],"target_position":[10,0,0],"own_strength":107,"visible_threats":[{"enemy_ref":"enemy","position":[50,0,0],"army_interval":{"lower":10000,"upper":15000},"tile_distance":47,"known_land_approach":{"status":"no_visible_neutral_barrier_on_known_land_connection","known_land_steps":47,"movement_scenario":{"status":"conditional_direct_land_approach","turns":3,"daily_points":2000}}}]})");
+RequestArbiter arbiter;arbiter.beginTurn(1,{280000,120000,40000});
+auto first=arbiter.consider({automaticSafetySignal(review,1,true)});
+require(first.request);arbiter.dispatched(first);arbiter.finished(22000,73532);
+review["origin"]=json("[1,0,0]");review["stop_positions"]=json("[[4,0,0]]");
+review["visible_threats"][0]["tile_distance"].Integer()=46;
+review["visible_threats"][0]["known_land_approach"]["known_land_steps"].Integer()=46;
+require(!arbiter.consider({automaticSafetySignal(review,1,true)}).request);
+RequestArbiter restored(arbiter.save());
+restored.beginTurn(1,{280000,120000,40000});
+require(!restored.consider({automaticSafetySignal(review,1,true)}).request);
+''')
+
+    def test_helper_safety_reconsiders_new_threats_and_keeps_strict_unknown_and_passage_reviews(self):
+        self.proof(r'''
+auto review=json(R"({"hero_ref":"helper","reason":"automatic_helper_approaches_stronger_visible_enemy","status":"conditional_unchanged_route","origin":[0,0,0],"stop_positions":[[3,0,0]],"target_position":[10,0,0],"own_strength":107,"visible_threats":[{"enemy_ref":"enemy","position":[50,0,0],"army_interval":{"lower":10000,"upper":15000},"tile_distance":47,"known_land_approach":{"status":"no_visible_neutral_barrier_on_known_land_connection","known_land_steps":47,"movement_scenario":{"status":"conditional_direct_land_approach","turns":3,"daily_points":2000}}}]})");
+RequestArbiter arbiter;arbiter.beginTurn(1,{280000,120000,40000});
+auto first=arbiter.consider({automaticSafetySignal(review,1,true)});
+arbiter.dispatched(first);arbiter.finished(22000,73532);
+auto changed=review;changed["visible_threats"][0]["enemy_ref"].String()="new_enemy";
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+changed=review;changed["visible_threats"][0]["position"]=json("[49,0,0]");
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+changed=review;changed["visible_threats"][0]["army_interval"]["lower"].Integer()=20000;
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+changed=review;changed["own_strength"].Integer()=100;
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+changed=review;changed["target_position"]=json("[11,0,0]");
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+changed=review;changed["visible_threats"][0]["known_land_approach"]["movement_scenario"]["turns"].Integer()=2;
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+require(arbiter.consider({automaticSafetySignal(review,2,true)}).request);
+// Missing movement evidence never receives the coarser comparison.
+review["visible_threats"][0]["known_land_approach"].Struct().erase("movement_scenario");
+first=arbiter.consider({automaticSafetySignal(review,1,true)});
+arbiter.dispatched(first);arbiter.finished(1000,100);
+changed=review;changed["stop_positions"]=json("[[4,0,0]]");
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+// Passage crossing remains critical and exact, independent of helper coalescing.
+review["reason"].String()="passage_crossing_requires_fresh_decision";
+auto crossing=automaticSafetySignal(review,1,true);require(crossing.critical);
+first=arbiter.consider({crossing});arbiter.dispatched(first);arbiter.finished(1000,100);
+changed=review;changed["stop_positions"]=json("[[4,0,0]]");
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+''')
+
+    def test_multiple_visible_threats_keep_the_saved_review_loadable(self):
+        self.proof(r'''
+std::vector<KnownLandTile> land(13);JsonNode positions;positions.Vector();
+for(size_t i=0;i<land.size();++i) {
+ positions.Vector().push_back(json("["+std::to_string(i)+",0,0]"));
+ if(i) { land[i].neighbors.push_back(i-1);land[i].movementCosts.push_back(100); }
+ if(i+1<land.size()) { land[i].neighbors.push_back(i+1);land[i].movementCosts.push_back(100); }
+}
+auto review=json(R"({"hero_ref":"helper","reason":"automatic_helper_approaches_stronger_visible_enemy","status":"conditional_unchanged_route","origin":[0,0,0],"stop_positions":[[3,0,0]],"target_position":[10,0,0],"own_strength":107,"visible_threats":[]})");
+auto threat=json(R"({"enemy_ref":"enemy","position":[12,0,0],"army_interval":{"basis":"UI creature counts and public creature AI values; enemy combat bonuses and intentions unknown","lower":10000,"upper":15000},"tile_distance":9})");
+threat["known_land_approach"]=knownLandApproach(land,12,3,500);
+for(int i=0;i<16;++i) {
+ threat["enemy_ref"].String()="enemy"+std::to_string(i);
+ review["visible_threats"].Vector().push_back(threat);
+}
+RequestArbiter arbiter;arbiter.beginTurn(1,{280000,120000,40000});
+auto before=review;
+for(auto & threat:before["visible_threats"].Vector()) threat["known_land_approach"].Struct().erase("movement_scenario");
+if(before.toCompactString().size()>8192) throw std::runtime_error("baseline "+std::to_string(before.toCompactString().size()));
+require(automaticSafetySignal(review,1,true).facts.size()<=before.toCompactString().size());
+auto first=arbiter.consider({automaticSafetySignal(review,1,true)});
+arbiter.dispatched(first);arbiter.finished(22000,73532);
+// NativeCampaign::restoreArbiter rejects saved fact strings above 8192 bytes.
+for(const auto & [question,facts]:arbiter.save().addressed) require(facts.size()<=8192);
+RequestArbiter restored(arbiter.save());
+require(!restored.consider({automaticSafetySignal(review,1,true)}).request);
+require(review["visible_threats"][0]["known_land_approach"]["movement_scenario"]["assumptions"].isString());
+// One unknown enemy retains exact route facts without duplicating known prose.
+review["visible_threats"][0]["known_land_approach"].Struct().erase("movement_scenario");
+require(automaticSafetySignal(review,1,true).facts.size()<=before.toCompactString().size());
+first=restored.consider({automaticSafetySignal(review,1,true)});
+require(first.request);restored.dispatched(first);restored.finished(1000,100);
+for(const auto & [question,facts]:restored.save().addressed) require(facts.size()<=8192);
+auto moved=review;moved["stop_positions"]=json("[[4,0,0]]");
+require(restored.consider({automaticSafetySignal(moved,1,true)}).request);
+''')
+
+    def test_helper_review_retains_conditional_approach_turns_for_reconsideration(self):
+        self.proof(r'''
+std::vector<KnownLandTile> land(13);JsonNode positions;positions.Vector();
+for(size_t i=0;i<land.size();++i) {
+ positions.Vector().push_back(json("["+std::to_string(i)+",0,0]"));
+ if(i) { land[i].neighbors.push_back(i-1);land[i].movementCosts.push_back(100); }
+ if(i+1<land.size()) { land[i].neighbors.push_back(i+1);land[i].movementCosts.push_back(100); }
+}
+auto world=json(R"({"enemy_players":[1],"visible_objects":[{"ref":"enemy","kind":"hero","owner":1,"position":[12,0,0],"army_interval":{"lower":10000}}]})");
+auto exposure=scoutStopExposure(positions[0],json(R"([{"position":[3,0,0],"turn":0}])"),true,world,land,positions,true);
+auto review=helperStopReview(positions[0],107,exposure,land,positions,500);
+require(review["visible_threats"][0]["known_land_approach"]["movement_scenario"]["turns"].Integer()==2);
+require(review["visible_threats"][0]["known_land_approach"]["movement_scenario"]["status"].String()=="conditional_direct_land_approach");
+require(review["enemy_movement_unknown"].Bool());
+''')
 
     def test_directed_portal_and_gate_connections_expose_cross_level_enemy(self):
         self.proof(r'''

@@ -92,7 +92,8 @@ if sys.argv[1:]==['--version']:
 args=sys.argv;r=json.load(sys.stdin)
 schema=json.loads(pathlib.Path(args[args.index('--output-schema')+1]).read_text())
 assert 'action_id' not in schema['properties'] and 'actions' not in r
-assert args[args.index('-m')+1]=='gpt-6.1-sol'
+assert args[args.index('-m')+1]=='gpt-5.6-terra'
+assert 'model_reasoning_effort="none"' in args
 plan=dict(version=3,revision=1,approach='economy',horizon_days=5,
  goals=[dict(id='guild',kind='develop_town',actor_ref=None,target_ref='object:1',deadline_day=3,
  priority=80,building_id=0,min_army_value=0,depends_on=[],required_capabilities=['build'],

@@ -25,9 +25,9 @@ schema = json.loads(pathlib.Path(args[args.index('--output-schema') + 1]).read_t
 request = json.loads(sys.stdin.read())
 assert 'OPENAI_API_KEY' not in os.environ and 'CODEX_API_KEY' not in os.environ
 assert '--ignore-user-config' in args and '--ignore-rules' in args
-assert args[args.index('-m') + 1] == 'gpt-6.1-sol'
+assert args[args.index('-m') + 1] == 'gpt-5.6-terra'
 assert 'forced_login_method="chatgpt"' in args
-assert 'model_reasoning_effort="low"' in args
+assert 'model_reasoning_effort="none"' in args
 assert schema['properties']['action_id']['enum'] == ['end', 'build-0']
 if mode == 'timeout': time.sleep(90)
 if mode == 'late': time.sleep(38)
@@ -73,8 +73,8 @@ with patch.object(time, 'monotonic', side_effect=lambda: 60.001 if Path({str(dec
         reply, info = self.run_controller()
         self.assertEqual(reply['action_id'], 'build-0')
         self.assertEqual(info['provider'], 'codex')
-        self.assertEqual(info['model'], 'gpt-6.1-sol')
-        self.assertEqual(info['reasoning_effort'], 'low')
+        self.assertEqual(info['model'], 'gpt-5.6-terra')
+        self.assertEqual(info['reasoning_effort'], 'none')
         self.assertEqual(info['usage']['input_tokens'], 12)
 
     def test_failed_or_invalid_choices_never_spend_resources(self):

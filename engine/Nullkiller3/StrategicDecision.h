@@ -8,6 +8,51 @@
 
 namespace nullkiller3
 {
+inline StrategicSignal automaticSafetySignal(const JsonNode & review,int64_t day,bool actionable)
+{
+    auto facts=review;
+    bool comparable=review["reason"].String()=="automatic_helper_approaches_stronger_visible_enemy"
+        && review["origin"].Vector().size()==3 && review["stop_positions"].Vector().size()==1
+        && review["stop_positions"][0].Vector().size()==3;
+    for(const auto & threat:review["visible_threats"].Vector())
+    {
+        const auto & scenario=threat["known_land_approach"]["movement_scenario"];
+        comparable &= scenario["status"].String()=="conditional_direct_land_approach"
+            && scenario["turns"].isNumber() && scenario["turns"].Integer()>0;
+    }
+    if(review["reason"].String()=="automatic_helper_approaches_stronger_visible_enemy")
+    {
+        facts.Struct().erase("basis");facts.Struct().erase("coverage");
+        for(auto & threat:facts["visible_threats"].Vector())
+        {
+            const auto & scenario=static_cast<const JsonNode &>(threat)["known_land_approach"]["movement_scenario"];
+            // Static prose stays in the observation, outside saved fact identity.
+            if(scenario.isStruct()) threat["known_land_approach"]["movement_scenario"].Struct().erase("assumptions");
+            if(static_cast<const JsonNode &>(threat)["army_interval"].isStruct())
+                threat["army_interval"].Struct().erase("basis");
+        }
+    }
+    if(comparable)
+    {
+        // Compare the reviewed threat, not each ordinary route waypoint.
+        // Conditional approach turns are a review boundary, never a safety grant.
+        facts["review_day"].Integer()=day;
+        facts["origin_level"]=review["origin"][2];
+        facts["stop_level"]=review["stop_positions"][0][2];
+        facts.Struct().erase("origin");facts.Struct().erase("stop_positions");
+        for(auto & threat:facts["visible_threats"].Vector())
+        {
+            threat.Struct().erase("tile_distance");
+            threat["known_land_approach"].Struct().erase("known_land_steps");
+        }
+        auto & threats=facts["visible_threats"].Vector();
+        std::sort(threats.begin(),threats.end(),[](const auto & a,const auto & b) {
+            return a["enemy_ref"].String()<b["enemy_ref"].String();
+        });
+    }
+    return {"automatic_safety:"+review["hero_ref"].String(),facts.toCompactString(),true,true,actionable,
+        review["reason"].String()=="passage_crossing_requires_fresh_decision"};
+}
 inline JsonNode controllerFailureFeedback(const JsonNode & reply,const JsonNode & request)
 {
     auto shape=[](const JsonNode & value,std::initializer_list<const char *> keys) {

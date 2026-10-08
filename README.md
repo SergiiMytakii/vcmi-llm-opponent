@@ -6,8 +6,8 @@ Development now uses our own VCMI build. Upstream acceptance is optional. The en
 When upgrading VCMI, update the pin, reapply the small integration patch, rebuild, and repeat acceptance checks
 before releasing our matching build. Installed VCMI and existing saves must remain separate.
 
-The working implementation calls Codex CLI through a ChatGPT subscription using `gpt-6.1-sol`
-with low reasoning. The adapter offers construction, troop recruitment, town-tavern hero hiring, hero destinations,
+The working implementation calls Codex CLI through a ChatGPT subscription using `gpt-5.6-terra`
+with reasoning effort `none`. The adapter offers construction, troop recruitment, town-tavern hero hiring, hero destinations,
 exploration, attacks and end-turn; VCMI executes routes and battles. Real Codex construction and
 recruitment, scripted movement, and mixed ExternalAI/Nullkiller2 assignment have local runtime proof.
 The [two-player land scenario](docs/land-duel.md) supplies the initial calibration map.
@@ -111,7 +111,7 @@ initialization; changing a terminal variable does not alter a running process.
 | `analysis_mine_turns` | `2`; `1..30` | Mine-related analysis threshold. |
 | `analysis_scouting_turns` | `3`; `1..30` | Scouting-related analysis threshold. |
 
-The gameplay controller currently uses `gpt-6.1-sol` / `low`, defined in
+The gameplay controller currently uses `gpt-5.6-terra` / `none`, defined in
 `controller/codex.py`. The match JSON's `model` and `reasoning_effort` fields do
 **not** override those gameplay constants. Native-only mode avoids gameplay
 model requests; also set `experience_mode: "off"` to avoid analyst model calls.

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from strategy import strategy_schema, validate_strategy, campaign_schema, validate_campaign
 from batch import validate_batch
 from prompt_context import (compact_json, encode_request, context_parts, bounded_history, without_unknown_army_values,
@@ -14,8 +15,8 @@ from prompt_context import (compact_json, encode_request, context_parts, bounded
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL = 'gpt-6.1-sol'
-REASONING_EFFORT = 'low'
+MODEL = 'gpt-5.6-terra'
+REASONING_EFFORT = 'none'
 VERSION = 'codex-cli 0.160.0'
 TIMEOUT = 120  # NK3: recorder 130s, native exchange 140s.
 LEGACY_TIMEOUT = 60  # Deprecated protocol 1 retains its native 70s boundary.
@@ -197,6 +198,49 @@ def choose(request):
     return answer,metadata
 
 
+def _compact_response_schema(schema):
+    """Share large string enums in an expanded native schema, without changing its language."""
+    def normalize(value):
+        if isinstance(value, list):return [normalize(item) for item in value]
+        if not isinstance(value, dict):return value
+        result = {key:normalize(item) for key,item in value.items()}
+        values = result.get('enum')
+        if result.get('type') == 'string' and values and all(isinstance(v, str) for v in values):
+            if 'minLength' in result and all(len(v) >= result['minLength'] for v in values):
+                del result['minLength']
+            if 'maxLength' in result and all(len(v) <= result['maxLength'] for v in values):
+                del result['maxLength']
+        return result
+
+    normalized = normalize(schema)
+    counts = Counter()
+    nodes = {}
+    def enum_key(value):
+        if value.get('type') == 'string' and 'enum' in value:
+            key = compact_json(value)
+            if len(key.encode('utf-8')) >= 256:return key
+        return None
+    def collect(value):
+        if isinstance(value, dict):
+            key = enum_key(value)
+            if key is not None:counts[key] += 1;nodes[key] = value
+            for item in value.values():collect(item)
+        elif isinstance(value, list):
+            for item in value:collect(item)
+    collect(normalized)
+    names = {key:'allowed_'+str(i) for i,key in enumerate(key for key in counts if counts[key] > 1)}
+    def share(value):
+        if isinstance(value, dict):
+            key = enum_key(value)
+            if key in names:return {'$ref':'#/$defs/'+names[key]}
+            return {key:share(item) for key,item in value.items()}
+        if isinstance(value, list):return [share(item) for item in value]
+        return value
+    result = share(normalized)
+    if names:result['$defs'] = {name:nodes[key] for key,name in names.items()}
+    return result
+
+
 def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effort=REASONING_EFFORT,knowledge=None,guide=None,guide_info=None,game_rules=None,rules_info=None,decision_dir=None,max_output_bytes=8192,deadline=None):
     """Return a validated reply and diagnostics; failures belong to caller fallback."""
     started = time.monotonic()
@@ -230,9 +274,13 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
         if shared_context:instructions += '\n' + SHARED_CONTEXT_INSTRUCTIONS
         if history['applied']:instructions += '\n' + HISTORY_INSTRUCTIONS
         (workspace / 'instructions.txt').write_text(instructions, encoding='utf-8')
-        (workspace / 'schema.json').write_text(compact_json(schema), encoding='utf-8')
+        original_schema_bytes = len(compact_json(schema).encode('utf-8'))
+        # Only the model copy uses references; local validation retains reply_schema().
+        model_schema = _compact_response_schema(schema) if request.get('protocol') == 2 else schema
+        (workspace / 'schema.json').write_text(compact_json(model_schema), encoding='utf-8')
         encoding['instruction_bytes'] = len(instructions.encode('utf-8'))
-        encoding['reply_schema_bytes'] = len(compact_json(schema).encode('utf-8'))
+        encoding['original_reply_schema_bytes'] = original_schema_bytes
+        encoding['reply_schema_bytes'] = len(compact_json(model_schema).encode('utf-8'))
         if decision_dir:
             (Path(decision_dir) / 'codex-instructions.txt').write_text(instructions,encoding='utf-8')
             (Path(decision_dir) / 'input-encoding.json').write_text(compact_json(encoding), encoding='utf-8')
@@ -326,7 +374,7 @@ def invoke_model(request,schema,instructions,*,timeout=TIMEOUT,model=MODEL,effor
                 if decision_dir:
                     (Path(decision_dir) / 'codex-timing.json').write_text(compact_json(timing),encoding='utf-8')
                     (Path(decision_dir) / 'codex-request.json').write_text(model_input, encoding='utf-8')
-                    (Path(decision_dir) / 'codex-schema.json').write_text(compact_json(schema), encoding='utf-8')
+                    (Path(decision_dir) / 'codex-schema.json').write_text(compact_json(model_schema), encoding='utf-8')
                     if (workspace / 'answer.json').is_file():
                         with (workspace / 'answer.json').open('rb') as answer_stream:
                             (Path(decision_dir) / 'codex-answer.json').write_bytes(answer_stream.read(LIMIT))

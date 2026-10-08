@@ -2456,7 +2456,7 @@ JsonNode NativeCampaign::automaticMoveReview(const NK2AI::Nullkiller & ai,const 
         if(assignment["hero_ref"].String()==ref) helper=assignment["role"].String()!="main";
     const auto graph=visibleLandGraph(ai,world,refOf);
     const auto exposure=ordinaryStopExposure(ai,hero,target,world,graph,true);
-    auto review=helper ? helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions) : JsonNode();
+    auto review=helper ? helperStopReview(coordinate(hero->visitablePos()),hero->estimateHeroCombatValue(),exposure,graph.land,graph.positions,graph.dailyMovement) : JsonNode();
     if(review.isNull()) review=townStopReview(ref,coordinate(hero->visitablePos()),exposure,world,graph.land,graph.positions);
     if(!review.isNull()) { review["hero_ref"].String()=ref;review["target_position"]=coordinate(target); }
     return review;

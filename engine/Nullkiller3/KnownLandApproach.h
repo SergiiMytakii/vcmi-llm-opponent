@@ -218,7 +218,7 @@ inline JsonNode scoutStopExposure(const JsonNode & origin,const JsonNode & nodes
 
 // This asks for a strategic choice; it is not enemy reachability or a battle forecast.
 inline JsonNode helperStopReview(const JsonNode & origin,uint64_t ownStrength,const JsonNode & exposure,
-    const std::vector<KnownLandTile> & land,const JsonNode & positions)
+    const std::vector<KnownLandTile> & land,const JsonNode & positions,int64_t dailyPoints=0)
 {
     if(exposure["status"].String()!="conditional_unchanged_route"
         || exposure["stop_positions"].Vector().empty() || exposure["stop_positions"][0]==origin) return JsonNode();
@@ -241,6 +241,13 @@ inline JsonNode helperStopReview(const JsonNode & origin,uint64_t ownStrength,co
         auto review=exposure;
         review["origin"]=origin;review["own_strength"].Integer()=ownStrength;
         review["reason"].String()="automatic_helper_approaches_stronger_visible_enemy";
+        if(dailyPoints>0)
+            for(auto & visible:review["visible_threats"].Vector())
+            {
+                const auto source=cell(visible["position"]),stop=cell(review["stop_positions"][0]);
+                if(source<land.size() && stop<land.size())
+                    visible["known_land_approach"]=knownLandApproach(land,source,stop,dailyPoints);
+            }
         return review;
     }
     return JsonNode();
