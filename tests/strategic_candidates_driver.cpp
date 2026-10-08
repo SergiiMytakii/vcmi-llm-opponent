@@ -14,6 +14,11 @@ int main()
     {
         const auto input=parse(std::string(std::istreambuf_iterator<char>(std::cin),{}));
         const auto & world=input["world"];const auto & plan=input["plan"];const auto & intent=input["intent"];
+        if(input["project_only"].Bool())
+        {
+            std::cout<<nullkiller3::strategicCandidateView(world,plan,intent,!input["local_review"].Bool()).toCompactString()<<'\n';
+            return 0;
+        }
         int64_t calls=0;
         auto quote=[&](const JsonNode & pos,bool frontier,bool area) {
             ++calls;
@@ -37,7 +42,7 @@ int main()
         generated["frontier_options"]=result["scouts"]["frontiers"];
         generated["scouting_options"]=result["scouts"]["scouting"];
         generated["forecasts"]["routes"]=result["targets"]["routes"];
-        result["view"]=nullkiller3::strategicCandidateView(generated,plan,intent);
+        result["view"]=nullkiller3::strategicCandidateView(generated,plan,intent,!input["local_review"].Bool());
         result["memory"]=nullkiller3::strategicCandidateMemory(input["memory"],result["view"]);
         result["overview"]=nullkiller3::strategicMapOverview(world,intent,!input["compact"].Bool());
         auto request=input["request"];

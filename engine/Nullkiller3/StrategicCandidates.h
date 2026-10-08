@@ -225,13 +225,30 @@ inline JsonNode generateTargetCandidates(const JsonNode & world,const JsonNode &
     for(const auto & [ref,route]:chosen) result["routes"].Vector().push_back(route);
     result["probes"].Integer()=probes;return result;
 }
+// Keep referenced guards even when they are far from an own hero. Route,
+// defense and safety evidence must remain readable in a focused model view.
+inline void collectCandidateEvidenceRefs(const JsonNode & value,std::set<std::string> & refs)
+{
+    if(value.isVector()) for(const auto & item:value.Vector()) collectCandidateEvidenceRefs(item,refs);
+    if(value.isStruct()) for(const auto & [key,item]:value.Struct())
+    {
+        if((key=="ref" || key.ends_with("_ref")) && item.isString()) refs.insert(item.String());
+        if(key.ends_with("_refs") && item.isVector())
+            for(const auto & ref:item.Vector()) if(ref.isString()) refs.insert(ref.String());
+        collectCandidateEvidenceRefs(item,refs);
+    }
+}
 // The engine retains its complete observation. Only the model-facing copy is
 // bounded; candidates are not a statement that unlisted objects do not exist.
-inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & plan,const JsonNode & intent=JsonNode())
+inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & plan,const JsonNode & intent=JsonNode(),bool detailed=true)
 {
     auto selected=requiredCandidateRefs(world,plan,intent);
     for(const auto & route:world["forecasts"]["routes"].Vector()) selected.insert(route["target_ref"].String());
+    if(!detailed) for(const auto & [key,value]:world.Struct())
+        if(key!="objects" && key!="visible_objects" && key!="heroes" && key!="towns")
+            collectCandidateEvidenceRefs(value,selected);
     JsonNode view=world;
+    int64_t omittedNeutrals=0;
     view["objects"].Vector().clear();
     for(const auto & object:world["objects"].Vector())
         if(selected.count(object["ref"].String())) view["objects"].Vector().push_back(object);
@@ -239,6 +256,14 @@ inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & p
     for(const auto & object:world["visible_objects"].Vector())
     {
         const auto & kind=object["kind"].String();
+        bool nearby=false;
+        for(const auto & hero:world["heroes"].Vector())
+            nearby |= candidateDistance(object["position"],hero["position"])<=std::max<int64_t>(1,hero["sight_radius"].Integer());
+        if(!detailed && (kind=="monster" || kind=="other") && object["owner"].isNumber()
+            && object["owner"].Integer()<0 && !selected.count(object["ref"].String()) && !nearby)
+        {
+            ++omittedNeutrals;continue;
+        }
         if(selected.count(object["ref"].String()) || kind=="hero" || kind=="town" || kind=="monster"
             || kind=="garrison" || kind=="boat" || kind=="shipyard" || kind=="other" || keymasterObject(object))
             view["visible_objects"].Vector().push_back(object);
@@ -253,6 +278,12 @@ inline JsonNode strategicCandidateView(const JsonNode & world,const JsonNode & p
     view["candidate_generation"]["known_object_count"].Integer()=world["objects"].Vector().size();
     view["candidate_generation"]["observed_frontier_count"].Integer()=world["observed_frontiers"].Vector().size();
     view["candidate_generation"]["visible_object_count"].Integer()=world["visible_objects"].Vector().size();
+    if(!detailed)
+    {
+        view["candidate_generation"]["omitted_visible_neutrals"].Integer()=omittedNeutrals;
+        view["candidate_generation"]["visible_neutral_coverage"].String()=
+            "Local review omits distant neutral monsters/other objects outside candidates and referenced evidence; omitted objects are not absent or safe. Full native route and safety checks still apply.";
+    }
     return view;
 }
 inline JsonNode strategicCandidateMemory(const JsonNode & memory,const JsonNode & view)

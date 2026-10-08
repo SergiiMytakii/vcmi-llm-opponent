@@ -27,7 +27,20 @@ inline StrategicSignal automaticSafetySignal(const JsonNode & review,int64_t day
         {
             const auto & scenario=static_cast<const JsonNode &>(threat)["known_land_approach"]["movement_scenario"];
             // Static prose stays in the observation, outside saved fact identity.
-            if(scenario.isStruct()) threat["known_land_approach"]["movement_scenario"].Struct().erase("assumptions");
+            if(scenario.isStruct())
+            {
+                auto identity=scenario;identity.Struct().erase("assumptions");
+                // Store the three native scenario values without repeating keys
+                // per enemy; this identity also fits the saved arbiter limit.
+                if(identity.Struct().size()==3 && identity["status"].String()=="conditional_direct_land_approach"
+                    && identity["turns"].isNumber() && identity["daily_points"].isNumber())
+                {
+                    JsonNode values;
+                    for(const auto * key:{"status","turns","daily_points"}) values.Vector().push_back(identity[key]);
+                    identity=std::move(values);
+                }
+                threat["known_land_approach"]["movement_scenario"]=std::move(identity);
+            }
             if(static_cast<const JsonNode &>(threat)["army_interval"].isStruct())
                 threat["army_interval"].Struct().erase("basis");
         }

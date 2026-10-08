@@ -67,6 +67,8 @@ changed=review;changed["target_position"]=json("[11,0,0]");
 require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
 changed=review;changed["visible_threats"][0]["known_land_approach"]["movement_scenario"]["turns"].Integer()=2;
 require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
+changed=review;changed["visible_threats"][0]["known_land_approach"]["movement_scenario"]["daily_points"].Integer()=3000;
+require(arbiter.consider({automaticSafetySignal(changed,1,true)}).request);
 require(arbiter.consider({automaticSafetySignal(review,2,true)}).request);
 // Missing movement evidence never receives the coarser comparison.
 review["visible_threats"][0]["known_land_approach"].Struct().erase("movement_scenario");
@@ -93,7 +95,7 @@ for(size_t i=0;i<land.size();++i) {
 auto review=json(R"({"hero_ref":"helper","reason":"automatic_helper_approaches_stronger_visible_enemy","status":"conditional_unchanged_route","origin":[0,0,0],"stop_positions":[[3,0,0]],"target_position":[10,0,0],"own_strength":107,"visible_threats":[]})");
 auto threat=json(R"({"enemy_ref":"enemy","position":[12,0,0],"army_interval":{"basis":"UI creature counts and public creature AI values; enemy combat bonuses and intentions unknown","lower":10000,"upper":15000},"tile_distance":9})");
 threat["known_land_approach"]=knownLandApproach(land,12,3,500);
-for(int i=0;i<16;++i) {
+for(int i=0;i<17;++i) {
  threat["enemy_ref"].String()="enemy"+std::to_string(i);
  review["visible_threats"].Vector().push_back(threat);
 }
@@ -101,7 +103,7 @@ RequestArbiter arbiter;arbiter.beginTurn(1,{280000,120000,40000});
 auto before=review;
 for(auto & threat:before["visible_threats"].Vector()) threat["known_land_approach"].Struct().erase("movement_scenario");
 if(before.toCompactString().size()>8192) throw std::runtime_error("baseline "+std::to_string(before.toCompactString().size()));
-require(automaticSafetySignal(review,1,true).facts.size()<=before.toCompactString().size());
+if(automaticSafetySignal(review,1,true).facts.size()>before.toCompactString().size()) throw std::runtime_error("saved facts "+std::to_string(automaticSafetySignal(review,1,true).facts.size())+" baseline "+std::to_string(before.toCompactString().size()));
 auto first=arbiter.consider({automaticSafetySignal(review,1,true)});
 arbiter.dispatched(first);arbiter.finished(22000,73532);
 // NativeCampaign::restoreArbiter rejects saved fact strings above 8192 bytes.
@@ -111,7 +113,7 @@ require(!restored.consider({automaticSafetySignal(review,1,true)}).request);
 require(review["visible_threats"][0]["known_land_approach"]["movement_scenario"]["assumptions"].isString());
 // One unknown enemy retains exact route facts without duplicating known prose.
 review["visible_threats"][0]["known_land_approach"].Struct().erase("movement_scenario");
-require(automaticSafetySignal(review,1,true).facts.size()<=before.toCompactString().size());
+if(automaticSafetySignal(review,1,true).facts.size()>before.toCompactString().size()) throw std::runtime_error("saved facts "+std::to_string(automaticSafetySignal(review,1,true).facts.size())+" baseline "+std::to_string(before.toCompactString().size()));
 first=restored.consider({automaticSafetySignal(review,1,true)});
 require(first.request);restored.dispatched(first);restored.finished(1000,100);
 for(const auto & [question,facts]:restored.save().addressed) require(facts.size()<=8192);

@@ -37,6 +37,53 @@ class StrategicCandidatesTest(unittest.TestCase):
         return {'world':world,'plan':{'goals':[],'policy':{'max_loss_ratio':.25,'critical_towns':['home']}},
             'coverage':coverage,'memory':{'known_objects':[]}}
 
+    def test_local_review_keeps_relevant_neutrals_and_all_enemy_facts(self):
+        data=self.fixture(0)
+        guards=[{'ref':f'guard-{i}','kind':'monster' if i%2 else 'other',
+                 'owner':-2,'position':[40+i,40,0],'visible':True,
+                 'army_interval':{'status':'unknown','basis':'Player observation'},
+                 'last_seen_day':10} for i in range(80)]
+        guards[0]['position']=[2,0,0]  # Near an own hero.
+        data['world']['visible_objects']=copy.deepcopy(guards)
+        data['world']['objects']=copy.deepcopy(guards)
+        enemies=[{'ref':'enemy','kind':'hero','owner':0,'position':[90,90,0],
+                  'visible':True,'army_interval':{'status':'unbounded'}},
+                 {'ref':'enemy-home','kind':'town','owner':0,'position':[99,99,0],
+                  'visible':False,'stale':True,'last_seen_day':3}]
+        data['world']['visible_objects']+=enemies
+        data['plan']['goals']=[{'kind':'capture_target','actor_ref':'hero','target_ref':'guard-79'}]
+        data['world']['automatic_safety_reviews']=[{'visible_threats':[
+            {'known_land_approach':{'example_guard_refs':['guard-77']}}]}]
+        data['world']['forecasts']['threats'][0]['barrier_ref']='guard-78'
+        original=copy.deepcopy(data)
+        full=self.call(data)['view']
+        data['local_review']=True
+        local=self.call(data)['view']
+        self.assertEqual(data['world'],original['world'])
+        self.assertEqual({o['ref'] for o in local['visible_objects']},
+                         {'guard-0','guard-77','guard-78','guard-79','enemy','enemy-home'})
+        for item in local['visible_objects']:
+            self.assertEqual(item,next(o for o in original['world']['visible_objects'] if o['ref']==item['ref']))
+        self.assertEqual(local['forecasts'],full['forecasts'])
+        self.assertEqual(local['heroes'],full['heroes'])
+        self.assertEqual(local['towns'],full['towns'])
+        self.assertEqual(local['automatic_safety_reviews'],full['automatic_safety_reviews'])
+        self.assertLess(len(json.dumps(local)),len(json.dumps(full))*.6)
+        self.assertEqual(local['candidate_generation']['omitted_visible_neutrals'],76)
+        self.assertIn('not absent',local['candidate_generation']['visible_neutral_coverage'])
+        self.assertEqual(len(full['visible_objects']),82)
+
+    def test_local_review_keeps_route_targets_and_non_neutral_access_options(self):
+        data=self.fixture(0);self.add_objects(data)
+        data['local_review']=True
+        for kind in ('garrison','boat','shipyard','keymaster_tent','border_guard','other'):
+            data['world']['visible_objects'].append({'ref':kind,'kind':kind,'owner':0,
+                                                     'position':[90,90,0],'visible':True})
+        result=self.call(data)
+        visible={o['ref'] for o in result['view']['visible_objects']}
+        self.assertTrue({r['target_ref'] for r in result['targets']['routes']}<=visible|{'hero','home'})
+        self.assertTrue({'garrison','boat','shipyard','keymaster_tent','border_guard','other'}<=visible)
+
     def test_visible_foreign_town_fortification_survives_both_overview_modes(self):
         for compact in (True, False):
             data=self.fixture(0)

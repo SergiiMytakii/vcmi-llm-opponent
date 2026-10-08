@@ -341,7 +341,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         detailedOverview |= signal.question.starts_with("strategy:") || signal.question.starts_with("battle_loss:")
             || signal.question.starts_with("critical_town:") || signal.question.starts_with("defense:")
             || signal.question.starts_with("checkpoint:") || signal.question.starts_with("stagnation:");
-    request["observation"] = strategicCandidateView(world,campaign.plan(),request["strategic_intent"]);
+    request["observation"] = strategicCandidateView(world,campaign.plan(),request["strategic_intent"],detailedOverview);
     request["observation"]["strategy_stalls"]=strategicStalls(request["strategic_intent"],world);
     request["observation"]["map_overview"]=strategicMapOverview(world,request["strategic_intent"],detailedOverview);
     // Retain must echo the exact accepted roles, including order. Expose the
