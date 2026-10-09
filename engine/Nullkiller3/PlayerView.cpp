@@ -189,20 +189,12 @@ JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance
         return result;
     }
     ArmyDescriptor army;
-    if(object->ID == Obj::HERO)
-    {
-        InfoAboutHero info;
-        if(!callback.getHeroInfo(object, info)) return result;
-        army = info.army;
-    }
-    else if(object->ID == Obj::TOWN)
-    {
-        InfoAboutTown info;
-        if(!callback.getTownInfo(object, info)) return result;
-        army = info.army;
-    }
+    // Exact visible troop counts are an explicit privileged observation.
+    // Preserve the visibility gate above and expose no hero skills or town economy.
+    if(const auto * town = dynamic_cast<const CGTownInstance *>(object))
+        army = ArmyDescriptor(town->getUpperArmy(), true);
     else if(const auto * armed = dynamic_cast<const CArmedInstance *>(object))
-        army = InfoAboutArmy(armed, object->ID == Obj::MONSTER).army;
+        army = ArmyDescriptor(armed, object->ID == Obj::HERO || object->ID == Obj::MONSTER);
     else
     {
         result["status"].String() = "not_armed";
@@ -210,18 +202,18 @@ JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance
         result["estimate"].Integer() = 0;
         return result;
     }
-    // Exact UI numbers, when scouting permits them, are ordinary observations.
+    // Other armed objects retain their ordinary categorical observations.
     static constexpr int64_t low[] = {0,1,5,10,20,50,100,250,500,1000};
     static constexpr int64_t high[] = {0,4,9,19,49,99,249,499,999,0};
     int64_t minimum=0, maximum=0, midpoint=0;
     bool bounded=true;
-    const bool exactNeutral = object->ID == Obj::MONSTER && army.isDetailed;
-    if(exactNeutral) result["stacks"].Vector();
+    const bool exactVisible = army.isDetailed;
+    if(exactVisible) result["stacks"].Vector();
     for(const auto & [slot, stack] : army)
     {
         const auto count=stack.getCount();
         const int64_t value=LIBRARY->creh->getCombatValue().getAIValue(stack.getType());
-        if(exactNeutral)
+        if(exactVisible)
         {
             JsonNode observed;
             observed["creature_id"].Integer() = stack.getType()->getId().getNum();
@@ -241,8 +233,8 @@ JsonNode observedArmyInterval(const CCallback & callback, const CGObjectInstance
     result["lower"].Integer()=minimum;
     result["estimate"].Integer()=midpoint;
     if(bounded) result["upper"].Integer()=maximum;
-    result["basis"].String()=exactNeutral
-        ? "Exact currently visible neutral creature counts and public creature AI values; not a battle simulation or loss guarantee"
+    result["basis"].String()=exactVisible
+        ? "Exact currently visible creature counts and public creature AI values; privileged for enemy heroes/towns, excludes hero combat bonuses; not a battle simulation or loss guarantee"
         : "UI creature counts and public creature AI values; enemy combat bonuses and intentions unknown";
     return result;
 }

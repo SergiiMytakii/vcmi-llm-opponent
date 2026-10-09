@@ -40,8 +40,9 @@ public:
     bool checkForVisitableDir(const int3 & src, const int3 & dst) const override;
 };
 
-// Owned armies and visible neutral creature stacks retain exact counts. Other
-// visible armies use the ordinary UI DTO; strengths are not battle probabilities.
+// Owned armies and visible heroes, towns and neutral creatures retain exact counts.
+// Enemy hero/town counts are privileged; fog remains hidden. Strengths are troop
+// values, not hero combat bonuses or battle probabilities.
 void restrictToSupportedMovement(PathfinderOptions & options);
 int3 observedBoatPlacement(const CCallback & callback, const IShipyard * shipyard);
 std::shared_ptr<const CPathsInfo> currentPlayerPaths(const CCallback & callback, const CGHeroInstance * hero, const JsonNode & observedPassages);
