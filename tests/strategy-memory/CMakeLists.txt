@@ -52,7 +52,7 @@ target_include_directories(strategic-candidates-driver PRIVATE
 target_link_libraries(strategic-candidates-driver PRIVATE "${VCMI_LIBRARY}")
 
 add_executable(strategic-request-driver ../strategic_request_driver.cpp
-    ../../engine/Nullkiller3/StrategicContext.cpp
+    ../../engine/Nullkiller3/StrategicRequest.cpp
     ../../engine/TransportJSON/TransportJSON.cpp)
 target_compile_features(strategic-request-driver PRIVATE cxx_std_20)
 target_compile_definitions(strategic-request-driver PRIVATE VCMI_DLL=1 BOOST_ALL_DYN_LINK)

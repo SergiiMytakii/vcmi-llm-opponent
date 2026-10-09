@@ -1,4 +1,4 @@
-"""Native content compatibility with a test-owned request envelope."""
+"""Complete native requests, through the same assembly seam as both turn paths."""
 import json
 import os
 from pathlib import Path
