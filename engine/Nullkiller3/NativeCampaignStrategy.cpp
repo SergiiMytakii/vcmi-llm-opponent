@@ -89,31 +89,7 @@ void NativeCampaign::saveArbiter()
 }
 void NativeCampaign::observeBuildingProgress()
 {
-    JsonNode current;
-    current.Struct();
-    for(const auto & goal:campaign.plan()["goals"].Vector())
-    {
-        if(goal["kind"].String()!="develop_town"
-            || world["goal_statuses"][goal["id"].String()]["state"].String()!="ready") continue;
-        for(const auto & town:world["towns"].Vector()) if(town["ref"]==goal["target_ref"])
-            for(const auto & option:town["building_options"].Vector()) if(option["id"]==goal["building_id"])
-            {
-                std::vector<const JsonNode *> sequence;
-                if(!buildingSequence(town,option,sequence)) continue;
-                JsonNode remaining;remaining.Vector();
-                for(const auto * step:sequence) remaining.Vector().push_back((*step)["id"]);
-                // Remaining prerequisites exclude unrelated native construction,
-                // routine income and per-turn build availability. The identity
-                // survives a model renumbering the same unfinished objective.
-                const auto key=goal["target_ref"].String()+":"+std::to_string(goal["building_id"].Integer());
-                const auto & previous=static_cast<const JsonNode &>(persisted)["building_progress"][key];
-                auto & progress=current[key];
-                progress["remaining"]=remaining;
-                progress["last_progress_day"] = previous["remaining"]==remaining
-                    ? previous["last_progress_day"] : world["day"];
-            }
-    }
-    persisted["building_progress"]=current;
+    persisted["building_progress"]=campaign.observeBuildingProgress(persisted["building_progress"],world);
 }
 void NativeCampaign::observeOperationProgress()
 {
@@ -121,8 +97,9 @@ void NativeCampaign::observeOperationProgress()
     for(const auto & goal:campaign.plan()["goals"].Vector())
     {
         const auto & kind=goal["kind"].String();
+        const auto & status=world["goal_statuses"][goal["id"].String()]["state"].String();
         if(kind=="develop_town" || kind=="preserve_force" || kind=="defend_area"
-            || world["goal_statuses"][goal["id"].String()]["state"].String()!="ready") continue;
+            || status=="completed" || status=="cancelled") continue;
         auto objective=operationIdentity(goal);
         objective["risk"]=goal["risk"];
         for(const auto * field:{"max_loss_ratio","allow_route_repair","allow_helper_replacement"}) objective["policy"][field]=campaign.plan()["policy"][field];
@@ -173,6 +150,29 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         if(fresh.isNull()) continue;
         world["automatic_safety_reviews"].Vector().push_back(fresh);
         result.push_back(automaticSafetySignal(fresh,world["day"].Integer(),actionable));
+    }
+    for(const auto & observation:world["decision_basis_facts"].Vector())
+    {
+        if(observation["ended_reason"].isNull()) continue;
+        const auto & id=observation["goal_id"].String();
+        JsonNode subject;
+        for(const auto & goal:campaign.plan()["goals"].Vector()) if(goal["id"].String()==id)
+            subject=operationIdentity(goal);
+        // IDs and daily counters are not new facts. The concrete named goal
+        // remains in observation; only question identity uses its semantics.
+        if(subject["kind"].String()=="preserve_force" || subject["kind"].String()=="defend_area")
+            subject["complete_when"].Struct().erase("value");
+        subject["purpose"]=observation["purpose"];
+        for(const auto & fact:observation["basis"].Vector())
+            subject["basis_objectives"].Vector().push_back(fact["objective"]);
+        auto facts=observation;facts.Struct().erase("goal_id");
+        const auto canonical=subject.toCompactString();
+        boost::uuids::detail::sha1 digest;digest.process_bytes(canonical.data(),canonical.size());
+        unsigned int words[5];digest.get_digest(words);
+        static constexpr char hex[]="0123456789abcdef";
+        std::string question="decision_basis:";
+        for(const auto word:words) for(int shift=28;shift>=0;shift-=4) question+=hex[(word>>shift)&15];
+        result.push_back({question,facts.toCompactString(),true,true,actionable,false});
     }
     const auto intentSignals=strategicIntentSignals(persisted["strategic_intent"],world,actionable);
     result.insert(result.end(),intentSignals.begin(),intentSignals.end());
@@ -387,6 +387,8 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
         +":"+std::to_string(world["day"].Integer())+":"+std::to_string(campaign.plan()["revision"].Integer())+":"+std::to_string(sequence);
     request["strategic_intent"]=persisted["strategic_intent"];request["campaign"]=campaign.plan();
     request["observation"]=strategicCandidateView(world,campaign.plan(),request["strategic_intent"],strategicReview);
+    request["observation"]["accepted_decision_basis"]=persisted["strategy_metadata"]["decision_basis"];
+    request["observation"]["operation_progress"]=persisted["operation_progress"];
     request["observation"]["strategy_assignments"]=persisted["strategy_metadata"]["assignments"];
     if(!request["observation"]["strategy_assignments"].isVector()) request["observation"]["strategy_assignments"].Vector();
     if(strategicReview)
@@ -468,10 +470,11 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
     catch(const std::exception & error) { reason=error.what(); }
     if(accepted)
     {
+        observeOperationProgress();
         observeIntentProgress();
         bindStrategicOperation(intent,derived["operation_focus"],candidate.plan(),persisted["pending_native_task"]);
         campaign=candidate;persisted["strategic_intent"]=intent;
-        for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus"})
+        for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis"})
             persisted["strategy_metadata"][field]=derived[field];
         acceptedRevision=campaign.plan()["revision"].Integer();acceptedLossRatio=campaign.plan()["policy"]["max_loss_ratio"].Float();
         const bool strategyCovered=backgroundRequest["strategic_review"].Bool() && preparationStrategyFresh(backgroundObservation,world);
@@ -570,6 +573,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     // Retain must echo the exact accepted roles, including order. Expose the
     // same saved owner used by admission; rejected proposals never replace it.
     const auto & metadata=static_cast<const JsonNode &>(persisted)["strategy_metadata"];
+    request["observation"]["accepted_decision_basis"]=metadata["decision_basis"];
+    request["observation"]["operation_progress"]=persisted["operation_progress"];
     request["observation"]["strategy_assignments"]=metadata["assignments"];
     if(!request["observation"]["strategy_assignments"].isVector())
         request["observation"]["strategy_assignments"].Vector();
@@ -661,6 +666,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         if(accepted)
         {
             // Drain old operation receipts before replacing either value owner.
+            observeOperationProgress();
             observeIntentProgress();
             bindStrategicOperation(candidateIntent,reply["operation_focus"],candidate.plan(),persisted["pending_native_task"]);
             campaign = candidate;
@@ -668,7 +674,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
             acceptedLossRatio=campaign.plan()["policy"]["max_loss_ratio"].Float();
             acceptedRevision=campaign.plan()["revision"].Integer();
             persisted["strategy_metadata"]=JsonNode();
-            for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus"})
+            for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis"})
                 persisted["strategy_metadata"][field]=reply[field];
             persisted["pending_strategic_questions"] = JsonNode();
             world["goal_statuses"] = campaign.review(world);

@@ -340,7 +340,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
             return reject("invalid_defense_exit");
     }
     if(!shape(replyShape, {"protocol", "request_id", "identity", "decision", "reason", "evidence_refs", "victory_method",
-        "assignments", "alternatives", "reconsider_when", "plan", "usage", "strategy_update", "operation_focus"})
+        "assignments", "alternatives", "reconsider_when", "plan", "usage", "strategy_update", "operation_focus", "decision_basis"})
         || !number(reply["protocol"], 2, 2) || reply["request_id"] != request["request_id"]
         || reply["identity"] != request["identity"] || !text(reply["decision"]) || !text(reply["reason"],640)
         || !text(reply["victory_method"],640)) return reject("invalid_or_stale_strategic_identity");
@@ -473,6 +473,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
     }
     JsonNode nextIntent;
     if(!validateStrategicIntentUpdate(reply,request,freshWorld,trial.plan(),currentIntent ? *currentIntent : request["strategic_intent"],nextIntent,reason)) return false;
+    if(!validateDecisionBasis(reply["decision_basis"],reply["operation_focus"],nextIntent,trial,freshWorld,reason)) return false;
     if(nextIntentOut) *nextIntentOut=nextIntent;
     candidate = trial;
     reason.clear();

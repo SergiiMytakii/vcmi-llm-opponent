@@ -79,3 +79,13 @@ target_include_directories(background-planning-driver PRIVATE
     ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
     "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
 target_link_libraries(background-planning-driver PRIVATE "${VCMI_LIBRARY}")
+
+add_executable(decision-wait-driver ../decision_wait_driver.cpp
+    ../../engine/Nullkiller3/CampaignState.cpp ../../engine/Nullkiller3/Forecasts.cpp)
+target_compile_features(decision-wait-driver PRIVATE cxx_std_20)
+target_compile_definitions(decision-wait-driver PRIVATE VCMI_DLL=1 BOOST_ALL_DYN_LINK)
+target_include_directories(decision-wait-driver PRIVATE
+    ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
+    "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
+target_link_libraries(decision-wait-driver PRIVATE "${VCMI_LIBRARY}")
+add_test(NAME decision-wait COMMAND decision-wait-driver)

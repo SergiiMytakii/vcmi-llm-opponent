@@ -66,12 +66,17 @@ def stabilization_map():
     for name in list(objects):
         if objects[name]['type'] in ('mine','resource','monster'):del objects[name]
     home=next(o for o in objects.values() if o['type']=='town' and o['options']['owner']=='red')
-    home['options']['army']=[dict(type='core:pikeman',amount=590)]
+    # Base is short after the controlled enemy reinforcement; current stock
+    # covers the deficit without relying on a returning commander.
+    home['options']['army']=[dict(type='core:pikeman',amount=570)]
     home['options']['buildings']['allOf']+=['dwellingLvl7','dwellingUpLvl7','castle','citadel']
     main=next(o for o in objects.values() if o['type']=='hero' and o['options']['owner']=='red')
-    main.update(x=11);main['options']['army']=[dict(type='core:archer',amount=100)]
+    # The isolated gold trip keeps the commander away from both capitals.
+    main.update(x=25,y=12);main['options']['army']=[dict(type='core:archer',amount=100)]
     enemy_town=next(o for o in objects.values() if o['type']=='town' and o['options']['owner']=='blue')
     enemy_town['options']['buildings']['allOf']+=['dwellingLvl7','dwellingUpLvl7']
+    objects['main_pickup']=dict(type='resource',subtype='gold',x=35,y=3,l=0,
+        template=template('AVTGOLD0',['VA']),options=dict(amount=1000))
     objects['advance_pickup']=dict(type='resource',subtype='gold',x=16,y=12,l=0,
         template=template('AVTGOLD0',['VA']),options=dict(amount=1000))
     return data

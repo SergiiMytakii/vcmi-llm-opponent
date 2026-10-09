@@ -1,5 +1,6 @@
 #include "Global.h"
 #include "CampaignState.h"
+#include "Forecasts.h"
 
 namespace nullkiller3
 {
@@ -425,7 +426,14 @@ bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, st
             // courier; the gateway enforces the floor during the exchange.
             const bool preservation = ((*goal)["kind"].String() == "preserve_force" && (*other)["kind"].String() == "reinforce_hero")
                 || ((*other)["kind"].String() == "preserve_force" && (*goal)["kind"].String() == "reinforce_hero");
-            if(overlap && !preservation) return reject("conflicting_hero_obligations");
+            // Two explicit floors at the same refuge hold the same physical
+            // army. Their independently justified intervals need no invented
+            // dependency; force reserves still combine through the pool guard.
+            const bool sharedRefuge=(*goal)["kind"].String()=="preserve_force"
+                && (*other)["kind"].String()=="preserve_force"
+                && (*goal)["actor_ref"]==(*other)["actor_ref"]
+                && (*goal)["target_ref"]==(*other)["target_ref"];
+            if(overlap && !preservation && !sharedRefuge) return reject("conflicting_hero_obligations");
         }
     const auto & reserves = proposal["reserves"];
     if(!reserves.isVector() || reserves.Vector().size() > 12) return reject("invalid_reserves");
@@ -458,6 +466,36 @@ bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, st
         || !policy["allow_route_repair"].isBool() || !policy["allow_helper_replacement"].isBool()
         || !policy["critical_towns"].isVector()) return reject("invalid_policy");
     for(const auto & ref : policy["critical_towns"].Vector()) if(find(world, "towns", ref).isNull()) return reject("critical_town_not_owned");
+    // The old accepted basis and progress are inspected before replacement.
+    // This is an execution-evidence guard, not a preference for another course.
+    std::set<std::string> preparation;
+    for(const auto & wait:world["accepted_decision_basis"]["waits"].Vector())
+        if(wait["purpose"].String()=="prepare")
+            for(const auto & ref:wait["basis_goal_ids"].Vector()) preparation.insert(ref.String());
+    for(const auto & old:plan()["goals"].Vector())
+    {
+        if(!preparation.count(old["id"].String())) continue;
+        const auto & kind=old["kind"].String();
+        if(kind!="reinforce_hero" && kind!="develop_town" && kind!="prepare_garrison") continue;
+        for(const auto & goal:goals.Vector())
+        {
+            bool same=true;
+            for(const auto * field:{"kind","actor_ref","target_ref","building_id","min_army_value","complete_when","garrison_mode"})
+                same &= goal[field]==old[field];
+            if(!same || goal["deadline_day"].Integer()<=old["deadline_day"].Integer()) continue;
+            const auto & progress=world["operation_progress"][old["id"].String()];
+            bool stalled=!progress.isNull() && day>=progress["last_progress_day"].Integer()+2
+                && !progress["last_no_change_day"].isNull()
+                && progress["last_no_change_day"].Integer()>=progress["last_progress_day"].Integer()+1;
+            if(kind=="develop_town")
+            {
+                const auto key=old["target_ref"].String()+":"+std::to_string(old["building_id"].Integer());
+                const auto & building=world["building_progress"][key];
+                stalled=!building.isNull() && day>=building["last_progress_day"].Integer()+2;
+            }
+            if(stalled) return reject("preparation_extended_without_progress");
+        }
+    }
     JsonNode accepted;
     accepted["version"].Integer() = 3;
     accepted["accepted_day"] = world["day"];
@@ -624,6 +662,9 @@ JsonNode CampaignState::review(const JsonNode & world,bool checkRoutes)
         const auto & previous = static_cast<const JsonNode &>(state)["statuses"][id];
         if(previous["state"].String() == "completed" || previous["state"].String()=="cancelled")
         { status = previous; return; }
+        if(previous["reason"].String()=="dependency_failed"
+            && previous["failure_reason"].String().starts_with("decision_basis:"))
+        { status=previous;return; }
         // Preservation describes the whole accepted interval. Later
         // recruitment cannot erase an observed loss below its floor;
         // keep that evidence in the saved goal status until a revision.
@@ -730,6 +771,170 @@ JsonNode CampaignState::review(const JsonNode & world,bool checkRoutes)
     return result;
 }
 
+JsonNode CampaignState::observeBuildingProgress(const JsonNode & previous,const JsonNode & world) const
+{
+    JsonNode current;current.Struct();
+    for(const auto & goal:plan()["goals"].Vector())
+    {
+        const auto & status=statuses()[goal["id"].String()]["state"].String();
+        if(goal["kind"].String()!="develop_town" || status=="completed" || status=="cancelled") continue;
+        const auto key=goal["target_ref"].String()+":"+std::to_string(goal["building_id"].Integer());
+        const auto & old=previous[key];
+        auto & progress=current[key];progress=old;
+        if(progress.isNull()) { progress["remaining"].Vector();progress["last_progress_day"]=world["day"]; }
+        const auto & town=find(world,"towns",goal["target_ref"]);
+        JsonNode support;support["owned"].Bool()=!town.isNull();support["day"]=world["day"];
+        const auto reserved=reservedResources(goal["id"].String());
+        const auto & income=world["economy"]["base_daily_income"].isVector()
+            ? world["economy"]["base_daily_income"] : world["daily_income"];
+        for(int i=0;i<7;++i)
+        {
+            support["treasury"].Vector().emplace_back(std::max<int64_t>(0,world["resources"][i].Integer()));
+            support["available"].Vector().emplace_back(std::max<int64_t>(0,world["resources"][i].Integer()-reserved[i].Integer()));
+            support["base_income"].Vector().emplace_back(std::max<int64_t>(0,income[i].Integer()));
+            support["remaining_cost"].Vector().emplace_back(0);
+        }
+        bool supported=false,advanced=false;
+        for(const auto & option:town["building_options"].Vector()) if(option["id"]==goal["building_id"])
+        {
+            std::vector<const JsonNode *> sequence;
+            if(!buildingSequence(town,option,sequence)) break;
+            supported=true;
+            JsonNode remaining;remaining.Vector();
+            for(const auto * step:sequence)
+            {
+                remaining.Vector().push_back((*step)["id"]);
+                for(int i=0;i<7;++i) support["remaining_cost"][i].Integer()+=(*step)["cost"][i].Integer();
+            }
+            // Actual prerequisites built, rather than an altered model deadline
+            // or a less attractive quote, are progress of this same event.
+            for(const auto & ref:old["remaining"].Vector())
+                advanced |= contains(town["buildings"],ref);
+            progress["remaining"]=remaining;
+            break;
+        }
+        const auto & prior=old["support"];
+        if(supported && prior.isStruct())
+        {
+            const auto elapsed=world["day"].Integer()-prior["day"].Integer();
+            bool affordable=true,wasAffordable=true,incomeRise=false,extraFunds=false;
+            auto ordinary=prior["treasury"];
+            // Own-turn observations normally differ by one day. A long unknown
+            // interval does not prove extraordinary funding from treasury alone.
+            if(elapsed>=0 && elapsed<=32)
+                for(int64_t date=prior["day"].Integer()+1;date<=world["day"].Integer();++date)
+                {
+                    const auto daily=forecastDailyIncome(world,date,prior["base_income"]);
+                    for(int i=0;i<7;++i) ordinary[i].Integer()+=daily[i].Integer();
+                }
+            for(int i=0;i<7;++i)
+            {
+                affordable &= support["available"][i].Integer()>=support["remaining_cost"][i].Integer();
+                wasAffordable &= prior["available"][i].Integer()>=prior["remaining_cost"][i].Integer();
+                const bool needed=prior["remaining_cost"][i].Integer()>prior["available"][i].Integer()
+                    && support["remaining_cost"][i].Integer()>0;
+                incomeRise |= needed && support["base_income"][i].Integer()>prior["base_income"][i].Integer();
+                const auto previouslyReserved=prior["treasury"][i].Integer()-prior["available"][i].Integer();
+                const auto ordinaryAvailable=std::max<int64_t>(0,ordinary[i].Integer()-previouslyReserved);
+                extraFunds |= needed && elapsed>=0 && elapsed<=32
+                    && ordinaryAvailable<support["remaining_cost"][i].Integer()
+                    && support["treasury"][i].Integer()>ordinary[i].Integer();
+            }
+            advanced |= !prior["owned"].Bool() || incomeRise || (affordable && !wasAffordable && extraFunds);
+        }
+        if(advanced) progress["last_progress_day"]=world["day"];
+        progress["support"]=support;
+    }
+    return current;
+}
+
+JsonNode CampaignState::observeDecisionBasis(const JsonNode & basis,const JsonNode & world)
+{
+    JsonNode observations;observations.Vector();
+    std::map<std::string,const JsonNode *> goals;
+    for(const auto & goal:plan()["goals"].Vector()) goals[goal["id"].String()]=&goal;
+    for(const auto & wait:basis["waits"].Vector())
+    {
+        const auto id=wait["goal_id"].String();
+        if(!goals.count(id)) continue; // A legacy save can have no accepted basis.
+        const auto & goal=*goals.at(id);
+        const auto & status=static_cast<const JsonNode &>(state)["statuses"][id];
+        if(status["state"].String()=="completed" || status["state"].String()=="cancelled"
+            || status["failure_reason"].String().starts_with("decision_basis:")) continue;
+        JsonNode item;item["goal_id"]=wait["goal_id"];item["purpose"]=wait["purpose"];
+        std::string broken;
+        bool completedPreparation=!wait["basis_goal_ids"].Vector().empty();
+        for(const auto & ref:wait["basis_goal_ids"].Vector())
+        {
+            if(!goals.count(ref.String())) { broken="basis_goal_missing";continue; }
+            const auto & basisGoal=*goals.at(ref.String());
+            const auto & basisStatus=static_cast<const JsonNode &>(state)["statuses"][ref.String()];
+            JsonNode fact;
+            for(const auto * field:{"kind","actor_ref","target_ref","building_id","min_army_value","complete_when"})
+                fact["objective"][field]=basisGoal[field];
+            if(basisGoal["kind"].String()=="preserve_force" || basisGoal["kind"].String()=="defend_area")
+                fact["objective"]["complete_when"].Struct().erase("value");
+            fact["state"]=basisStatus["state"];fact["reason"]=basisStatus["reason"];
+            completedPreparation &= basisStatus["state"].String()=="completed";
+            if(failedCommitment(basisStatus)) broken="basis_goal_failed";
+            if(basisGoal["kind"].String()=="reinforce_hero" && basisStatus["state"].String()!="completed")
+            {
+                auto source=basisGoal["target_ref"];
+                for(const auto & quote:world["forecasts"]["deliveries"].Vector())
+                    if(quote["goal_id"]==ref && quote["source_ref"].isString()) source=quote["source_ref"];
+                fact["source_ref"]=source;
+                if(find(world,"heroes",source).isNull() && find(world,"towns",source).isNull())
+                    broken="source_no_longer_owned";
+            }
+            if(wait["purpose"].String()=="prepare" && basisStatus["state"].String()!="completed")
+            {
+                bool confirmed=false;
+                for(const auto * list:{"commitments","deliveries"})
+                    for(const auto & quote:world["forecasts"][list].Vector()) if(quote["goal_id"]==ref)
+                    {
+                        fact["forecast_status"]=quote["status"];
+                        confirmed |= quote["status"].String()=="conditional";
+                    }
+                if(!confirmed) broken="preparation_unconfirmed";
+            }
+            item["basis"].Vector().push_back(fact);
+        }
+        const bool hold=goal["kind"].String()=="preserve_force" || goal["kind"].String()=="defend_area";
+        if(hold && wait["purpose"].String()=="prepare" && completedPreparation) broken="preparation_completed";
+        if(hold && wait["purpose"].String()=="intercept" && completedPreparation) broken="interception_completed";
+        if(world["day"].Integer()>goal["deadline_day"].Integer()) broken="deadline_missed";
+        if(!goal["actor_ref"].isNull() && find(world,"heroes",goal["actor_ref"]).isNull()) broken="executor_no_longer_owned";
+        if(!broken.empty())
+        {
+            auto & invalid=state["statuses"][id];
+            invalid["state"].String()=hold ? "cancelled" : "blocked";
+            invalid["reason"].String()=hold ? "decision_basis_ended" : "dependency_failed";
+            invalid["failure_reason"].String()="decision_basis:"+broken;
+            item["ended_reason"].String()=broken;
+        }
+        observations.Vector().push_back(item);
+    }
+    // Propagate only real dependency edges. A second commitment or courier
+    // sharing a hero retains its own status and reserve without such an edge.
+    bool changed=true;
+    while(changed)
+    {
+        changed=false;
+        for(const auto & [id,goal]:goals)
+        {
+            auto & status=state["statuses"][id];
+            if(status["state"].String()=="completed" || failedCommitment(status)) continue;
+            for(const auto & ref:(*goal)["depends_on"].Vector())
+                if(failedCommitment(static_cast<const JsonNode &>(state)["statuses"][ref.String()]))
+                {
+                    status["state"].String()="blocked";status["reason"].String()="dependency_failed";
+                    changed=true;break;
+                }
+        }
+    }
+    return observations;
+}
+
 void CampaignState::unconfirmedExecution(int firstDay)
 {
     for(const auto & goal:plan()["goals"].Vector())
@@ -806,7 +1011,8 @@ int64_t CampaignState::reservedForce(const std::string & ref, const JsonNode & w
     for(const auto & goal : plan()["goals"].Vector())
     {
         const auto & id = goal["id"].String();
-        if(goal["kind"].String()=="prepare_garrison" && world["day"].Integer()<=goal["deadline_day"].Integer()
+        if(goal["kind"].String()=="prepare_garrison" && !failedCommitment(state["statuses"][id])
+            && world["day"].Integer()<=goal["deadline_day"].Integer()
             && armyPool(goal["target_ref"].String(),world)==pool && pool!=goal["actor_ref"].String())
             floor=std::max(floor,goal["complete_when"]["value"].Integer());
         if(!holdsCommitment(id)) continue;

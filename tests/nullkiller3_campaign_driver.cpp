@@ -322,6 +322,7 @@ int main(int argc,char ** argv)
                             require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
                                 && reason=="missing_defense_exit","previous hold accepted null reconsideration");
                             reply["defense_exit"]=exit;
+                            reply["decision_basis"]["waits"][0]["purpose"].String()=std::string(kind)=="preserve_force" ? "safety" : "defend";
                             require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
                         }
                     }
@@ -340,6 +341,7 @@ int main(int argc,char ** argv)
             moving["goals"][0]["kind"].String()="scout_frontier";moving["goals"][0]["target_ref"].String()="edge";
             moving["goals"][0]["complete_when"]["kind"].String()="frontier_observed";moving["goals"][0]["complete_when"]["value"].Integer()=0;
             reply["decision"].String()="revise";reply["plan"]=moving;reply["defense_exit"]=JsonNode();
+            initialCourseFixture(request,reply,world);
             require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
             reply.Struct().erase("defense_exit");
             require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
@@ -352,6 +354,7 @@ int main(int argc,char ** argv)
             mixed["goals"].Vector().push_back(secondHold);
             reply["assignments"].Vector().push_back(json(R"({"hero_ref":"helper","role":"defender"})"));
             reply["plan"]=mixed;reply["defense_exit"]=JsonNode();
+            initialCourseFixture(request,reply,world);
             require(!nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason)
                 && reason=="missing_defense_exit","safe second-town hold accepted null reconsideration");
             reply["defense_exit"]=exit;
@@ -360,8 +363,10 @@ int main(int argc,char ** argv)
             current=nullkiller3::CampaignState();moving["revision"].Integer()=1;
             require(current.accept(moving,world,reason),reason.c_str());request["campaign"]=current.plan();
             reply.Struct().erase("defense_exit");reply["plan"]=plan;reply["plan"]["revision"].Integer()=2;
+            initialCourseFixture(request,reply,world);
             require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
             reply["decision"].String()="retain";reply["plan"]=JsonNode();
+            reply["decision_basis"]["waits"].Vector().clear();
             require(nullkiller3::validateStrategicDecision(reply,request,world,current,candidate,reason),reason.c_str());
             std::cout << "NK3 universal hold reconsideration, retain, safe multi-town, movement and initial-plan proof passed\n";return 0;
         }
@@ -1095,6 +1100,7 @@ int main(int argc,char ** argv)
         auto deliveryReply=reply; deliveryReply["plan"]=deliveryPlan;
         deliveryReply["assignments"]=json(R"([{"hero_ref":"object:0","role":"main"},{"hero_ref":"object:1","role":"reinforcement"}])");
         deliveryReply["reconsider_when"]=json(R"([{"goal_id":"deliver","kind":"deadline_missed"}])");
+        initialCourseFixture(request,deliveryReply,world);
         require(nullkiller3::validateStrategicDecision(deliveryReply,request,world,initial,modelCandidate,reason),"courier role cannot bind to its delivery operation");
         require(modelCandidate.participantGoals("object:1").count("deliver"),"source courier is not committed to delivery");
         require(modelCandidate.reservedForce("object:1",world) == 500,"promised reinforcement can be donated elsewhere");

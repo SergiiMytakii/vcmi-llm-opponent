@@ -57,6 +57,18 @@ class NativeBackgroundTest(unittest.TestCase):
         result=subprocess.run([str(DRIVER)],input=json.dumps(case),text=True,capture_output=True,check=True)
         return json.loads(result.stdout)
 
+    def test_town_basis_references_join_atomic_group(self):
+        case=heroes_fixture()
+        case['reply']['decision_basis']['town_choices']=[dict(
+            town_ref='object:1',choice='accept_risk',goal_ids=['resource-one','resource-two'])]
+        case['fresh']['forecasts']['routes'][1]['own_arrivals'][0]['army_loss_estimate']=1
+        result=self.run_case(case)
+        self.assertTrue(result['accepted'],result)
+        self.assertEqual([g['id'] for g in result['candidate']['plan']['goals']],['new'])
+        self.assertEqual(result['candidate']['decision_basis']['town_choices'],[])
+        self.assertEqual(result['groups'][1]['goal_ids'],['resource-one','resource-two'])
+        self.assertFalse(result['groups'][1]['accepted'])
+
     def test_completed_goal_and_reserve_removed_new_town_task_admitted(self):
         case=fixture();case['request']['campaign']['reserves']=[dict(goal_id='old',resources=[0,0,0,0,0,0,50],force_value=0)]
         result=self.run_case(case)
@@ -161,6 +173,14 @@ class NativeBackgroundTest(unittest.TestCase):
     def test_dependency_group_is_discarded_together_without_losing_town(self):
         case=heroes_fixture()
         case['reply']['plan']['goals'][2]['depends_on']=['resource-one']
+        # A dependency wait now records the concrete safety commitment it waits on.
+        source=case['reply']['plan']['goals'][1]
+        source.update(kind='preserve_force',target_ref='object:1',complete_when=dict(kind='force_preserved_until',value=5))
+        case['reply']['decision_basis']['waits']=[dict(goal_id=goal,purpose='safety',basis_goal_ids=['resource-one'],next_goal_id=None)
+            for goal in ('resource-one','resource-two')]
+        milestone=case['request']['strategic_intent']['milestones'][0]['id']
+        case['reply']['operation_focus']['bindings'].extend(dict(goal_id=goal,milestone_id=milestone)
+            for goal in ('resource-one','resource-two'))
         case['fresh']['forecasts']['routes'][0]['own_arrivals'][0]['end_turn_exposure']['status']='unknown'
         result=self.run_case(case);self.assertTrue(result['accepted'],result)
         self.assertEqual([g['id'] for g in result['candidate']['plan']['goals']],['new'])

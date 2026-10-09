@@ -1674,6 +1674,11 @@ void NativeCampaign::updateForecasts(NK2AI::Nullkiller & ai)
     }
     observeBuildingProgress();
     observeOperationProgress();
+    world["accepted_decision_basis"]=persisted["strategy_metadata"]["decision_basis"];
+    world["decision_basis_facts"]=campaign.observeDecisionBasis(world["accepted_decision_basis"],world);
+    world["goal_statuses"]=campaign.statuses();
+    world["operation_progress"]=persisted["operation_progress"];
+    world["building_progress"]=persisted["building_progress"];
     world["offensive_preparation"]=offensivePreparation(campaign,world);
     for(const auto & loss:battleLossSignals(campaign.plan(),persisted["memory"],true))
     {

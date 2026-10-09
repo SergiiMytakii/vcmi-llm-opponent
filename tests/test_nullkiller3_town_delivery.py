@@ -137,7 +137,7 @@ class NativeTownDeliveryTest(unittest.TestCase):
                 required_capabilities=['land'],complete_when=dict(kind='held_until',value=6)))
         seed_path=output/'campaign.json';seed_path.write_text(json.dumps(seed))
         config.update(profile_template=str(fixture),map_resource='Maps/NK3TownDelivery.vmap',players={'red':'Nullkiller3','blue':'EmptyAI'},
-                      nk3_mode='native',experience_mode='off',purpose='integration',case_id='nk3-town-delivery',headless=True,max_seconds=20,references={})
+                      nk3_mode='native',experience_mode='off',purpose='integration',case_id='nk3-town-delivery',headless=True,max_seconds=60 if weekly else 20,references={})
         if protected:config['review_interval_days']=1
         if review or protected:
             probe=ROOT/'tests/fixtures/nk3_retention_probe.py'
@@ -149,7 +149,7 @@ class NativeTownDeliveryTest(unittest.TestCase):
             child=subprocess.Popen([sys.executable,str(CLI),'run','--run',str(run)],
                                    env=dict(os.environ,VCMI_NK3_SEED_CAMPAIGN=str(seed_path)),stdout=log,stderr=subprocess.STDOUT)
             try:
-                deadline=time.monotonic()+25
+                deadline=time.monotonic()+(65 if weekly else 25)
                 while child.poll() is None and time.monotonic()<deadline:
                     if protected:
                         state=run/'turn-review/state.json'

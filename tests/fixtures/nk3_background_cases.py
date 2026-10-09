@@ -28,7 +28,7 @@ goals=[];reserves=[];retain=False
 if player==1:
     if background:sys.exit(1)
     time.sleep(2)
-    if case=='partial':
+    if case in ('partial','partial_new_threat'):
         target=next(o for o in world['objects'] if o['kind']=='resource' and o['position'][:2]==[22,12])
         goals=[goal('open-observed-front','secure_resource',heroes[0]['ref'],target['ref'],1)]
     elif case=='stabilization':
@@ -49,7 +49,7 @@ elif background:
         goals.append(goal('prepared-town','develop_town',None,town['ref'],building,building,day+3))
         quote=next(b for b in town['building_options'] if b['id']==building)
         reserves.append(dict(goal_id='prepared-town',resources=quote['cost'],force_value=0))
-    if case=='partial':
+    if case in ('partial','partial_new_threat'):
         for hero in heroes:
             options=[]
             for route in world['forecasts']['routes']:
@@ -80,11 +80,11 @@ else:
                   dict(goal_id='short',resources=[0,0,0,0,0,0,world['resources'][6]-9300],force_value=0)]
         policy['critical_towns']=[]
     elif case=='stabilization':
-        target=next(o for o in world['objects'] if o['kind']=='town' and o['owner'] in world['enemy_players'])
-        offensive=goal('offense','capture_target',heroes[0]['ref'],target['ref'],player)
-        offensive['risk']=dict(max_loss_ratio=.8,reason='Controlled initial supported route')
+        target=next(o for o in world['objects'] if o['kind']=='resource' and o['position'][:2]==[35,3])
+        offensive=goal('offense','secure_resource',heroes[0]['ref'],target['ref'],1)
         goals=[offensive];reserves=[dict(goal_id='offense',resources=[0,0,0,0,0,0,world['resources'][6]],force_value=0)]
     else:goals=[goal('seed-town','develop_town',None,town['ref'],0,0)]
+    if case=='partial_new_threat':policy['critical_towns']=[t['ref'] for t in world['towns']]
 
 plan=None if retain else dict(version=3,revision=r['identity']['revision']+1,approach='economy',horizon_days=7,
     goals=goals,reserves=reserves,policy=policy)
@@ -96,6 +96,17 @@ reply=dict(protocol=2,request_id=r['request_id'],identity=r['identity'],decision
     reconsider_when=[dict(goal_id=g['id'],kind='deadline_missed') for g in (r['campaign']['goals'] if retain else goals)],
     plan=plan,usage=dict(known=True,input_tokens=0,output_tokens=0))
 reply=with_intent(r,reply)
+if player==0 and case=='partial':
+    # The controlled model accepts uncertain outpost risk in the original
+    # snapshot; partial admission preserves that choice when the route changes.
+    chosen=(r['campaign']['goals'] if retain else goals)[0]['id']
+    reply['decision_basis']['town_choices']=[dict(town_ref=t['ref'],choice='accept_risk',goal_ids=[chosen])
+        for t in world['towns']]
+if player==1 and case=='stabilization':
+    reply['decision_basis']['waits']=[dict(goal_id='advance',purpose='prepare',basis_goal_ids=['reinforce'],next_goal_id=None)]
+    if reply['strategy_update']['selected']:
+        reply['strategy_update']['selected']['milestones'][0]['complete_when']=dict(
+            kind='army_at_least',target_ref=None,actor_ref=heroes[0]['ref'],value=16000)
 if any(g['kind'] in ('preserve_force','defend_area') for g in (r.get('campaign') or {}).get('goals',[])):
     reply['defense_exit']=dict(waiting_for='Confirmed held date',expected_gain='Retain protected own force',next_step='Reassess at release')
 if background:

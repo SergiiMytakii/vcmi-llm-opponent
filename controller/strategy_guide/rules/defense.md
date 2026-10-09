@@ -16,7 +16,7 @@ Check income, stock, walls, troops, bases, threats and return routes. critical_t
 - Prefer feasible initiative over speculative recall. Historical/guarded/missing approaches establish neither urgency nor safety.
 - Keep protection through departure, including completed prepare_garrison obligations. A returning main is not an independent attacker or stationary pool.
 - Keeping every town is not the objective. Token helpers cannot stop the enemy main; clearing neutral screens can open passage for both sides.
-- Renew a hold for a quoted reinforcement, recruitment, building or interception before its exit. Preserving today's force or awaiting an unspecified route adds no readiness; compare enemy income/growth during the wait.
+- Preparation waits need quoted reinforcement/building/garrison work and an unfinished result; attained army adds no new gain. Defense, interception and safety may protect useful current conditions without daily growth. Name the actual basis and review condition; compare enemy growth and safe alternatives.
 
 ## When to reconsider
 Recheck threats, stock, routes and ownership at the exit. After base loss, reassess income/production and return assumptions; compare quoted recapture, pressure elsewhere and funded reinforcement. Holding the surviving town alone restores no lost production. Use town_after_capture for renewed holds and endgame for decisive risk.

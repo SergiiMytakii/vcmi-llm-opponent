@@ -174,6 +174,9 @@ public:
     std::string routeFeedbackFacts(const JsonNode & goal,const JsonNode & world) const;
 
     JsonNode review(const JsonNode & world,bool checkRoutes=true);
+    // Own-turn observer releases only the exact wait whose executable basis ended.
+    JsonNode observeDecisionBasis(const JsonNode & basis,const JsonNode & world);
+    JsonNode observeBuildingProgress(const JsonNode & previous,const JsonNode & world) const;
     void unconfirmedExecution(int firstDay);
     bool observeForceMinimum(const std::string & heroRef, int day, int64_t armyValue);
     void blocked(const std::string & goalID, const std::string & reason)

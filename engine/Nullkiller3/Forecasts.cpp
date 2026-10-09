@@ -546,12 +546,40 @@ JsonNode forecastCommitments(const JsonNode & world, const CampaignState & campa
     }
     for(const auto & entry:entries)
         result[(*entry.goal)["kind"].String()=="develop_town" ? "commitments" : "deliveries"].Vector().push_back(entry.estimate);
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+        if(goal["kind"].String()=="prepare_garrison" && campaign.holdsCommitment(goal["id"].String()))
+        {
+            JsonNode quote;quote["goal_id"]=goal["id"];quote["source_ref"]=goal["target_ref"];
+            quote["status"].String()=supportedGarrisonPreparation(goal,world,campaign) ? "conditional" : "unknown";
+            quote["arrival_day"]=quote["status"].String()=="conditional" ? world["day"] : JsonNode();
+            quote["assumptions"].String()="Current co-located owned town/hero, stock, treasury and detachable force quote only; native packing and execution revalidate. Unknown future arrival is not a promised schedule.";
+            result["deliveries"].Vector().push_back(quote);
+        }
     result["stock_at_deadline"].Vector();
     for(const auto & [ref,units]:stock) for(const auto & unit:units)
     { JsonNode item;item["town_ref"].String()=ref;item["creature"]=(*unit.unit)["creature"];item["remaining"].Integer()=unit.count;result["stock_at_deadline"].Vector().push_back(item); }
     return result;
 }
 
+bool supportedGarrisonPreparation(const JsonNode & source,const JsonNode & world,const CampaignState & campaign)
+{
+    // The existing town choice quote is a conditional same-day schedule:
+    // current stock/treasury or detachable current force, at this town now.
+    const auto choices=forecastTownChoices(world,campaign,{},source["id"].String());
+    for(const auto & quote:choices.Vector())
+        if(quote["town_ref"]==source["target_ref"] && quote["actor_ref"]==source["actor_ref"])
+        {
+            const auto required=source["complete_when"]["value"].Integer();
+            const auto stationary=quote["garrison_after_departure"].Integer();
+            const auto detach=quote["separable_surplus_under_current_plan"].Integer();
+            const auto bought=quote["buy_garrison"]["additional_force"].Integer();
+            const auto & mode=source["garrison_mode"].String();
+            const auto available=stationary+(mode=="detach" ? detach : mode=="recruit" ? bought : bought+detach);
+            return world["day"].Integer()<=source["deadline_day"].Integer() && available>=required
+                && available>stationary;
+        }
+    return false;
+}
 JsonNode forecastThreats(const JsonNode & world)
 {
     JsonNode result; result.Vector();
@@ -704,7 +732,7 @@ JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign
 }
 
 JsonNode forecastTownChoices(const JsonNode & world,const CampaignState & campaign,
-    const std::map<std::string,std::string> & replacements)
+    const std::map<std::string,std::string> & replacements,const std::string & spendingGoal)
 {
     JsonNode result;result.Vector();
     for(const auto & town:world["towns"].Vector()) for(const auto & hero:world["heroes"].Vector())
@@ -723,7 +751,7 @@ JsonNode forecastTownChoices(const JsonNode & world,const CampaignState & campai
         for(const auto & threat:world["forecasts"]["threats"].Vector())
             if(threat["town_ref"]==town["ref"]) item["threats"].Vector().push_back(threat);
         auto budget=world["resources"];
-        const auto reserved=campaign.reservedResources();
+        const auto reserved=campaign.reservedResources(spendingGoal);
         for(int i=0;i<7;++i) budget[i].Integer()=std::max<int64_t>(0,budget[i].Integer()-reserved[i].Integer());
         JsonNode purchase;purchase["units"].Vector();for(int i=0;i<7;++i) purchase["cost"].Vector().emplace_back(0);
         int64_t bought=0;

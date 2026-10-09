@@ -15,7 +15,7 @@ Check public victory rules, hostile bases and remaining forces. The last known b
 - Include enemy growth and extra operations caused by waiting. A costly decisive attack may beat repeated safe accumulation.
 - Grant higher goal.risk only when the named attack's gain outweighs casualties/base exposure; preserve ordinary policy.max_loss_ratio elsewhere.
 - State what success removes and which opponents/forces may remain. Protection of the last viable army/town or another active front can justify refusal; no attack is compulsory.
-- Waiting needs a concrete benefit and observable review condition; unknown passage exploration is not a visible-base assault.
+- Waiting needs an unfinished result or protected useful condition, concrete basis and observable review. Conditional later elimination stages need no invented ready route; new troops require fresh routes. Unknown passage exploration is not a visible-base assault.
 
 ## When to reconsider
 After battle/capture select the next remaining elimination step from fresh quotes. Judge preparation by the operation it opens. Use town_after_capture for renewed holds.

@@ -116,6 +116,7 @@ if mode in ('risk_protect','risk_accept'):
   plan['goals']=[dict(id='guild',kind='defend_area',actor_ref='object:0',target_ref='object:1',deadline_day=3,
    priority=90,building_id=-1,min_army_value=5000,depends_on=[],required_capabilities=['land'],
    complete_when=dict(kind='held_until',value=3))]
+if mode in ('risk_protect','risk_accept'):answer=with_intent(r,answer)
 if mode=='stale':answer['identity']['generation']='old'
 if mode=='capability':plan['goals'][0]['required_capabilities']=['fly']
 if mode=='policy':plan['policy']['allow_route_repair']=1

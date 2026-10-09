@@ -119,7 +119,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     if(!validSavedStrategicIntent(saved["strategic_intent"]))
     {
         result.Struct().erase("strategic_intent");
-        if(result["strategy_metadata"].isStruct()) result["strategy_metadata"].Struct().erase("operation_focus");
+        if(result["strategy_metadata"].isStruct()) { result["strategy_metadata"].Struct().erase("operation_focus");result["strategy_metadata"].Struct().erase("decision_basis"); }
     }
     // An invalid optional pickup proof cannot discard an otherwise valid
     // pending native command or rerun it. Drop only that untrusted proof.
@@ -163,6 +163,18 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
             invalid |= key.empty() || key.size()>240 || !item.isStruct();
             if(!item.isStruct()) continue;
             invalid |= !savedInteger(item["last_progress_day"],1,2147483647) || !item["remaining"].isVector();
+            if(!item["support"].isNull())
+            {
+                const auto & support=item["support"];
+                invalid |= !intentFields(support,{"owned","day","treasury","available","remaining_cost","base_income"})
+                    || !support["owned"].isBool() || !savedInteger(support["day"],1,2147483647);
+                for(const auto * field:{"treasury","available","remaining_cost","base_income"})
+                {
+                    invalid |= !support[field].isVector() || support[field].Vector().size()!=7;
+                    for(const auto & value:support[field].Vector()) invalid |= !savedInteger(value,0,1000000000000LL);
+                }
+            }
+
             if(item["remaining"].isVector())
             {
                 invalid |= item["remaining"].Vector().size()>512;
@@ -215,6 +227,7 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
     if(!metadata.isNull())
     {
         invalid |= !metadata.isStruct();
+        invalid |= !metadata["decision_basis"].isNull() && !validDecisionBasis(metadata["decision_basis"]);
         if(metadata.isStruct())
         {
             invalid |= !metadata["assignments"].isVector();
@@ -271,9 +284,9 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         result["request_arbiter"]["addressed"].Struct().erase("initial_strategy");
     if(result["strategy_metadata"].isStruct())
     {
-        const std::set<std::string> kept{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus"};
+        const std::set<std::string> kept{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis"};
         std::erase_if(result["strategy_metadata"].Struct(),[&](const auto & item) { return !kept.count(item.first); });
-        if(result["strategic_intent"].isNull()) result["strategy_metadata"].Struct().erase("operation_focus");
+        if(result["strategic_intent"].isNull()) { result["strategy_metadata"].Struct().erase("operation_focus");result["strategy_metadata"].Struct().erase("decision_basis"); }
     }
     if(result["strategy_metadata"].isStruct())
         for(auto & assignment:result["strategy_metadata"]["assignments"].Vector())

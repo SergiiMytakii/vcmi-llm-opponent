@@ -140,7 +140,7 @@ def completed_interceptions(request):
     world=request['observation']
     return [goal for goal in (request.get('campaign') or {}).get('goals',[])
             if goal['kind']=='intercept_hero'
-            and world.get('goal_statuses',{}).get(goal['id'],{}).get('state')=='completed'
+            and (world.get('goal_statuses') or {}).get(goal['id'],{}).get('state')=='completed'
             and any(same_goal(receipt.get('goal'),goal) and receipt.get('won') is True
                     and type(receipt.get('day')) is int and 1<=receipt['day']<=goal['deadline_day']
                     for receipt in world.get('confirmed_interceptions',[]))]
@@ -292,7 +292,7 @@ def reply_schema(request):
         'defend_area':town_refs,'scout_frontier':world['frontiers'],
         'scout_area':[a['ref'] for a in world.get('scouting_options',[])],'preserve_force':town_refs,
         'visit_site':[o['ref'] for o in objects if visit_site_available(o)]
-            +[g['target_ref'] for g in (request.get('campaign') or {}).get('goals',[]) if g['kind']=='visit_site' and world.get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'],
+            +[g['target_ref'] for g in (request.get('campaign') or {}).get('goals',[]) if g['kind']=='visit_site' and (world.get('goal_statuses') or {}).get(g['id'],{}).get('state')=='completed'],
         'explore_passage':[o['ref'] for o in objects if o.get('kind') in ('subterranean_gate','portal') and o.get('visible') is True]}
     supported_buildings = sorted({b['id'] for t in world['towns'] for b in t.get('building_options',[]) if b.get('supported') is True})
     completions = {'hire_helper':['helper_hired'],'develop_town':['building_present'],'secure_resource':['target_owned','reserve_at_least'],
@@ -351,7 +351,7 @@ def reply_schema(request):
                     narrowed.append(town_variant)
             else:narrowed.append(variant)
         carried=copy.deepcopy((request.get('campaign') or {}).get('goals',[]))
-        carried=[item for item in carried if world.get('goal_statuses',{}).get(item['id'],{}).get('state')!='completed'
+        carried=[item for item in carried if (world.get('goal_statuses') or {}).get(item['id'],{}).get('state')!='completed'
                  and not (item['kind']=='develop_town' and any(t['ref']==item['target_ref'] and item['building_id'] in t.get('buildings',[]) for t in world['towns']))]
         for item in carried:item.setdefault('risk',None)
         for item in carried:
@@ -382,7 +382,7 @@ def reply_schema(request):
     minimum_horizon=3
     if request.get('mode')=='prepare_next_turn' and not request['strategic_review']:
         for previous in (request.get('campaign') or {}).get('goals',[]):
-            if world.get('goal_statuses',{}).get(previous['id'],{}).get('state')!='completed':
+            if (world.get('goal_statuses') or {}).get(previous['id'],{}).get('state')!='completed':
                 minimum_horizon=max(minimum_horizon,previous['deadline_day']-day)
     for horizon in range(minimum_horizon, 8):
         option = copy.deepcopy(plan)
@@ -410,6 +410,14 @@ def reply_schema(request):
                       'base_revision':{**integer(0,2147483647),'enum':[intent_revision]},
                       'selected':{'anyOf':[{'type':'null'},selected_schema(request)]},
                       'change_reason':{'anyOf':[{'type':'null'},text]}}),
+                  'decision_basis':_object({
+                      'waits':array(_object({'goal_id':label,
+                          'purpose':{'type':'string','enum':['prepare','defend','intercept','safety']},
+                          'basis_goal_ids':array(label,1,12),
+                          'next_goal_id':{'anyOf':[{'type':'null'},label]}}),0,12),
+                      'town_choices':array(_object({'town_ref':refs_schema(town_refs),
+                          'choice':{'type':'string','enum':['defend','accept_risk']},
+                          'goal_ids':array(label,1,12)}),0,12)}),
                   'operation_focus':_object({'revision':{**integer(1,2147483647),
                       'enum':[intent_revision,intent_revision+1] if intent else [1]},
                       'bindings':array(_object({'goal_id':label,'milestone_id':label}),0,16)})}
@@ -431,6 +439,81 @@ def reply_schema(request):
             properties['assignments']['enum']=[world.get('strategy_assignments',[])]
             for option in plans:option['properties']['policy']['enum']=[request['campaign']['policy']]
     return _object(properties)
+
+
+def milestone_satisfied(request, milestone):
+    """Current facts, distinct from a historical completion receipt."""
+    world=request['observation']; predicate=milestone['complete_when']
+    kind=predicate['kind']; target=predicate['target_ref']; actor=predicate['actor_ref']
+    if kind=='army_at_least':
+        return any(h['ref']==actor and h.get('army_value',0)>=predicate['value'] for h in world['heroes'])
+    if kind=='building_present':
+        return any(t['ref']==target and predicate['value'] in t.get('buildings',[]) for t in world['towns'])
+    if kind=='target_owned':
+        return any(t['ref']==target for t in world['towns']) or any(
+            o.get('ref')==target and o.get('visible') is True and o.get('owner')==world['player']
+            for o in world['objects'])
+    # Native receipts authoritatively confirm visits and passage crossings.
+    progress=(request.get('strategic_intent') or {}).get('progress',{})
+    old=next((m for m in (request.get('strategic_intent') or {}).get('milestones',[])
+              if m['id']==milestone['id'] and m['complete_when']==predicate),None)
+    return bool(old and isinstance(progress,dict) and progress.get(milestone['id'],{}).get('currently_satisfied'))
+
+
+def validate_decision_basis(request,reply,plan,milestones):
+    goals={g['id']:g for g in plan['goals']}
+    bindings={b['goal_id']:b['milestone_id'] for b in reply['operation_focus']['bindings']}
+    basis=reply['decision_basis'];covered=set(); towns=set()
+    statuses=request['observation'].get('goal_statuses') or {}
+    for wait in basis['waits']:
+        name=wait['goal_id']; purpose=wait['purpose']; refs=wait['basis_goal_ids']
+        if name in covered:raise ValueError('duplicate_wait_goal')
+        covered.add(name)
+        if name not in goals:raise ValueError('unknown_wait_goal')
+        goal=goals[name]
+        if goal['actor_ref'] is None or (goal['kind'] not in ('preserve_force','defend_area') and not goal['depends_on']):
+            raise ValueError('invalid_wait_goal')
+        if name not in bindings:raise ValueError('unbound_wait_goal')
+        if len(set(refs))!=len(refs):raise ValueError('duplicate_wait_basis_goal')
+        if any(ref not in goals for ref in refs):raise ValueError('unknown_wait_basis_goal')
+        nxt=wait['next_goal_id']
+        if nxt is not None and (nxt not in goals or nxt==name):raise ValueError('unknown_next_goal')
+        kinds={goals[ref]['kind'] for ref in refs}
+        if purpose=='prepare':
+            if milestone_satisfied(request,milestones[bindings[name]]):
+                raise ValueError('preparation_result_already_satisfied')
+            if not kinds<= {'reinforce_hero','develop_town','prepare_garrison'}:
+                raise ValueError('invalid_preparation_goal_kind')
+            for ref in refs:
+                if (goals[ref]['actor_ref']!=goal['actor_ref'] and
+                        bindings.get(ref)!=bindings[name]):
+                    raise ValueError('preparation_not_connected')
+                old=next((g for g in (request.get('campaign') or {}).get('goals',[]) if g['id']==ref),None)
+                if same_goal(old,goals[ref]) and statuses.get(ref,{}).get('state')=='completed':
+                    raise ValueError('preparation_already_completed')
+        elif not (purpose=='defend' and kinds & {'defend_area','prepare_garrison'}
+                  or purpose=='intercept' and 'intercept_hero' in kinds
+                  or purpose=='safety' and 'preserve_force' in kinds):
+            raise ValueError('unsupported_wait_purpose')
+    for name,goal in goals.items():
+        old=next((g for g in (request.get('campaign') or {}).get('goals',[]) if g['id']==name),None)
+        state=statuses.get(name,{}).get('state') if same_goal(old,goal) else None
+        if state in ('completed','cancelled','dependency_failed','failed'):continue
+        if goal['actor_ref'] is not None and (goal['kind'] in ('preserve_force','defend_area') or
+                statuses.get(name,{}).get('reason')=='dependency_unconfirmed') and name not in covered:
+            raise ValueError('missing_wait_basis')
+    for choice in basis['town_choices']:
+        town=choice['town_ref']; refs=choice['goal_ids']
+        if town in towns:raise ValueError('duplicate_town_choice')
+        towns.add(town)
+        if len(set(refs))!=len(refs):raise ValueError('duplicate_town_choice_goal')
+        if any(ref not in goals for ref in refs):raise ValueError('unknown_town_choice_goal')
+        if choice['choice']=='defend' and not any(goals[ref]['target_ref']==town and
+                goals[ref]['kind'] in ('defend_area','prepare_garrison') for ref in refs):
+            raise ValueError('unsupported_town_defense')
+    for defense in request['observation'].get('forecasts',{}).get('defenses',[]):
+        if defense.get('threats') and defense['town_ref'] not in towns:
+            raise ValueError('missing_town_choice')
 
 
 def validate_rejection(request, reply):
@@ -502,7 +585,7 @@ def validate_reply(request, reply, wire=False):
     proposal=shape_reply.get('plan') if shape_reply.get('decision')=='revise' else request.get('campaign')
     if survival_deadline is not None and isinstance(proposal,dict) and isinstance(proposal.get('goals'),list):
         previous={g['id']:g for g in (request.get('campaign') or {}).get('goals',[])}
-        statuses=request['observation'].get('goal_statuses',{})
+        statuses=request['observation'].get('goal_statuses') or {}
         for goal in proposal['goals']:
             if (not isinstance(goal,dict) or type(goal.get('deadline_day')) is not int
                     or not isinstance(goal.get('id'),str)):continue
@@ -552,6 +635,7 @@ def validate_reply(request, reply, wire=False):
         if name not in goals or name in stack: raise ValueError('missing or cyclic dependency')
         for dep in goals[name]['depends_on']: visit(dep, stack|{name})
     for name in goals: visit(name,set())
+    validate_decision_basis(request,reply,plan,milestones)
     by_ref = goal_objects(request)
     hiring_costs=[0]*7
     hired_candidates=set()
@@ -562,7 +646,7 @@ def validate_reply(request, reply, wire=False):
                     same_goal(receipt.get('goal'),g) and g['candidate_ref']=='tavern:'+str(receipt.get('hero_type_id'))
                     and type(receipt.get('day')) is int
                     and 1<=receipt['day']<=g['deadline_day']
-                    and (request['observation'].get('goal_statuses',{}).get(g['id'],{}).get('state')=='completed'
+                    and ((request['observation'].get('goal_statuses') or {}).get(g['id'],{}).get('state')=='completed'
                          or any(h['ref']==receipt.get('hero_ref') and h.get('hero_type_id')==receipt.get('hero_type_id')
                                 for h in request['observation']['heroes']))
                     for receipt in request['observation'].get('confirmed_helper_hires',[])):

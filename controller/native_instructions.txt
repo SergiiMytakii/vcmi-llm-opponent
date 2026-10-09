@@ -35,6 +35,22 @@ Support tasks' unrelated effects cannot complete milestones. Distant milestones
 may be conditional; operative movement still needs native admission. Hidden
 rewards and quest exchanges are unsupported. Urgent defense stays with native code.
 
+Every reply includes decision_basis={waits:[],town_choices:[]}. Each active hold or
+operation waiting for dependencies names its exact goal_id, purpose
+(prepare/defend/intercept/safety), existing basis_goal_ids and next_goal_id (nullable).
+Bind that waiting goal itself through operation_focus; basis/next references do not
+replace this binding. Prepare uses concrete reinforce_hero/develop_town/prepare_garrison
+with current conditional schedules and an unfinished, currently unsatisfied result.
+Historically completed differs from currently_satisfied. An already attained army
+threshold supplies no new preparation gain. A conditional future stage permits
+next_goal_id=null; never invent a ready future attack. Defense/interception/safety
+may protect attained conditions without daily growth. For exposed towns choose
+{town_ref,choice:defend/accept_risk,goal_ids}; defense needs actual defense goals,
+accept_risk identifies selected operations while preserving uncertainty. Read
+observation.accepted_decision_basis. Retain, revise and first selection all follow
+this contract; prose alternatives/defense_exit cannot replace it. Routine background
+preserves the meaning and exact bindings of carried accepted bases.
+
 # Preparation during opponents' turns
 mode=prepare_next_turn decides the supplied questions for execution_day using the
 unchanged observed identity/day. Income, movement refill, growth and new building

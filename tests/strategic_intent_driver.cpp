@@ -35,11 +35,13 @@ int main(int argc,char ** argv)
         auto goal=json(R"({"id":"old","kind":"visit_site","actor_ref":"hero","target_ref":"site","deadline_day":5,"complete_when":{"kind":"site_visited","value":0}})");
         JsonNode plan;plan["revision"].Integer()=1;plan["goals"].Vector().push_back(goal);
         JsonNode request;request["observation"]=world;request["strategic_intent"]=JsonNode();request["evidence_refs"].Vector();
-        JsonNode reply;reply["strategy_update"]["decision"].String()="revise";reply["strategy_update"]["base_revision"].Integer()=0;
+        JsonNode reply;reply["decision_basis"]=json(R"({"waits":[],"town_choices":[]})");reply["strategy_update"]["decision"].String()="revise";reply["strategy_update"]["base_revision"].Integer()=0;
         reply["strategy_update"]["selected"]=selected;reply["strategy_update"]["change_reason"].String()="Initial course";
         reply["operation_focus"]["revision"].Integer()=1;
         reply["operation_focus"]["bindings"].Vector().push_back(json(R"({"goal_id":"old","milestone_id":"visit"})"));
         std::string reason;JsonNode intent;
+        auto missingBasis=reply;missingBasis.Struct().erase("decision_basis");
+        require(!validateStrategicIntentUpdate(missingBasis,request,world,plan,JsonNode(),intent,reason),"missing decision basis accepted");
         require(validateStrategicIntentUpdate(reply,request,world,plan,JsonNode(),intent,reason),reason.c_str());
         bindStrategicOperation(intent,reply["operation_focus"],plan,JsonNode());
         require(validSavedStrategicIntent(intent),"initial course cannot restore");
@@ -164,6 +166,23 @@ int main(int argc,char ** argv)
         saved["site_receipts"]["old"]=receipt;saved["site_receipts"]["old"]["artifact_visit"].Struct();
         restored=restoreNativeNamespace(saved);
         require(restored["native_campaign"]==newPlan && restored["site_receipts"]["old"].isNull(),"invalid optional pickup receipt reset operation or remained usable");
+        auto withSupport=saved;
+        withSupport["building_progress"]["home:1"]=json(R"({"remaining":[1],"last_progress_day":1,"support":{"owned":true,"day":1,"treasury":[0,0,0,0,0,0,100],"available":[0,0,0,0,0,0,100],"remaining_cost":[0,0,0,0,0,0,200],"base_income":[0,0,0,0,0,0,10]}})");
+        restored=restoreNativeNamespace(withSupport);
+        require(restored["native_campaign"]==newPlan && restored["building_progress"]==withSupport["building_progress"],"valid building support cannot restore");
+        for(const auto * field:{"owned","day","treasury","available","remaining_cost","base_income"})
+        {
+            auto corruptSupport=withSupport;corruptSupport["building_progress"]["home:1"]["support"][field].String()="bad";
+            const auto cleared=restoreNativeNamespace(corruptSupport);
+            require(cleared["building_progress"].isNull(),"corrupt building support retained progression permission");
+        }
+        saved["strategy_metadata"]["assignments"].Vector();
+        saved["strategy_metadata"]["decision_basis"]=reply["decision_basis"];
+        restored=restoreNativeNamespace(saved);
+        require(restored["strategy_metadata"]["decision_basis"]==reply["decision_basis"],"accepted decision basis discarded on restore");
+        saved["strategy_metadata"].Struct().erase("decision_basis");
+        restored=restoreNativeNamespace(saved);
+        require(restored["native_campaign"]==newPlan && restored["strategic_intent"]==saved["strategic_intent"],"legacy optional basis reset namespace/course");
         saved.Struct().erase("strategic_intent");restored=restoreNativeNamespace(saved);
         require(restored["native_campaign"]==newPlan && restored["request_arbiter"]==saved["request_arbiter"],"old save without course lost operation or budget");
         auto unassigned=saved;unassigned["pending_native_task"]["action"]["goal_id"].String()="";

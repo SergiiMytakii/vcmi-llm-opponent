@@ -53,7 +53,7 @@ class NativeHoldingTest(unittest.TestCase):
         path=output/'config.json';path.write_text(json.dumps(config));run=output/'game'
         subprocess.run([sys.executable,'scripts/playtest.py','prepare','--config',str(path),'--out',str(run)],
                        check=True,capture_output=True)
-        env=dict(os.environ);env.pop('VCMI_NK3_SEED_CAMPAIGN',None)
+        env=dict(os.environ,VCMI_AI_OPEN_MAP='0');env.pop('VCMI_NK3_SEED_CAMPAIGN',None)
         with (output/'driver.log').open('w') as log:
             child=subprocess.Popen([sys.executable,'scripts/playtest.py','run','--run',str(run)],
                                    env=env,stdout=log,stderr=subprocess.STDOUT)

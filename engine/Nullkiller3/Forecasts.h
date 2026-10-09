@@ -56,6 +56,7 @@ JsonNode forecastDeliveries(const JsonNode & world, const CampaignState & campai
 
 // One bounded calendar for accepted construction and town-source recruitment.
 // This is a conditional branch, not a simulator of unseen routes or battles.
+bool supportedGarrisonPreparation(const JsonNode & source,const JsonNode & world,const CampaignState & campaign);
 JsonNode forecastCommitments(const JsonNode & world, const CampaignState & campaign,
     const std::map<std::string,std::string> & replacements = {});
 
@@ -69,5 +70,5 @@ JsonNode forecastDefenses(const JsonNode & world, const CampaignState & campaign
 // Counterfactual capacities, not decisions or battle guarantees. Each choice
 // uses the same current pools and budget independently, never cumulatively.
 JsonNode forecastTownChoices(const JsonNode & world,const CampaignState & campaign,
-    const std::map<std::string,std::string> & replacements = {});
+    const std::map<std::string,std::string> & replacements = {},const std::string & spendingGoal = {});
 }

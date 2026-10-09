@@ -252,11 +252,25 @@ bool admitPreparation(const JsonNode & reply,const JsonNode & request,const Json
         if(goal["job_ref"].isString()) refs.insert(CampaignState::armyPool(goal["job_ref"].String(),fresh));
         return refs;
     };
+    std::vector<std::set<std::string>> basisGroups;
+    for(const auto & wait:reply["decision_basis"]["waits"].Vector())
+    {
+        std::set<std::string> refs{wait["goal_id"].String()};
+        for(const auto & id:wait["basis_goal_ids"].Vector()) refs.insert(id.String());
+        if(wait["next_goal_id"].isString()) refs.insert(wait["next_goal_id"].String());
+        basisGroups.push_back(std::move(refs));
+    }
+    for(const auto & choice:reply["decision_basis"]["town_choices"].Vector())
+    {
+        std::set<std::string> refs;for(const auto & id:choice["goal_ids"].Vector()) refs.insert(id.String());
+        basisGroups.push_back(std::move(refs));
+    }
     for(size_t i=0;i<proposals.size();++i) for(size_t j=0;j<i;++j)
     {
         const auto a=pools(proposals[i]),b=pools(proposals[j]);
         bool linked=contains(proposals[i]["depends_on"],proposals[j]["id"]) || contains(proposals[j]["depends_on"],proposals[i]["id"]);
         for(const auto & ref:a) linked |= b.count(ref)>0;
+        for(const auto & refs:basisGroups) linked |= refs.count(proposals[i]["id"].String()) && refs.count(proposals[j]["id"].String());
         if(linked) parent[root(i)]=root(j);
     }
     std::vector<std::vector<JsonNode>> ordered;
@@ -306,6 +320,34 @@ bool admitPreparation(const JsonNode & reply,const JsonNode & request,const Json
             JsonNode retained;retained["goal_id"]=binding["goal"]["id"];retained["milestone_id"]=binding["milestone_id"];
             add(derived["operation_focus"]["bindings"],retained);
         }
+    // Remove only whole rejected decisions. Never trim a decision's references
+    // to make a different meaning appear admissible after partial acceptance.
+    std::erase_if(derived["decision_basis"]["waits"].Vector(),[&](const auto & wait){
+        if(!hasGoal(wait["goal_id"])) return true;
+        return false;
+    });
+    std::erase_if(derived["decision_basis"]["town_choices"].Vector(),[&](const auto & choice){
+        bool live=false;for(const auto & id:choice["goal_ids"].Vector()) live |= hasGoal(id);
+        return !live;
+    });
+    if(!revise)
+    {
+        const auto & accepted=request["observation"]["accepted_decision_basis"];
+        for(const auto & previous:accepted["waits"].Vector()) if(carried.count(previous["goal_id"].String()))
+        {
+            for(const auto & proposed:derived["decision_basis"]["waits"].Vector())
+                if(proposed["goal_id"]==previous["goal_id"] && proposed!=previous) return reject("changed_carried_wait_basis");
+            add(derived["decision_basis"]["waits"],previous);
+        }
+        for(const auto & previous:accepted["town_choices"].Vector())
+        {
+            bool carry=false;for(const auto & id:previous["goal_ids"].Vector()) carry |= carried.count(id.String());
+            if(!carry) continue;
+            for(const auto & proposed:derived["decision_basis"]["town_choices"].Vector())
+                if(proposed["town_ref"]==previous["town_ref"] && proposed!=previous) return reject("changed_carried_town_choice");
+            add(derived["decision_basis"]["town_choices"],previous);
+        }
+    }
     if(derived["reconsider_when"].Vector().empty()) return reject("no_admitted_reconsideration");
     return validateStrategicDecision(derived,request,fresh,current,candidate,reason,&nextIntent,&intent);
 }

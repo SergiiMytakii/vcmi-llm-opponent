@@ -1,6 +1,7 @@
 #pragma once
 #include "CampaignState.h"
 #include "RequestArbiter.h"
+#include "Forecasts.h"
 
 namespace nullkiller3
 {
@@ -242,10 +243,120 @@ inline void bindStrategicOperation(JsonNode & intent,const JsonNode & focus,cons
         }
     intent["bindings"]=bindings;
 }
+// Persisted saves may omit this field; every new decision supplies the same
+// bounded structural basis. References remain exact campaign goal identities.
+inline bool validDecisionBasis(const JsonNode & basis)
+{
+    if(!intentFields(basis,{"waits","town_choices"}) || !basis["waits"].isVector()
+        || basis["waits"].Vector().size()>12 || !basis["town_choices"].isVector()
+        || basis["town_choices"].Vector().size()>12) return false;
+    auto refs=[](const JsonNode & values,bool required) {
+        if(!values.isVector() || values.Vector().size()>12 || (required && values.Vector().empty())) return false;
+        std::set<std::string> ids;
+        for(const auto & id:values.Vector()) if(!intentText(id,120) || !ids.insert(id.String()).second) return false;
+        return true;
+    };
+    std::set<std::string> waiting,towns;
+    const std::set<std::string> purposes{"prepare","defend","intercept","safety"};
+    for(const auto & wait:basis["waits"].Vector())
+        if(!intentFields(wait,{"goal_id","purpose","basis_goal_ids","next_goal_id"})
+            || !intentText(wait["goal_id"],120) || !waiting.insert(wait["goal_id"].String()).second
+            || !purposes.count(wait["purpose"].String()) || !refs(wait["basis_goal_ids"],true)
+            || (!wait["next_goal_id"].isNull() && !intentText(wait["next_goal_id"],120))) return false;
+    for(const auto & choice:basis["town_choices"].Vector())
+        if(!intentFields(choice,{"town_ref","choice","goal_ids"}) || !intentText(choice["town_ref"],160)
+            || !towns.insert(choice["town_ref"].String()).second
+            || (choice["choice"].String()!="defend" && choice["choice"].String()!="accept_risk")
+            || !refs(choice["goal_ids"],true)) return false;
+    return true;
+}
+inline bool validateDecisionBasis(const JsonNode & basis,const JsonNode & focus,const JsonNode & intent,
+    const CampaignState & campaign,const JsonNode & world,std::string & reason)
+{
+    auto reject=[&](const char * why){reason=why;return false;};
+    if(!validDecisionBasis(basis)) return reject("invalid_decision_basis");
+    std::map<std::string,const JsonNode *> goals;
+    for(const auto & goal:campaign.plan()["goals"].Vector()) goals[goal["id"].String()]=&goal;
+    std::set<std::string> covered;
+    const auto schedule=forecastCommitments(world,campaign);
+    for(const auto & wait:basis["waits"].Vector())
+    {
+        const auto id=wait["goal_id"].String();
+        if(!goals.count(id)) return reject("unknown_wait_goal");
+        const auto & goal=*goals.at(id);const auto & kind=goal["kind"].String();
+        if(!goal["actor_ref"].isString() || (kind!="preserve_force" && kind!="defend_area"
+            && goal["depends_on"].Vector().empty())) return reject("invalid_wait_goal");
+        const JsonNode * milestone=nullptr;
+        for(const auto & binding:focus["bindings"].Vector()) if(binding["goal_id"]==wait["goal_id"])
+            milestone=&intentMilestone(intent,binding["milestone_id"]);
+        if(!milestone || milestone->isNull()) return reject("unbound_wait_goal");
+        covered.insert(id);
+        if(!wait["next_goal_id"].isNull() && (!goals.count(wait["next_goal_id"].String())
+            || wait["next_goal_id"]==wait["goal_id"])) return reject("unknown_next_goal");
+        const auto & purpose=wait["purpose"].String();
+        if(purpose=="prepare" && intent["progress"][(*milestone)["id"].String()]["currently_satisfied"].Bool())
+            return reject("preparation_result_already_satisfied");
+        bool supported=false;
+        for(const auto & ref:wait["basis_goal_ids"].Vector())
+        {
+            if(!goals.count(ref.String())) return reject("unknown_wait_basis_goal");
+            const auto & source=*goals.at(ref.String());const auto & sourceKind=source["kind"].String();
+            if(purpose=="prepare")
+            {
+                if(sourceKind!="reinforce_hero" && sourceKind!="develop_town" && sourceKind!="prepare_garrison")
+                    return reject("invalid_preparation_goal_kind");
+                bool connected=source["actor_ref"]==goal["actor_ref"];
+                for(const auto & binding:focus["bindings"].Vector())
+                    connected |= binding["goal_id"]==ref && binding["milestone_id"]==(*milestone)["id"];
+                if(!connected) return reject("unrelated_preparation_goal");
+                if(campaign.statuses()[ref.String()]["state"].String()=="completed")
+                    return reject("preparation_already_completed");
+                bool scheduled=false;
+                for(const auto * list:{"commitments","deliveries"}) for(const auto & quote:schedule[list].Vector())
+                    if(quote["goal_id"]==ref && quote["status"].String()=="conditional")
+                    {
+                        const auto & day=sourceKind=="develop_town" ? quote["build_day"] : quote["arrival_day"];
+                        scheduled=day.isNumber() && day.Integer()>=world["day"].Integer()
+                            && day.Integer()<=source["deadline_day"].Integer();
+                    }
+                if(!scheduled) return reject("preparation_schedule_unconfirmed");
+                supported=true;
+            }
+            else if((purpose=="defend" && (sourceKind=="defend_area" || sourceKind=="prepare_garrison"))
+                || (purpose=="intercept" && sourceKind=="intercept_hero")
+                || (purpose=="safety" && sourceKind=="preserve_force")) supported=true;
+        }
+        if(!supported) return reject("unsupported_wait_purpose");
+    }
+    for(const auto & [id,goal]:goals)
+        if(campaign.holdsCommitment(id) && (*goal)["actor_ref"].isString() && ((*goal)["kind"].String()=="preserve_force"
+            || (*goal)["kind"].String()=="defend_area" || campaign.statuses()[id]["reason"].String()=="dependency_unconfirmed")
+            && !covered.count(id)) return reject("missing_wait_basis");
+    for(const auto & choice:basis["town_choices"].Vector())
+    {
+        if(intentOwnedObject(world,"towns",choice["town_ref"]).isNull()) return reject("unknown_town_choice");
+        bool defense=false;
+        for(const auto & id:choice["goal_ids"].Vector())
+        {
+            if(!goals.count(id.String())) return reject("unknown_town_choice_goal");
+            const auto & goal=*goals.at(id.String());
+            defense |= goal["target_ref"]==choice["town_ref"]
+                && (goal["kind"].String()=="defend_area" || goal["kind"].String()=="prepare_garrison");
+        }
+        if(choice["choice"].String()=="defend" && !defense) return reject("unsupported_town_defense");
+    }
+    for(const auto & defense:world["forecasts"]["defenses"].Vector()) if(!defense["threats"].Vector().empty())
+    {
+        bool chosen=false;for(const auto & choice:basis["town_choices"].Vector()) chosen |= choice["town_ref"]==defense["town_ref"];
+        if(!chosen) return reject("missing_town_choice");
+    }
+    reason.clear();return true;
+}
 inline bool validateStrategicIntentUpdate(const JsonNode & reply,const JsonNode & request,const JsonNode & freshWorld,
     const JsonNode & candidatePlan,const JsonNode & currentIntent,JsonNode & nextIntent,std::string & reason)
 {
     auto reject=[&](const char * message) { reason=message;return false; };
+    if(!validDecisionBasis(reply["decision_basis"])) return reject("invalid_decision_basis");
     const auto & update=reply["strategy_update"];
     const int64_t revision=currentIntent.isNull() ? 0 : currentIntent["revision"].Integer();
     if(!intentFields(update,{"decision","base_revision","selected","change_reason"})

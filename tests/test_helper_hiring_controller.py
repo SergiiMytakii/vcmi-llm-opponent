@@ -65,6 +65,7 @@ class DefenseExitControllerTest(unittest.TestCase):
         request['observation']['objects'].append(dict(ref='object:2',kind='mine',owner=1,visible=True))
         answer['plan']['goals'][0].update(kind='capture_target',target_ref='object:2',complete_when=dict(kind='target_owned',value=0))
         answer['defense_exit']=None
+        answer=with_intent(request,answer)
         validate_reply(request,answer)
 
     def test_hold_reassessment_covers_all_signals_approaches_and_retention(self):

@@ -28,4 +28,17 @@ def with_intent(request, reply):
     reply['operation_focus'] = dict(revision=revision if current else 1,
                                     bindings=[dict(goal_id=g['id'],milestone_id=milestone)
                                               for g in (campaign or {}).get('goals',[])])
+    goals=(campaign or {}).get('goals',[])
+    waits=[]
+    for g in goals:
+        if g['kind'] in ('preserve_force','defend_area'):
+            waits.append(dict(goal_id=g['id'],purpose='safety' if g['kind']=='preserve_force' else 'defend',
+                              basis_goal_ids=[g['id']],next_goal_id=None))
+    towns=[]
+    for front in request['observation'].get('forecasts',{}).get('defenses',[]):
+        if not front.get('threats') or not goals:continue
+        defense=[g['id'] for g in goals if g['target_ref']==front['town_ref'] and g['kind'] in ('defend_area','prepare_garrison')]
+        towns.append(dict(town_ref=front['town_ref'],choice='defend' if defense else 'accept_risk',
+                          goal_ids=defense or [goals[0]['id']]))
+    reply['decision_basis']=dict(waits=waits,town_choices=towns)
     return reply

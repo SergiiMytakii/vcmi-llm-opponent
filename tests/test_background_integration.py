@@ -29,6 +29,9 @@ class BackgroundIntegrationTest(unittest.TestCase):
     def test_partial_admission_preserves_secondary_hero_need_before_spending(self):
         self.run_barrier('partial')
 
+    def test_new_exposed_town_without_chosen_risk_discards_preparation(self):
+        self.run_barrier('partial_new_threat')
+
     def test_allocation_question_survives_routine_reserves_before_spending(self):
         self.run_barrier('allocation')
 
@@ -39,7 +42,7 @@ class BackgroundIntegrationTest(unittest.TestCase):
         config=json.loads(Path(os.environ['VCMI_NK3_BACKGROUND_CONFIG']).read_text())
         output=Path(tempfile.mkdtemp(prefix='native-background-'+case+'-',dir=ROOT/'.build/background-proof'))
         fixture=output/'fixture';shutil.copytree(config['profile_template'],fixture,copy_function=copy_snapshot_file)
-        data={'partial':partial_map,'allocation':allocation_map,'stabilization':stabilization_map}[case]()
+        data={'partial':partial_map,'partial_new_threat':partial_map,'allocation':allocation_map,'stabilization':stabilization_map}[case]()
         with zipfile.ZipFile(fixture/'Library/Application Support/vcmi/Maps/BackgroundBarrier.vmap','x') as archive:
             for name,value in data.items():archive.writestr(name,json.dumps(value))
         settings_path=fixture/'Library/Application Support/vcmi/config/ai/nk2ai/nk2ai-settings.json'
@@ -72,10 +75,18 @@ class BackgroundIntegrationTest(unittest.TestCase):
         ordinary=[r for r in requests if r['identity']['player']==0 and r['identity']['day']==target_day and not r.get('mode')]
         self.assertTrue(ordinary,str(output));fresh=ordinary[-1]
         admissions=[t for t in records(run/'runtime.log','NK3_BACKGROUND') if t.get('phase')=='admit' and t.get('execution_day')==target_day]
-        if case=='stabilization':
+        if case=='partial_new_threat':
             self.assertFalse(admissions,str(output))
+            discards=[t for t in records(run/'runtime.log','NK3_BACKGROUND') if t.get('phase')=='discard' and t.get('execution_day')==target_day]
+            self.assertTrue(any(t.get('reason') in ('missing_town_choice','critical_question') for t in discards),str(output))
             self.assertTrue(any(s['question'].startswith('defense:') for s in fresh['signals']),str(output))
+        elif case=='stabilization':
+            self.assertFalse(admissions,str(output))
+            self.assertTrue(any(s['question'].startswith('defense:') and s['facts'].startswith('insufficient_current_force:')
+                for s in fresh['signals']),str(output))
             self.assertTrue(all(d['status']=='conditional_force_available' for d in fresh['observation']['forecasts']['defenses']),str(output))
+            self.assertTrue(all(d['garrison_value']>=d['opposing_upper_sum']
+                for d in fresh['observation']['forecasts']['defenses']),str(output))
             self.assertTrue(any(t['player']==0 and t['day']==2 and t['action']['kind']=='recruit'
                 for t in records(run/'runtime.log','NK3_EXECUTION')),str(output))
             self.assertTrue(any(e['day']==2 and e['action']['kind']=='recruit'
