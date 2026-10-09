@@ -1023,7 +1023,7 @@ diff --git a/AI/Nullkiller2/CMakeLists.txt b/AI/Nullkiller2/CMakeLists.txt
 index 0ba7df246..d8b6cb94d 100644
 --- a/AI/Nullkiller2/CMakeLists.txt
 +++ b/AI/Nullkiller2/CMakeLists.txt
-@@ -153,7 +153,10 @@ set(Nullkiller2_HEADERS
+@@ -153,7 +153,11 @@ set(Nullkiller2_HEADERS
  
  assign_source_group(${Nullkiller2_SRCS} ${Nullkiller2_HEADERS})
  
@@ -1031,7 +1031,8 @@ index 0ba7df246..d8b6cb94d 100644
 +add_library(Nullkiller2 OBJECT ${Nullkiller2_SRCS} ${Nullkiller2_HEADERS} ../Nullkiller3/PlayerView.cpp
 +    ../Nullkiller3/NativeCampaign.cpp ../Nullkiller3/NativeCampaignStrategy.cpp
 +    ../Nullkiller3/Forecasts.cpp ../Nullkiller3/CampaignState.cpp
-+    ../Nullkiller3/StrategicDecision.cpp ../Nullkiller3/BackgroundPlanning.cpp)
++    ../Nullkiller3/StrategicDecision.cpp ../Nullkiller3/BackgroundPlanning.cpp
++    ../Nullkiller3/StrategicRequest.cpp)
  target_compile_definitions(Nullkiller2 PRIVATE VCMI_DLL=1)
  
  target_include_directories(Nullkiller2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -51,9 +51,19 @@ target_include_directories(strategic-candidates-driver PRIVATE
     "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
 target_link_libraries(strategic-candidates-driver PRIVATE "${VCMI_LIBRARY}")
 
+add_executable(strategic-request-driver ../strategic_request_driver.cpp
+    ../../engine/Nullkiller3/StrategicRequest.cpp
+    ../../engine/TransportJSON/TransportJSON.cpp)
+target_compile_features(strategic-request-driver PRIVATE cxx_std_20)
+target_compile_definitions(strategic-request-driver PRIVATE VCMI_DLL=1 BOOST_ALL_DYN_LINK)
+target_include_directories(strategic-request-driver PRIVATE
+    ../../engine/Nullkiller3 "${VCMI_SOURCE_DIR}" "${VCMI_SOURCE_DIR}/lib"
+    "${VCMI_SOURCE_DIR}/include" ${Boost_INCLUDE_DIRS})
+target_link_libraries(strategic-request-driver PRIVATE "${VCMI_LIBRARY}")
+
 # These consumers exercise the same separately compiled value-contract bodies
 # that the native Nullkiller2 target includes through the project overlay.
-foreach(target nullkiller3-campaign-driver nullkiller3-idle-driver strategic-candidates-driver)
+foreach(target nullkiller3-campaign-driver nullkiller3-idle-driver strategic-candidates-driver strategic-request-driver)
     target_sources(${target} PRIVATE
         ../../engine/Nullkiller3/Forecasts.cpp
         ../../engine/Nullkiller3/CampaignState.cpp

@@ -1,0 +1,340 @@
+{
+  "world": {
+    "player": 0,
+    "day": 1,
+    "resources": [
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10000
+    ],
+    "heroes": [
+      {
+        "id": 0,
+        "ref": "object:0",
+        "army_value": 5000,
+        "movement": 1500,
+        "movement_per_day": 1500,
+        "mana": 5,
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "sight_radius": 4
+      }
+    ],
+    "towns": [
+      {
+        "id": 1,
+        "ref": "object:1",
+        "buildings": [
+          0
+        ],
+        "building_options": [
+          {
+            "id": 0,
+            "supported": true,
+            "availability": "allowed",
+            "cost": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "requirements": {
+              "allOf": []
+            }
+          },
+          {
+            "id": 1,
+            "supported": true,
+            "availability": "allowed",
+            "cost": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "requirements": {
+              "allOf": []
+            }
+          },
+          {
+            "id": 2,
+            "supported": true,
+            "availability": "allowed",
+            "cost": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "requirements": {
+              "allOf": []
+            }
+          }
+        ],
+        "recruitment_options": [],
+        "position": [
+          0,
+          1,
+          0
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "id": 1,
+        "ref": "object:1",
+        "kind": "town",
+        "owner": 0,
+        "visible": true,
+        "position": [
+          0,
+          1,
+          0
+        ]
+      }
+    ],
+    "frontiers": [
+      "tile:frontier"
+    ],
+    "capabilities": [
+      "land",
+      "build",
+      "transfer"
+    ],
+    "strategy_assignments": [],
+    "forecasts": {
+      "routes": [],
+      "defenses": [
+        {
+          "town_ref": "object:1",
+          "status": "no_observed_front",
+          "threats": [],
+          "unconfirmed_threats": []
+        }
+      ]
+    },
+    "daily_income": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "map_size": [
+      100,
+      100,
+      1
+    ],
+    "visible_tile_counts": [
+      4
+    ],
+    "visible_objects": [
+      {
+        "ref": "enemy:far",
+        "kind": "town",
+        "visible": true,
+        "owner": 1,
+        "position": [
+          90,
+          90,
+          0
+        ],
+        "army_interval": {
+          "status": "unknown"
+        }
+      },
+      {
+        "ref": "neutral:far",
+        "kind": "monster",
+        "visible": true,
+        "owner": -1,
+        "position": [
+          75,
+          75,
+          0
+        ],
+        "army_interval": {
+          "lower": 1000,
+          "upper": 2000
+        }
+      }
+    ],
+    "frontier_options": [],
+    "scouting_options": [],
+    "offensive_preparation": {
+      "hero_ref": "object:0",
+      "army_value": 5000,
+      "movement": 1500
+    }
+  },
+  "campaign": {
+    "version": 3,
+    "revision": 1,
+    "approach": "economy",
+    "horizon_days": 5,
+    "goals": [
+      {
+        "id": "old",
+        "kind": "develop_town",
+        "actor_ref": null,
+        "target_ref": "object:1",
+        "deadline_day": 4,
+        "priority": 80,
+        "building_id": 0,
+        "min_army_value": 0,
+        "depends_on": [],
+        "required_capabilities": [
+          "build"
+        ],
+        "complete_when": {
+          "kind": "building_present",
+          "value": 0
+        }
+      }
+    ],
+    "reserves": [],
+    "policy": {
+      "max_loss_ratio": 0.2,
+      "allow_route_repair": true,
+      "allow_helper_replacement": true,
+      "critical_towns": [
+        "object:1"
+      ]
+    }
+  },
+  "persisted": {
+    "experience_id": "request-proof",
+    "strategic_intent": {
+      "objective": "Prepare own forces for conquest",
+      "selection_reason": "Controlled contract fixture",
+      "assumptions": [],
+      "milestones": [
+        {
+          "id": "stage-1",
+          "description": "Confirmed stage 1",
+          "depends_on": [],
+          "complete_when": {
+            "kind": "building_present",
+            "target_ref": "object:1",
+            "actor_ref": null,
+            "value": 0
+          }
+        },
+        {
+          "id": "stage-2",
+          "description": "Confirmed stage 2",
+          "depends_on": [
+            "stage-1"
+          ],
+          "complete_when": {
+            "kind": "building_present",
+            "target_ref": "object:1",
+            "actor_ref": null,
+            "value": 0
+          }
+        },
+        {
+          "id": "stage-3",
+          "description": "Confirmed stage 3",
+          "depends_on": [
+            "stage-2"
+          ],
+          "complete_when": {
+            "kind": "building_present",
+            "target_ref": "object:1",
+            "actor_ref": null,
+            "value": 0
+          }
+        }
+      ],
+      "reconsider_when": [
+        {
+          "kind": "milestone_completed",
+          "milestone_id": "stage-1",
+          "reason": "Select the next operation"
+        }
+      ],
+      "version": 1,
+      "revision": 7,
+      "adopted_day": 1,
+      "progress": [],
+      "bindings": []
+    },
+    "strategy_metadata": {
+      "assignments": [
+        {
+          "hero_ref": "object:0",
+          "role": "collector"
+        }
+      ],
+      "decision_basis": {
+        "waits": [],
+        "town_choices": []
+      }
+    },
+    "operation_progress": {
+      "note": "Юнікод \"quoted\" \\ path"
+    },
+    "memory": {
+      "known_objects": [
+        {
+          "id": 1,
+          "ref": "object:1",
+          "kind": "town",
+          "owner": 0,
+          "visible": true,
+          "position": [
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "ref": "discarded",
+          "kind": "resource"
+        },
+        {
+          "ref": "remembered-enemy",
+          "kind": "hero"
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "identity": {
+      "instance": "request-proof",
+      "generation": "generation",
+      "player": 0,
+      "day": 1,
+      "revision": 1
+    },
+    "request_id": "request-proof:generation:0:1:1:2",
+    "wait_ms": 70000,
+    "tokens": 120000,
+    "signals": [
+      {
+        "question": "routine:object:1",
+        "facts": "first",
+        "critical": false
+      }
+    ]
+  }
+}

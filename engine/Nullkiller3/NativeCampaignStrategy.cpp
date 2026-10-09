@@ -4,7 +4,7 @@
 #include "StrategicIntent.h"
 #include "Forecasts.h"
 #include "OffensivePreparation.h"
-#include "StrategicCandidates.h"
+#include "StrategicRequest.h"
 #include "BackgroundPlanning.h"
 #include "../ExternalAI/ProcessExchange.h"
 #include "../TransportJSON/TransportJSON.h"
@@ -375,48 +375,18 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
     for(const auto & need:scope["needs"].Vector())
         decision.signals.push_back({"routine:"+need["ref"].String(),std::to_string(nextDay)+":"+std::to_string(campaign.plan()["revision"].Integer()),true,true,true,false});
     if(decision.signals.empty() || (scope["targets"].Vector().empty() && !strategicReview)) return;
-    JsonNode request;
-    request["protocol"].Integer()=2;request["mode"].String()="prepare_next_turn";
-    request["identity"]=identity(persisted,generation,world,campaign.plan()["revision"].Integer());
-    request["execution_day"].Integer()=nextDay;request["intent_revision"]=persisted["strategic_intent"]["revision"];
-    request["strategic_review"].Bool()=strategicReview;
-    request["allowed_actor_refs"]=scope["actors"];request["allowed_target_refs"]=scope["targets"];
-    request["routine_needs"]=scope["needs"];
     const auto sequence=persisted["request_sequence"].Integer()+1;
-    request["request_id"].String()=persisted["experience_id"].String()+":"+generation+":"+std::to_string(world["player"].Integer())
+    StrategicRequestParameters parameters;
+    parameters.identity=identity(persisted,generation,world,campaign.plan()["revision"].Integer());
+    parameters.requestID=persisted["experience_id"].String()+":"+generation+":"+std::to_string(world["player"].Integer())
         +":"+std::to_string(world["day"].Integer())+":"+std::to_string(campaign.plan()["revision"].Integer())+":"+std::to_string(sequence);
-    request["strategic_intent"]=persisted["strategic_intent"];request["campaign"]=campaign.plan();
-    request["observation"]=strategicCandidateView(world,campaign.plan(),request["strategic_intent"],strategicReview);
-    request["observation"]["accepted_decision_basis"]=persisted["strategy_metadata"]["decision_basis"];
-    request["observation"]["operation_progress"]=persisted["operation_progress"];
-    request["observation"]["strategy_assignments"]=persisted["strategy_metadata"]["assignments"];
-    if(!request["observation"]["strategy_assignments"].isVector()) request["observation"]["strategy_assignments"].Vector();
-    if(strategicReview)
-    {
-        request["observation"]["map_overview"]=strategicMapOverview(world,request["strategic_intent"],true);
-        request["observation"]["strategy_stalls"]=strategicStalls(request["strategic_intent"],world);
-    }
-    request["memory"]=strategicCandidateMemory(persisted["memory"],request["observation"]);
-    for(const auto & signal:decision.signals)
-    {
-        JsonNode item;item["question"].String()=signal.question;item["facts"].String()=signal.facts;item["critical"].Bool()=signal.critical;
-        request["signals"].Vector().push_back(item);
-    }
-    for(const auto * field:{"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview","strategy_stalls","automatic_safety_reviews","decision_feedback"})
-        request["evidence_refs"].Vector().emplace_back("observation:"+std::string(field));
-    if(strategicReview) for(const auto * field:{"map_overview","strategy_stalls"}) request["evidence_refs"].Vector().emplace_back("observation:"+std::string(field));
-    for(const auto & hero:request["observation"]["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
-    for(const auto & town:request["observation"]["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
-    for(const auto & object:request["observation"]["objects"].Vector()) request["evidence_refs"].Vector().emplace_back("target:"+object["ref"].String());
-    request["budget"]["wait_ms"].Integer()=80000;request["budget"]["tokens"].Integer()=strategicRequestTokens;
-    boundStrategicRequest(request);
-    std::set<std::string> exposed;
-    for(const auto * list:{"heroes","towns","objects","visible_objects"})
-        for(const auto & item:request["observation"][list].Vector()) exposed.insert(item["ref"].String());
-    for(const auto & ref:request["observation"]["frontiers"].Vector()) exposed.insert(ref.String());
-    std::erase_if(request["allowed_target_refs"].Vector(),[&](const auto & ref){return !exposed.count(ref.String());});
-    const auto input=ai_transport::transportJSON(request.toCompactString());
-    if(input.size()>512*1024) return;
+    parameters.signals=decision.signals;
+    parameters.waitMs=80000;parameters.tokens=strategicRequestTokens;
+    parameters.preparation=PreparationRequest{nextDay,strategicReview,scope};
+    const auto assembled=buildStrategicRequest(world,campaign,persisted,parameters);
+    if(!assembled.fits()) return;
+    const auto & request=assembled.request;
+    const auto & input=assembled.wire;
     // Persist the marker before publication, even with learning disabled.
     preparedExecutionDay=nextDay;persisted["request_sequence"].Integer()=sequence;
     persist(ai);
@@ -551,54 +521,22 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
         if(!decision.signals.empty()) logAi->info("NK3_STRATEGY %s",trace.toCompactString());
         return false;
     }
-    JsonNode request;
-    request["protocol"].Integer() = 2;
     const auto revision = campaign.plan()["revision"].Integer();
-    request["identity"] = identity(persisted,generation,world,revision);
     const int64_t sequence = persisted["request_sequence"].Integer()+1;
-    request["request_id"].String() = persisted["experience_id"].String()+":"+generation+":"
-        +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
-        +std::to_string(revision)+":"+std::to_string(sequence);
     // Freshness compares full native facts; proposal screening is model-only.
     const auto observationBeforeExchange = world;
-    request["strategic_intent"]=persisted["strategic_intent"];
-    bool detailedOverview=request["strategic_intent"].isNull();
-    for(const auto & signal:decision.signals)
-        detailedOverview |= signal.question.starts_with("strategy:") || signal.question.starts_with("battle_loss:")
-            || signal.question.starts_with("critical_town:") || signal.question.starts_with("defense:")
-            || signal.question.starts_with("checkpoint:") || signal.question.starts_with("stagnation:");
-    request["observation"] = strategicCandidateView(world,campaign.plan(),request["strategic_intent"],detailedOverview);
-    request["observation"]["strategy_stalls"]=strategicStalls(request["strategic_intent"],world);
-    request["observation"]["map_overview"]=strategicMapOverview(world,request["strategic_intent"],detailedOverview);
-    // Retain must echo the exact accepted roles, including order. Expose the
-    // same saved owner used by admission; rejected proposals never replace it.
-    const auto & metadata=static_cast<const JsonNode &>(persisted)["strategy_metadata"];
-    request["observation"]["accepted_decision_basis"]=metadata["decision_basis"];
-    request["observation"]["operation_progress"]=persisted["operation_progress"];
-    request["observation"]["strategy_assignments"]=metadata["assignments"];
-    if(!request["observation"]["strategy_assignments"].isVector())
-        request["observation"]["strategy_assignments"].Vector();
-    if(includeIdle) request["observation"]["main_army_idle"]=mainArmyIdle(campaign,world);
-    request["memory"] = strategicCandidateMemory(persisted["memory"],request["observation"]);
-    request["memory"]["experience_id"] = persisted["experience_id"];
-    request["campaign"] = campaign.plan();
-    request["signals"] = trace["signals"];
-    request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
-    // Every request gets fresh transport/token limits; saved usage is diagnostic.
-    request["budget"]["tokens"].Integer() = strategicRequestTokens;
-    for(const auto * key : {"day","resources","victory","rules","goal_feedback","offensive_preparation","main_army_idle","scouting_options","map_overview","strategy_stalls","automatic_safety_reviews","decision_feedback"})
-        request["evidence_refs"].Vector().emplace_back("observation:"+std::string(key));
-    for(const auto & hero : world["heroes"].Vector()) request["evidence_refs"].Vector().emplace_back("hero:"+hero["ref"].String());
-    for(const auto & town : world["towns"].Vector()) request["evidence_refs"].Vector().emplace_back("town:"+town["ref"].String());
-    for(const auto & object : request["observation"]["objects"].Vector()) request["evidence_refs"].Vector().emplace_back("target:"+object["ref"].String());
-    for(const auto & object:request["observation"]["map_overview"]["objects"].Vector())
-    {
-        const JsonNode ref("target:"+object["ref"].String());
-        if(std::find(request["evidence_refs"].Vector().begin(),request["evidence_refs"].Vector().end(),ref)==request["evidence_refs"].Vector().end())
-            request["evidence_refs"].Vector().push_back(ref);
-    }
-    boundStrategicRequest(request);
-    const auto input = ai_transport::transportJSON(request.toCompactString());
+    StrategicRequestParameters parameters;
+    parameters.identity = identity(persisted,generation,world,revision);
+    parameters.requestID = persisted["experience_id"].String()+":"+generation+":"
+        +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
+        +std::to_string(revision)+":"+std::to_string(sequence);
+    parameters.signals = decision.signals;
+    parameters.waitMs = decision.deadlineMs;
+    parameters.tokens = strategicRequestTokens;
+    parameters.includeIdle = includeIdle;
+    const auto assembled = buildStrategicRequest(world,campaign,persisted,parameters);
+    const auto & request = assembled.request;
+    const auto & input = assembled.wire;
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
     for(const auto & signal:decision.signals) unresolvedTurnQuestions.erase(signal.question);
@@ -612,7 +550,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     int64_t consumed = request["budget"]["tokens"].Integer(); // Unknown usage remains charged.
     try
     {
-    if(input.size()>512*1024) response.error = "context_overflow";
+    if(!assembled.fits()) response.error = "context_overflow";
     else if(!*environment("VCMI_EXTERNAL_AI_EXECUTABLE") || !*environment("VCMI_EXTERNAL_AI_SCRIPT")) response.error = "controller_unavailable";
     else
     {
