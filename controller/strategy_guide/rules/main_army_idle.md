@@ -9,7 +9,8 @@ Check main_army_idle, accepted goals, assigned_routes, feedback, commitments and
 ## Alternatives to compare
 - Compare concrete defense, supported delivery wait, ready expansion and purposeful scouting.
 - For safe_options compare another actor, explicit preparation or earliest_safe_arrival_day with a revised deadline.
-- With no route, compare reachable information, a safe approach or an intermediate objective.
+- With no direct attack route, compare offensive_preparation intermediate_options and water_options: useful key acquisition, gate/portal access, existing boats and quoted boat construction. Empty town routes do not mean all movement is unavailable.
+- Compare direct conquest, access opened by a suitable helper, access opened by the main army, then preparation or justified waiting. This is a comparison order, not a mandatory choice; weigh arrival, losses, commitments, base exposure and expected access gain.
 
 ## Benefits, costs and risks
 Waiting can protect an obligation but loses initiative. Keep valid funded goals while repairing blocked ones. A defender label or unknown enemy strength alone does not justify inactivity.

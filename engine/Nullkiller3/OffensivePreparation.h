@@ -1,6 +1,7 @@
 #pragma once
 #include "CampaignState.h"
 #include "Forecasts.h"
+#include "KeymasterAccess.h"
 
 namespace nullkiller3
 {
@@ -49,7 +50,7 @@ inline JsonNode reinforcementSources(const JsonNode & actor,const JsonNode & wor
 inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNode & world)
 {
     JsonNode result;result["targets"].Vector();result["reinforcement_sources"].Vector();
-    result["frontiers"].Vector();
+    result["frontiers"].Vector();result["intermediate_options"].Vector();result["water_options"].Vector();
     result["ready_goal_ids"].Vector();result["blocked_goal_ids"].Vector();
     const JsonNode * strongest=nullptr;
     for(const auto & hero:world["heroes"].Vector())
@@ -112,6 +113,61 @@ inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNo
         target["reinforced_route_assumptions"].String()="Offered native path army above the current army requires its native exchanges; separate source options do not prove this attack route.";
         result["targets"].Vector().push_back(target);
     }
+    // Compare access operations separately from final town/mine attacks.
+    // Quotes remain conditional; a reachable entrance does not prove its exit.
+    for(const auto & object:world["visible_objects"].Vector())
+    {
+        const auto & kind=object["kind"].String();
+        const bool passage=kind=="portal" || kind=="subterranean_gate";
+        const bool site=keymasterObject(object) && strategicSiteAvailable(object);
+        const bool water=kind=="boat" || kind=="shipyard";
+        if(!object["visible"].Bool() || (!passage && !site && !water)) continue;
+        JsonNode item;item["target_ref"]=object["ref"];item["kind"]=object["kind"];
+        for(const auto * key:{"position","key_color","key_owned","matching_visible_refs"})
+            if(!object[key].isNull()) item[key]=object[key];
+        item["onward_access"].String()="unknown: visit or crossing must be confirmed, then onward routes requoted";
+        if(passage)
+        {
+            item["observed_connections"].Vector();
+            for(const auto & connection:world["observed_passages"].Vector())
+                if(connection["from"]==object["position"] || connection["to"]==object["position"])
+                    item["observed_connections"].Vector().push_back(connection);
+        }
+        item["actor_options"].Vector();
+        for(const auto & hero:world["heroes"].Vector())
+        {
+            if(site && !strategicSiteAvailable(object,hero["ref"])) continue;
+            JsonNode goal;goal["kind"].String()=passage ? "explore_passage" : "visit_site";
+            goal["actor_ref"]=hero["ref"];goal["target_ref"]=object["ref"];
+            goal["min_army_value"].Integer()=0;goal["deadline_day"].Integer()=world["day"].Integer()+7;
+            auto feedback=campaign.routeFeedback(goal,world);
+            feedback.Struct().erase("safe_options");
+            for(auto & route:feedback["assigned_routes"].Vector())
+            {
+                JsonNode compact;
+                for(const auto * key:{"hero_ref","day","army_value","army_loss_estimate","movement_cost","issues",
+                                     "retained_force_floor","estimated_loss_percent","allowed_loss_percent","meets_deadline"})
+                    if(!route[key].isNull()) compact[key]=route[key];
+                compact["forecast_target_ref"]=object["ref"];
+                compact["exposure_status"]=route["end_turn_exposure"]["status"];
+                compact["exposure_details"].String()="Use the matching forecasts.routes own_arrival for end-turn exposure and loss basis";
+                route=compact;
+            }
+            if(feedback["assigned_routes"].Vector().empty()) continue;
+            // For water these are approach quotes, not visit_site admission.
+            feedback["action_admission"].String()=water ? "native embark or boat construction checks still required" : "fresh goal admission still required";
+            item["actor_options"].Vector().push_back(feedback);
+        }
+        if(!item["actor_options"].Vector().empty()) result[water ? "water_options" : "intermediate_options"].Vector().push_back(item);
+    }
+    for(const auto & shipyard:world["shipyards"].Vector())
+    {
+        JsonNode item;item["target_ref"]=shipyard["ref"];item["kind"].String()="boat_construction";
+        item["construction_quote"]=shipyard;
+        item["action_admission"].String()="requires owned visible shipyard, current placement, funds and native admission";
+        item["onward_access"].String()="unknown: a construction quote does not establish embark, landing or destination access";
+        result["water_options"].Vector().push_back(item);
+    }
     result["reinforcement_sources"]=reinforcementSources(actor,world);
     result["commander_options"].Vector();
     for(const auto & hero:world["heroes"].Vector())
@@ -121,6 +177,28 @@ inline JsonNode offensivePreparation(const CampaignState & campaign,const JsonNo
         option["reinforcement_sources"]=reinforcementSources(hero["ref"],world);
         result["commander_options"].Vector().push_back(option);
     }
+    // Keep the common source caveat once; route and resource facts stay intact.
+    auto compactSources=[&](JsonNode & sources) {
+        for(auto & source:sources.Vector())
+        {
+            for(auto & meeting:source["meeting_routes"].Vector())
+                for(const auto * key:{"basis","coverage"})
+                    if(meeting["end_turn_exposure"][key].isString())
+                    {
+                        if(result["reinforcement_route_exposure"][key].isNull())
+                            result["reinforcement_route_exposure"][key]=meeting["end_turn_exposure"][key];
+                        if(result["reinforcement_route_exposure"][key]==meeting["end_turn_exposure"][key])
+                            meeting["end_turn_exposure"].Struct().erase(key);
+                    }
+            if(source["assumptions"].isString())
+            {
+                result["reinforcement_source_assumptions"]=source["assumptions"];
+                source.Struct().erase("assumptions");
+            }
+        }
+    };
+    compactSources(result["reinforcement_sources"]);
+    for(auto & commander:result["commander_options"].Vector()) compactSources(commander["reinforcement_sources"]);
     return result;
 }
 
