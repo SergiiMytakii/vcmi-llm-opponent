@@ -2558,6 +2558,37 @@ void NativeCampaign::checkAutomaticMove(NK2AI::Nullkiller & ai,const CGHeroInsta
 }
 float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals::TSubgoal & task, float nativeScore) const
 {
+    const auto survivalDeadline=CampaignState::townlessCaptureDeadline(world);
+    if(survivalDeadline)
+    {
+        std::string reason;
+        // A supported admitted rescue keeps the model's destination and rank.
+        // Native fallback is only for the absence of a viable accepted return.
+        if(task->strategicGoalID.empty() && campaign.validateTownlessRecovery(world,reason)) return 0;
+        // Applies to old saved campaigns and unnamed native fallback as well.
+        // A complete town route may contain intermediate movement/exchanges;
+        // unrelated resource/scouting chains cannot spend the rescue window.
+        bool capture=false;
+        std::function<bool(const NK2AI::Goals::TSubgoal &,int)> timelyCapture=[&](const auto & item,int depth) {
+            if(depth>16) return false;
+            if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
+                for(const auto & child:composition->decompose(nullptr)) if(!timelyCapture(child,depth+1)) return false;
+            if(const auto * chain=dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(item.get()))
+            {
+                const auto & path=chain->getPath();
+                if(path.getFirstBlockedAction() || world["day"].Integer()+path.turn()>*survivalDeadline) return false;
+                bool town=false;
+                for(const auto * list:{"objects","visible_objects"}) for(const auto & object:world[list].Vector())
+                    if(object["kind"].String()=="town" && object["visible"].Bool() && object["owner"].isNumber()
+                        && (object["owner"].Integer()<0 || std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),object["owner"])!=world["enemy_players"].Vector().end()))
+                        if(const auto * target=resolve(ai,object["ref"])) town |= path.targetTile()==target->visitablePos();
+                if(!town) return false;
+                capture=true;
+            }
+            return true;
+        };
+        if(!timelyCapture(task,0) || !capture) return 0;
+    }
     std::function<bool(const NK2AI::Goals::TSubgoal &,int)> crossingPending=[&](const auto & item,int depth) {
         if(depth>16) return true;
         if(const auto * composition=dynamic_cast<const NK2AI::Goals::Composition *>(item.get()))
@@ -2704,6 +2735,7 @@ float NativeCampaign::priority(const NK2AI::Nullkiller & ai, const NK2AI::Goals:
                     + goal["priority"].Integer();
             }
         }
+    if(survivalDeadline) return 115000.0f+std::max(0.0f,nativeScore);
     // Keep independently useful opportunities, but do not divert a committed
     // hero to an unrelated operation before its current obligation completes.
     if(task->hero && !role(task->hero).empty()) return 0;

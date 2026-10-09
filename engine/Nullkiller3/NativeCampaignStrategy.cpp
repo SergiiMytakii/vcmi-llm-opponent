@@ -149,6 +149,14 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
+    if(const auto deadline=CampaignState::townlessCaptureDeadline(world))
+    {
+        JsonNode facts;facts["last_capture_day"].Integer()=*deadline;
+        facts["elapsed_turns"]=world["victory"]["townless_defeat"]["own_elapsed_turns"];
+        std::string failure;
+        facts["supported_recovery"].Bool()=campaign.validateTownlessRecovery(world,failure);
+        result.push_back({"townless_survival",facts.toCompactString(),true,true,actionable,true});
+    }
     for(const auto * hero:ai.cc->getHeroesInfo())
         if(static_cast<const JsonNode &>(persisted)["passage_reviews"][std::to_string(hero->id.getNum())].isStruct()) {
             const auto review=automaticMoveReview(ai,hero,hero->visitablePos());
@@ -336,6 +344,7 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
     // Serialized own-turn work only. Read the last already-built observation;
     // callbacks never observe, generate, persist or touch the arbiter.
     const auto nextDay=world["day"].Integer()+1;
+    if(const auto deadline=CampaignState::townlessCaptureDeadline(world); deadline && nextDay>*deadline) return;
     if(preparedExecutionDay>=nextDay) return;
     auto scope=preparationScope(world,campaign);
     auto prospective=arbiter;

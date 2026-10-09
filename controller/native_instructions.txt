@@ -92,6 +92,9 @@ For blocked goals inspect goal_feedback and assigned_routes. Fix the specific
 arrival, force, loss, reserve or actor-route failure. earliest_safe_arrival_day is
 that actor's earliest offered arrival meeting army/loss/floor constraints; absent
 means none established. safe_options are actor/deadline alternatives, not wins.
+With no own towns and a known public townless counter, native admission requires
+an executable town capture before the loss turn. Active goal deadlines cannot
+cross that boundary; unconfirmed preparation does not prove recovery.
 A later arrival needs a revised deadline. Future troops or unknown post-delivery
 forecasts do not establish readiness. Native route repair/helper replacement
 promises neither reinforcement nor arrival. Safe return before review does not

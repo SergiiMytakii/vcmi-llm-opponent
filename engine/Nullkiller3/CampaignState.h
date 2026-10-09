@@ -7,6 +7,7 @@
 #include <functional>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -100,6 +101,9 @@ class CampaignState
     bool finished(const JsonNode & goal, const JsonNode & world) const;
 
 public:
+    // Only an explicit own counter and public standalone rule bound survival.
+    static std::optional<int64_t> townlessCaptureDeadline(const JsonNode & world);
+    bool validateTownlessRecovery(const JsonNode & world,std::string & reason) const;
     static bool sameGoal(const JsonNode & left,const JsonNode & right)
     {
         auto a=left,b=right;

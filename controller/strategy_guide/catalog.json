@@ -67,7 +67,7 @@
     {
       "id": "endgame",
       "title": "Finish the game",
-      "applicability": "How can the advantage become a confirmed victory? Read when comparing a decisive attack with minor targets or waiting, or planning elimination and recapture prevention.",
+      "applicability": "How can the advantage become a confirmed victory? Read when comparing a decisive attack with minor targets or waiting, planning elimination, or returning a town before public townless loss.",
       "file": "rules/endgame.md",
       "enabled": true
     }

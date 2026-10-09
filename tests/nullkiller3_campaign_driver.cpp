@@ -23,6 +23,17 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--decision")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            nullkiller3::CampaignState current,candidate;std::string reason;
+            if(!input["current"].isNull() && !current.accept(input["current"],input["world"],reason))
+                throw std::runtime_error(reason);
+            const bool accepted=nullkiller3::validateStrategicDecision(input["reply"],input["request"],input["world"],current,candidate,reason);
+            JsonNode result;result["accepted"].Bool()=accepted;result["reason"].String()=reason;
+            result["plan"]=candidate.plan();
+            std::cout<<result.toCompactString()<<'\n';return 0;
+        }
         if(argc==1 || (argc==2 && std::string(argv[1])=="--weaker-main-intercept"))
         {
             auto world=json(R"({"day":4,"player":0,"resources":[0,0,0,0,0,0,10000],"capabilities":[],"heroes":[{"ref":"main","army_value":10000},{"ref":"stronger","army_value":15000}],"towns":[],"objects":[{"ref":"enemy","kind":"hero","owner":1,"visible":true}],"enemy_players":[1],"forecasts":{"routes":[{"target_ref":"enemy","own_arrivals":[{"hero_ref":"main","day":5,"army_value":10000,"army_loss_estimate":1000}]}]}})");

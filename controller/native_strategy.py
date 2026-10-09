@@ -120,6 +120,14 @@ def validate_preparation(request):
 
 
 
+def townless_capture_deadline(world):
+    rule=world.get('victory',{}).get('townless_defeat',{})
+    if world.get('towns') != [] or rule.get('status')!='public_rule':return None
+    day,turns,elapsed=world.get('day'),rule.get('turns'),rule.get('own_elapsed_turns')
+    if any(type(v) is not int for v in (day,turns,elapsed)) or day<1 or turns<1 or elapsed<0:return None
+    return day+turns-elapsed-1
+
+
 def same_goal(left, right):
     """Absent legacy risk and explicit null have identical goal semantics."""
     def normalized(goal):
@@ -380,7 +388,9 @@ def reply_schema(request):
         option = copy.deepcopy(plan)
         option['properties']['horizon_days'] = {**integer(horizon, horizon), 'enum':[horizon]}
         for variant in option['properties']['goals']['items']['anyOf']:
-            if 'enum' not in variant:variant['properties']['deadline_day'] = integer(day, day+horizon)
+            if 'enum' not in variant:
+                cap=townless_capture_deadline(world)
+                variant['properties']['deadline_day'] = integer(day, min(day+horizon,cap) if cap is not None else day+horizon)
         plans.append(option)
     properties = {'protocol':{**integer(2,2),'enum':[2]},
                   'request_id':{'type':'string','enum':[request['request_id']]},
@@ -486,6 +496,20 @@ def validate_reply(request, reply, wire=False):
     if isinstance(shape_reply.get('plan'),dict) and isinstance(shape_reply['plan'].get('goals'),list):
         for goal in shape_reply['plan']['goals']:
             if isinstance(goal,dict):goal.setdefault('risk',None)
+    # Report the loss boundary explicitly instead of a generic anyOf mismatch.
+    # Other malformed fields still go through the closed schema below.
+    survival_deadline=townless_capture_deadline(request['observation'])
+    proposal=shape_reply.get('plan') if shape_reply.get('decision')=='revise' else request.get('campaign')
+    if survival_deadline is not None and isinstance(proposal,dict) and isinstance(proposal.get('goals'),list):
+        previous={g['id']:g for g in (request.get('campaign') or {}).get('goals',[])}
+        statuses=request['observation'].get('goal_statuses',{})
+        for goal in proposal['goals']:
+            if (not isinstance(goal,dict) or type(goal.get('deadline_day')) is not int
+                    or not isinstance(goal.get('id'),str)):continue
+            completed=(statuses.get(goal.get('id'),{}).get('state')=='completed'
+                       and same_goal(previous.get(goal.get('id')),goal))
+            if not completed and goal['deadline_day']>survival_deadline:
+                raise ValueError('townless_goal_after_defeat')
     _validate_shape(shape_reply, byte_schema)
     exposed = any(front.get('town_ref') in {t['ref'] for t in request['observation']['towns']}
                   and front.get('threats') and front.get('status') in

@@ -500,6 +500,37 @@ bool CampaignState::accept(const JsonNode & proposal, const JsonNode & world, st
     return true;
 }
 
+std::optional<int64_t> CampaignState::townlessCaptureDeadline(const JsonNode & world)
+{
+    const auto & rule=world["victory"]["townless_defeat"];
+    if(!world["towns"].isVector() || !world["towns"].Vector().empty()
+        || rule["status"].String()!="public_rule"
+        || !integer(world["day"],1,2147483647) || !integer(rule["turns"],1,2147483647)
+        || !integer(rule["own_elapsed_turns"],0,2147483647)) return {};
+    // The loss check follows this player's turn: six elapsed of seven means
+    // capture today, not tomorrow. Owning a town removes this constraint.
+    return world["day"].Integer()+rule["turns"].Integer()-rule["own_elapsed_turns"].Integer()-1;
+}
+bool CampaignState::validateTownlessRecovery(const JsonNode & world,std::string & reason) const
+{
+    const auto deadline=townlessCaptureDeadline(world);
+    if(!deadline) return true;
+    for(const auto & goal:plan()["goals"].Vector())
+        if(statuses()[goal["id"].String()]["state"].String()!="completed"
+            && goal["deadline_day"].Integer()>*deadline)
+        { reason="townless_goal_after_defeat";return false; }
+    for(const auto & goal:plan()["goals"].Vector())
+    {
+        if(goal["kind"].String()!="capture_target" || statuses()[goal["id"].String()]["state"].String()!="ready") continue;
+        const auto & target=find(world,"objects",goal["target_ref"]);
+        if(target["kind"].String()=="town" && target["visible"].Bool()
+            && target["owner"].isNumber() && (target["owner"].Integer()<0 || contains(world["enemy_players"],target["owner"]))
+            && hasSupportedRoute(goal,world)) return true;
+    }
+    reason="townless_recovery_not_supported";
+    return false;
+}
+
 JsonNode CampaignState::routeFeedback(const JsonNode & goal,const JsonNode & world) const
 {
     JsonNode feedback;feedback["goal_id"]=goal["id"];feedback["actor_ref"]=goal["actor_ref"];

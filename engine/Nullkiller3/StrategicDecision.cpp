@@ -365,6 +365,7 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
     else if(reply["decision"].String() != "retain" || !reply["plan"].isNull() || current.plan().isNull())
         return reject("invalid_strategic_retention");
     trial.review(freshWorld);
+    if(!trial.validateTownlessRecovery(freshWorld,reason)) return false;
     if(previousHold && reply["defense_exit"].isNull())
         for(const auto & goal:trial.plan()["goals"].Vector())
             if(goal["kind"].String()=="defend_area" || goal["kind"].String()=="preserve_force") return reject("missing_defense_exit");

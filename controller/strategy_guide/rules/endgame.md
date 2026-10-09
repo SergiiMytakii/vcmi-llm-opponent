@@ -9,7 +9,7 @@ Check public victory rules, hostile bases and remaining forces. The last known b
 ## Alternatives to compare
 - Compare the named attack with a justified local goal.risk, offered reinforcement and waiting; absent reinforcement is unavailable/unknown.
 - Compare main-force defeat, base denial and recapture prevention by the path to confirmed elimination.
-- For a mine/weak target explain which elimination step it enables.
+- With no towns, compare currently executable town returns before the public loss deadline. Postpone minor targets and waits until ownership is restored; unconfirmed preparation or an unknown passage does not establish timely recovery. Otherwise explain which elimination step a mine/weak target enables.
 
 ## Benefits, costs and risks
 - Include enemy growth and extra operations caused by waiting. A costly decisive attack may beat repeated safe accumulation.

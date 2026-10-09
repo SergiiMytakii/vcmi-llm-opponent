@@ -9,6 +9,7 @@
 - Use actual victory.kind, supported status, public description and participants. An unsupported special objective stays unsupported. The public rule does not disclose unseen towns or enemy elapsed turns; the last observed town is not necessarily the last existing one.
 
 ## Facts to check
+- With no own towns and a known public counter, the last capture day is current day + turns - own_elapsed_turns - 1. Six elapsed turns out of seven requires capture today, before turn end. Use the actual map period; an unknown counter does not establish a deadline. Owning a town resets the constraint.
 - Read participant statuses, townless_defeat status/turns/basis, own_elapsed_turns, confirmed ownership changes and terminal results. A disappeared sighting proves no kill. Never invent a countdown or infer victory from an accepted goal.
 
 ## Executor boundary
