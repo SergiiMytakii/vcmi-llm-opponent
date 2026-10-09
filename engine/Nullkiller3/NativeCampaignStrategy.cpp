@@ -4,7 +4,8 @@
 #include "StrategicIntent.h"
 #include "Forecasts.h"
 #include "OffensivePreparation.h"
-#include "StrategicRequest.h"
+#include "StrategicContext.h"
+#include "StrategicMapOverview.h"
 #include "BackgroundPlanning.h"
 #include "../ExternalAI/ProcessExchange.h"
 #include "../TransportJSON/TransportJSON.h"
@@ -418,17 +419,34 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
         decision.signals.push_back({"routine:"+need["ref"].String(),std::to_string(nextDay)+":"+std::to_string(campaign.plan()["revision"].Integer()),true,true,true,false});
     if(decision.signals.empty() || (scope["targets"].Vector().empty() && !strategicReview)) return;
     const auto sequence=persisted["request_sequence"].Integer()+1;
-    StrategicRequestParameters parameters;
-    parameters.identity=identity(persisted,generation,world,campaign.plan()["revision"].Integer());
-    parameters.requestID=persisted["experience_id"].String()+":"+generation+":"+std::to_string(world["player"].Integer())
+    JsonNode request;
+    request["protocol"].Integer()=2;request["mode"].String()="prepare_next_turn";
+    request["identity"]=identity(persisted,generation,world,campaign.plan()["revision"].Integer());
+    request["request_id"].String()=persisted["experience_id"].String()+":"+generation+":"+std::to_string(world["player"].Integer())
         +":"+std::to_string(world["day"].Integer())+":"+std::to_string(campaign.plan()["revision"].Integer())+":"+std::to_string(sequence);
-    parameters.signals=decision.signals;
-    parameters.waitMs=80000;parameters.tokens=strategicRequestTokens;
-    parameters.preparation=PreparationRequest{nextDay,strategicReview,scope};
-    const auto assembled=buildStrategicRequest(world,campaign,persisted,parameters);
-    if(!assembled.fits()) return;
-    const auto & request=assembled.request;
-    const auto & input=assembled.wire;
+    request["execution_day"].Integer()=nextDay;request["intent_revision"]=persisted["strategic_intent"]["revision"];
+    request["strategic_review"].Bool()=strategicReview;
+    request["allowed_actor_refs"]=scope["actors"];request["allowed_target_refs"]=scope["targets"];
+    request["routine_needs"]=scope["needs"];
+    request["strategic_intent"]=persisted["strategic_intent"];request["campaign"]=campaign.plan();
+    auto context=buildStrategicContext(world,campaign,persisted,{true,strategicReview,false});
+    request["observation"]=std::move(context.observation);
+    request["memory"]=std::move(context.memory);
+    request["evidence_refs"]=std::move(context.evidenceRefs);
+    for(const auto & signal:decision.signals)
+    {
+        JsonNode item;item["question"].String()=signal.question;item["facts"].String()=signal.facts;item["critical"].Bool()=signal.critical;
+        request["signals"].Vector().push_back(item);
+    }
+    request["budget"]["wait_ms"].Integer()=80000;request["budget"]["tokens"].Integer()=strategicRequestTokens;
+    boundStrategicRequest(request);
+    std::set<std::string> exposed;
+    for(const auto * list:{"heroes","towns","objects","visible_objects"})
+        for(const auto & item:request["observation"][list].Vector()) exposed.insert(item["ref"].String());
+    for(const auto & ref:request["observation"]["frontiers"].Vector()) exposed.insert(ref.String());
+    std::erase_if(request["allowed_target_refs"].Vector(),[&](const auto & ref){return !exposed.count(ref.String());});
+    const auto input=ai_transport::transportJSON(request.toCompactString());
+    if(input.size()>512*1024) return;
     // Persist the marker before publication, even with learning disabled.
     preparedExecutionDay=nextDay;persisted["request_sequence"].Integer()=sequence;
     persist(ai);
@@ -600,18 +618,28 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     const int64_t sequence = persisted["request_sequence"].Integer()+1;
     // Freshness compares full native facts; proposal screening is model-only.
     const auto observationBeforeExchange = world;
-    StrategicRequestParameters parameters;
-    parameters.identity = identity(persisted,generation,world,revision);
-    parameters.requestID = persisted["experience_id"].String()+":"+generation+":"
+    JsonNode request;
+    request["protocol"].Integer() = 2;
+    request["identity"] = identity(persisted,generation,world,revision);
+    request["request_id"].String() = persisted["experience_id"].String()+":"+generation+":"
         +std::to_string(ai.playerID.getNum())+":"+std::to_string(world["day"].Integer())+":"
         +std::to_string(revision)+":"+std::to_string(sequence);
-    parameters.signals = decision.signals;
-    parameters.waitMs = decision.deadlineMs;
-    parameters.tokens = strategicRequestTokens;
-    parameters.includeIdle = includeIdle;
-    const auto assembled = buildStrategicRequest(world,campaign,persisted,parameters);
-    const auto & request = assembled.request;
-    const auto & input = assembled.wire;
+    request["strategic_intent"] = persisted["strategic_intent"];
+    request["campaign"] = campaign.plan();
+    bool detailedOverview=request["strategic_intent"].isNull();
+    for(const auto & signal:decision.signals)
+        detailedOverview |= signal.question.starts_with("strategy:") || signal.question.starts_with("battle_loss:")
+            || signal.question.starts_with("critical_town:") || signal.question.starts_with("defense:")
+            || signal.question.starts_with("checkpoint:") || signal.question.starts_with("stagnation:");
+    auto context = buildStrategicContext(world,campaign,persisted,{false,detailedOverview,includeIdle});
+    request["observation"] = std::move(context.observation);
+    request["memory"] = std::move(context.memory);
+    request["evidence_refs"] = std::move(context.evidenceRefs);
+    request["signals"] = trace["signals"];
+    request["budget"]["wait_ms"].Integer() = decision.deadlineMs;
+    request["budget"]["tokens"].Integer() = strategicRequestTokens;
+    boundStrategicRequest(request);
+    const auto input = ai_transport::transportJSON(request.toCompactString());
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
     for(const auto & signal:decision.signals) unresolvedTurnQuestions.insert_or_assign(signal.question,signal);
@@ -625,7 +653,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     int64_t consumed = request["budget"]["tokens"].Integer(); // Unknown usage remains charged.
     try
     {
-    if(!assembled.fits()) response.error = "context_overflow";
+    if(input.size()>512*1024) response.error = "context_overflow";
     else if(!*environment("VCMI_EXTERNAL_AI_EXECUTABLE") || !*environment("VCMI_EXTERNAL_AI_SCRIPT")) response.error = "controller_unavailable";
     else
     {

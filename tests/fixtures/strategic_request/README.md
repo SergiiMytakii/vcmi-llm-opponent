@@ -19,7 +19,9 @@ Cases cover initial/local/detailed/idle review and routine/strategic background
 preparation. Array order, repeated background evidence labels, absent versus
 null fields, scoped targets and Unicode are deliberately preserved. The tests
 also exercise truncation, required-context overflow, and unchanged source
-facts through the same assembly function used by both production callers.
+facts through the same context builder used by both production callers. The test
+driver supplies its own envelope, bounding and serialization; those now belong
+to the two native callers and are intentionally outside `buildStrategicContext`.
 
 Do not regenerate expected outputs merely because the implementation changes.
 A deliberate request-contract change must explain the corresponding fixture
