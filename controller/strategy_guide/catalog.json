@@ -32,7 +32,7 @@
     {
       "id": "main_army_idle",
       "title": "Main army idle",
-      "applicability": "Why is the main army making no useful progress, and what can unblock it? Read when movement remains unused, routes or goals are blocked, or execution misses a deadline.",
+      "applicability": "Why is the main army making no useful progress? Read before retaining or extending a hold with unused movement; compare intermediate_options and water_options when direct attack routes are empty.",
       "file": "rules/main_army_idle.md",
       "enabled": true
     },
@@ -60,7 +60,7 @@
     {
       "id": "exploration",
       "title": "Exploration",
-      "applicability": "How can missing town access be opened? Read for blocked conquest/expansion, targets on another level, key/border/passage prerequisites, scouting or collector assignments, and helper replacement after confirmed loss.",
+      "applicability": "How can missing town access be opened? Read when comparing intermediate_options or water_options: keys, borders, gates, portals, sailing, boats and shipyards; also after a crossing or helper loss.",
       "file": "rules/exploration.md",
       "enabled": true
     },

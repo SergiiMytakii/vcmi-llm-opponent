@@ -168,6 +168,7 @@ inline JsonNode generateTargetCandidates(const JsonNode & world,const JsonNode &
         if(kind=="hero" && object["owner"]!=world["player"]
             && (world["enemy_players"].Vector().empty() || std::find(world["enemy_players"].Vector().begin(),world["enemy_players"].Vector().end(),object["owner"])!=world["enemy_players"].Vector().end())) return std::string("interception");
         if(kind=="mine") return std::string("income");
+        if(kind=="boat" || kind=="shipyard") return std::string("water_access");
         if(kind=="resource") return std::string("supplies");
         if(kind=="subterranean_gate" || kind=="portal") return std::string("passages");
         if(keymasterObject(object) && strategicSiteAvailable(object)) return std::string(kind=="keymaster_tent" ? "key_tents" : "key_borders");

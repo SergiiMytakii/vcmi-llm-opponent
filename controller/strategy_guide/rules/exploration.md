@@ -11,7 +11,8 @@ When an operation lacks information/routes, or before another scout/collector/hi
 ## Alternatives to compare
 - Prioritize useful key/border openings; prefer a suitable helper. Compare viewpoints/sites, shorter routes, protection, passages and onward operations.
 - Match border key_color to known tents; for another level, compare admitted entrances first. Confirm each crossing/visit, then requote onward routes.
-- Empty quotes require a blocker or reachable intermediate step; physical impossibility and future access remain unproved.
+- Empty direct target quotes require comparison with intermediate_options and water_options. Prefer a suitable helper; compare the main army when helpers cannot accomplish a valuable access step. Physical impossibility and future access remain unproved.
+- On water maps compare offered sailing routes, visible boats, quoted construction at an owned shipyard and legal landing. Check cost, current placement, losses and exposure; a boat or reachable coast does not establish the onward route. Use only supported native sailing capabilities.
 - Before repeating an outing, identify changed route, protection, force or concrete information value; otherwise choose an existing alternative.
 
 ## Benefits, costs and risks
