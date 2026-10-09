@@ -26,6 +26,16 @@ class ProcessExchangeTest(unittest.TestCase):
             self.assertIn('foreground completed without waiting',result.stdout)
             self.assertIn('fresh foreground transport after spent time and spawn failure, without callback',result.stdout)
 
+    def test_pending_background_finishes_after_own_turn_readiness_check(self):
+        driver=DRIVER.parent/('background-exchange-driver.exe' if os.name=='nt' else 'background-exchange-driver')
+        with tempfile.TemporaryDirectory() as folder:
+            slow=Path(folder)/'slow.py'
+            slow.write_text('import sys,time\nsys.stdin.read()\ntime.sleep(.3)\nprint("background completed")\n')
+            result=subprocess.run([str(driver),sys.executable,str(slow),str(slow),'late'],
+                                  text=True,capture_output=True,timeout=5)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('pending background continued across own-turn readiness checks',result.stdout)
+
     def test_controller_json_is_minified_without_changing_escaped_strings(self):
         driver = DRIVER.parent / ('json-transport-driver.exe' if os.name == 'nt' else 'json-transport-driver')
         facts = {'values':[1, True, None, [], {}], 'text':'Привет \" герой \\ путь\n\t',

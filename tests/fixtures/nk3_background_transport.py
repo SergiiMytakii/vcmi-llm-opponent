@@ -9,6 +9,9 @@ from strategic_intent import with_intent
 r=json.load(sys.stdin);background=r.get('mode')=='prepare_next_turn'
 case=os.environ.get('NK3_BACKGROUND_CASE','ready')
 if r['identity']['player']==1:time.sleep(2)
+if case=='late':
+    if background and r['identity']['player']==0:time.sleep(4)
+    elif r['identity']['player']==0 and r['identity']['day']==2:time.sleep(5)
 if background and r['identity']['player']==0:
     if case=='pending':time.sleep(30)
     if case=='crash':sys.exit(1)

@@ -312,10 +312,12 @@ void NativeCampaign::captureTurnQuestions(NK2AI::Nullkiller & ai)
     for(const auto & signal:decision.signals) unresolvedTurnQuestions.insert_or_assign(signal.question,signal);
     if(std::any_of(unresolvedTurnQuestions.begin(),unresolvedTurnQuestions.end(),[](const auto & entry){return entry.second.critical;}))
     {
-        background.cancel();
-        if(!backgroundRequest.isNull())
+        // Critical facts invalidate admission, but never abort a running call
+        // just because the own turn began. Fresh foreground review remains open.
+        if(!backgroundRequest.isNull() && !backgroundInvalidated)
         {
-            JsonNode trace;trace["phase"].String()="cancel";trace["reason"].String()="critical_question";
+            backgroundInvalidated=true;
+            JsonNode trace;trace["phase"].String()="invalidate";trace["reason"].String()="critical_question";
             trace["request_id"]=backgroundRequest["request_id"];trace["observed_day"]=backgroundRequest["identity"]["day"];
             trace["execution_day"]=world["day"];
             for(const auto & [question,signal]:unresolvedTurnQuestions) if(signal.critical)
@@ -329,7 +331,7 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
     ai.aiGw->checkStrategicTurn();
     const std::string mode=environment("VCMI_NK3_MODE");
     if((!mode.empty() && mode!="model") || stopping || invalidBudget || invalidPreparationMarker
-        || !background.available() || campaign.plan().isNull() || persisted["strategic_intent"].isNull()
+        || !backgroundRequest.isNull() || !background.available() || campaign.plan().isNull() || persisted["strategic_intent"].isNull()
         || !*environment("VCMI_EXTERNAL_AI_EXECUTABLE") || !*environment("VCMI_EXTERNAL_AI_SCRIPT")) return;
     // Serialized own-turn work only. Read the last already-built observation;
     // callbacks never observe, generate, persist or touch the arbiter.
@@ -407,7 +409,7 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
     // Persist the marker before publication, even with learning disabled.
     preparedExecutionDay=nextDay;persisted["request_sequence"].Integer()=sequence;
     persist(ai);
-    backgroundRequest=request;backgroundObservation=world;
+    backgroundRequest=request;backgroundObservation=world;backgroundInvalidated=false;
     background.publish(input,environment("VCMI_EXTERNAL_AI_EXECUTABLE"),environment("VCMI_EXTERNAL_AI_SCRIPT"),request["request_id"].String());
     JsonNode trace;trace["phase"].String()="staged";trace["identity"]=request["identity"];trace["request_id"]=request["request_id"];
     trace["observed_day"]=world["day"];trace["execution_day"]=request["execution_day"];trace["signals"]=request["signals"];trace["budget"]=request["budget"];
@@ -415,32 +417,32 @@ void NativeCampaign::prepareNextTurn(NK2AI::Nullkiller & ai)
 }
 void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
 {
-    if(backgroundAdmissionDay==world["day"].Integer()) return;
+    if(backgroundRequest.isNull()) return;
+    const bool firstInspection=backgroundAdmissionDay!=world["day"].Integer();
     backgroundAdmissionDay=world["day"].Integer();
     // Missing/error/late background leaves every original need open, including
     // an idle secondary hero whose need a surviving campaign can otherwise hide.
-    if(backgroundRequest["execution_day"]==world["day"])
+    if(firstInspection && backgroundRequest["execution_day"]==world["day"])
         for(const auto & item:backgroundRequest["signals"].Vector())
         {
             StrategicSignal signal{item["question"].String(),item["facts"].String(),true,true,true,item["critical"].Bool()};
             if(arbiter.consider({signal}).request) unresolvedTurnQuestions.try_emplace(signal.question,signal);
         }
-    const auto response=background.take(); // One nonblocking readiness inspection.
+    const auto response=background.take(); // Poll again at subsequent safe own-turn passes.
     JsonNode trace;trace["phase"].String()="ready";trace["request_id"]=backgroundRequest["request_id"];
     trace["observed_day"]=backgroundRequest["identity"]["day"];trace["execution_day"]=world["day"];
     if(!response)
     {
-        if(!backgroundRequest.isNull())
+        if(firstInspection && !backgroundRequest.isNull())
         {
-            trace["phase"].String()="discard";trace["reason"].String()="not_ready_or_cancelled";
+            trace["phase"].String()="pending";trace["reason"].String()="not_ready";
             logAi->info("NK3_BACKGROUND %s",trace.toCompactString());
         }
-        backgroundRequest=JsonNode();backgroundObservation=JsonNode();
         return;
     }
     trace["elapsed_ms"].Integer()=response->elapsedMs;
     logAi->info("NK3_BACKGROUND %s",trace.toCompactString());
-    std::string reason=response->reply.error;
+    std::string reason=backgroundInvalidated ? "critical_question" : response->reply.error;
     CampaignState candidate;JsonNode intent,derived,groups,reply;
     bool accepted=false;
     try

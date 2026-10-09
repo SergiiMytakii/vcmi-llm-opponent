@@ -110,6 +110,9 @@ class BackgroundIntegrationTest(unittest.TestCase):
         for case in ('pending','crash','invalid','oversized'):
             with self.subTest(case=case):self.run_case(case)
 
+    def test_late_background_completes_during_own_turn_without_replacing_fresh_plan(self):
+        self.run_case('late')
+
     def test_ready_town_task_executes_without_second_call_for_covered_need(self):
         self.run_case('ready')
 
@@ -130,7 +133,12 @@ class BackgroundIntegrationTest(unittest.TestCase):
             try:
                 deadline=time.monotonic()+22
                 while process.poll() is None and time.monotonic()<deadline:
-                    if case=='ready':
+                    if case=='late':
+                        traces=records(run/'runtime.log','NK3_BACKGROUND')
+                        staged=next((t for t in traces if t.get('phase')=='staged' and t.get('observed_day')==1),{})
+                        if any(t.get('request_id')==staged.get('request_id') and t.get('phase')=='discard'
+                               and t.get('reason') in ('stale_preparation','critical_question') for t in traces):break
+                    elif case=='ready':
                         if any(r.get('phase')=='admit' for r in records(run/'runtime.log','NK3_BACKGROUND')) and any(r.get('day')==2 for r in records(run/'runtime.log','NK3_EXECUTION')):break
                     else:
                         if any(q.get('mode')!='prepare_next_turn' and q['identity']['player']==0 and q['identity']['day']==2
@@ -147,4 +155,20 @@ class BackgroundIntegrationTest(unittest.TestCase):
         else:
             self.assertFalse(ordinary,str(output))
             self.assertTrue(any(r.get('phase')=='admit' and r.get('execution_day')==2 for r in records(run/'runtime.log','NK3_BACKGROUND')),str(output))
+        if case=='late':
+            traces=records(run/'runtime.log','NK3_BACKGROUND');request_id=background[0]['request_id']
+            self.assertTrue(any(t.get('phase')=='pending' and t.get('request_id')==request_id for t in traces),str(output))
+            self.assertFalse(any(t.get('phase')=='cancel' and t.get('request_id')==request_id for t in traces),str(output))
+            completed=[]
+            for path in (run/'decisions').glob('*/request.json'):
+                if json.loads(path.read_text())['request_id']==request_id:
+                    result=path.parent/'result.json'
+                    if result.exists():completed.append(json.loads(result.read_text()))
+            self.assertEqual([v['status'] for v in completed],['reply_valid'],str(output))
+            self.assertTrue(any(t.get('request_id')==request_id and t.get('phase')=='ready' for t in traces),str(output))
+            self.assertTrue(any(t.get('request_id')==request_id and t.get('phase')=='discard'
+                                and t.get('reason') in ('stale_preparation','critical_question') for t in traces),str(output))
+            self.assertFalse(any(t.get('request_id')==request_id and t.get('phase')=='admit' for t in traces),str(output))
+            self.assertTrue(any(t.get('day')==2 and t.get('accepted') is True
+                                for t in records(run/'runtime.log','NK3_STRATEGY')),str(output))
         print('Native background proof:',case,output,flush=True)

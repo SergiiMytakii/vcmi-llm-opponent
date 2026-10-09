@@ -6,6 +6,27 @@
 int main(int argc,char ** argv)
 {
     using namespace nullkiller3;
+    if(argc==5 && std::string(argv[4])=="late")
+    {
+        BackgroundExchange background;
+        background.publish("{}",argv[1],argv[2],"late-request");
+        assert(background.start());
+        const auto began=std::chrono::steady_clock::now();
+        assert(!background.take()); // Own turn begins while the model is running.
+        assert(std::chrono::steady_clock::now()-began<std::chrono::milliseconds(100));
+        std::shared_ptr<const BackgroundExchange::Attempt> result;
+        for(int i=0;i<200 && !result;++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            result=background.take();
+        }
+        assert(result && result->requestID=="late-request");
+        assert(!result->cancelled && result->reply.error.empty());
+        assert(result->reply.output=="background completed\n");
+        assert(!background.take()); // One consumer, no replay.
+        std::cout<<"pending background continued across own-turn readiness checks\n";
+        return 0;
+    }
     std::atomic<bool> foregroundDone{false},cancelled{false};
     externalai::Reply foreground;
     // Large input holds a live writer until the delayed reader starts. The

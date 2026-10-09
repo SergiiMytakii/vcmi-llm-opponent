@@ -61,17 +61,14 @@ public:
         catch(...) { leased=false;value->reply.error="background_spawn_failed";value->ready.store(true,std::memory_order_release); }
         return true;
     }
-    // Inspect readiness once; even cancellation/cleanup cannot delay the turn.
+    // Nonblocking poll: a turn boundary must not cancel a live model call.
+    // Only consume a published result after its release/acquire handoff.
     std::shared_ptr<const Attempt> take()
     {
-        auto value=std::atomic_exchange(&running,std::shared_ptr<Attempt>());
-        epoch.fetch_add(1);
-        auto pending=std::atomic_exchange(&prepared,std::shared_ptr<Attempt>());
-        if(pending) pending->cancelled=true;
-        if(!value) return {};
-        const bool ready=value->ready.load(std::memory_order_acquire);
-        value->cancelled=true;
-        if(!ready) return {};
+        auto value=std::atomic_load(&running);
+        if(!value || !value->ready.load(std::memory_order_acquire)) return {};
+        if(!std::atomic_compare_exchange_strong(&running,&value,std::shared_ptr<Attempt>())) return {};
+        if(value->cancelled.load() || value->epoch!=epoch.load()) return {};
         return value;
     }
     void cancel()

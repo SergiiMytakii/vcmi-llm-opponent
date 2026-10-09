@@ -82,7 +82,7 @@ class NativeCampaign
     BackgroundExchange background;
     JsonNode backgroundRequest, backgroundObservation;
     int64_t preparedExecutionDay=-1, backgroundAdmissionDay=-1;
-    bool invalidPreparationMarker=false;
+    bool invalidPreparationMarker=false, backgroundInvalidated=false;
     std::map<std::string,StrategicSignal> unresolvedTurnQuestions;
     int64_t unresolvedQuestionDay=-1;
     std::mutex learningMutex;

@@ -1429,7 +1429,7 @@ index c2adab572..27fe95829 100644
  			if(hasUnlockedHeroWithMovement())
  				logAi->debug("Pass %d: No worthwhile task was found at full scan depth. AI turn is complete.", pass);
  			else
-@@ -763,21 +843,44 @@ void Nullkiller::makeTurn()
+@@ -763,21 +843,47 @@ void Nullkiller::makeTurn()
  		}
  
  		for(const auto * heroInfo : cc->getHeroesInfo())
@@ -1465,6 +1465,9 @@ index c2adab572..27fe95829 100644
 +		tempResults.clear();
 +		strategicCampaign->admitBackground(*this);
 +		strategicCampaign->reviewStrategy(*this);
++		// A pending reply may finish during foreground transport; recheck it
++		// against the current plan before the next native command.
++		strategicCampaign->admitBackground(*this);
 +	}
  
  	Goals::TTask bestPrioPassTask = taskptr(Goals::Invalid());
