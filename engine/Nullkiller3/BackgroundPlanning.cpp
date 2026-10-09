@@ -173,6 +173,38 @@ bool preparationStrategyFresh(const JsonNode & observed,const JsonNode & fresh)
     }
     return true;
 }
+PreparationQuestionCoverage preparationQuestionCoverage(const JsonNode & request,const JsonNode & groups,
+    bool strategyFresh,const CampaignState & campaign,const JsonNode & intent,const JsonNode & metadata,
+    const JsonNode & world,const std::map<std::string,StrategicSignal> & pending)
+{
+    PreparationQuestionCoverage result;
+    result.pending=pending;
+    bool allGroups=true;for(const auto & group:groups.Vector()) allGroups &= group["accepted"].Bool();
+    std::set<std::string> coveredNeeds;
+    for(const auto & need:request["routine_needs"].Vector())
+        for(const auto & goal:campaign.plan()["goals"].Vector()) if(campaign.holdsCommitment(goal["id"].String()))
+            if(goal["actor_ref"]==need["ref"] || goal["target_ref"]==need["ref"])
+                coveredNeeds.insert(need["ref"].String());
+    for(const auto & item:request["signals"].Vector())
+    {
+        const auto question=item["question"].String();
+        StrategicSignal signal{question,item["facts"].String(),true,true,true,item["critical"].Bool()};
+        bool covered=strategyFresh && admittedQuestionCovered(signal,metadata,campaign,intent,world);
+        // Routine coverage belongs to each participant independently of rejected groups.
+        if(question.starts_with("routine:")) covered=coveredNeeds.count(question.substr(8));
+        else if(question=="campaign_exhausted")
+            covered=allGroups && coveredNeeds.size()==request["routine_needs"].Vector().size();
+        const auto liveQuestion=result.pending.find(question);
+        if(liveQuestion!=result.pending.end() && liveQuestion->second.facts!=item["facts"].String()) covered=false;
+        if(covered)
+        {
+            result.resolved.push_back(signal);
+            result.pending.erase(question);
+        }
+        else result.pending.try_emplace(question,signal);
+    }
+    return result;
+}
 bool admitPreparation(const JsonNode & reply,const JsonNode & request,const JsonNode & observed,const JsonNode & fresh,
     const CampaignState & current,const JsonNode & intent,const JsonNode & pending,
     CampaignState & candidate,JsonNode & nextIntent,JsonNode & derived,JsonNode & groups,std::string & reason)

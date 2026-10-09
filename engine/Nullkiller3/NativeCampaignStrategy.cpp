@@ -505,31 +505,10 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
         const bool strategyFresh=backgroundRequest["strategic_review"].Bool() && preparationStrategyFresh(backgroundObservation,world);
         persisted["strategy_metadata"]["question_coverage"]=acceptedQuestionCoverage(
             backgroundRequest["signals"],persisted["strategy_metadata"],campaign,intent);
-        bool allGroups=true;for(const auto & group:groups.Vector()) allGroups &= group["accepted"].Bool();
-        std::set<std::string> coveredNeeds;
-        for(const auto & need:backgroundRequest["routine_needs"].Vector())
-            for(const auto & goal:campaign.plan()["goals"].Vector()) if(campaign.holdsCommitment(goal["id"].String()))
-                if(goal["actor_ref"]==need["ref"] || goal["target_ref"]==need["ref"])
-                    coveredNeeds.insert(need["ref"].String());
-        for(const auto & item:backgroundRequest["signals"].Vector())
-        {
-            const auto question=item["question"].String();
-            StrategicSignal signal{question,item["facts"].String(),true,true,true,item["critical"].Bool()};
-            bool covered=strategyFresh && admittedQuestionCovered(signal,persisted["strategy_metadata"],campaign,intent,world);
-            // Each routine question belongs to one participant. Rejection of
-            // an independent group must not reopen already covered questions.
-            if(question.starts_with("routine:")) covered=coveredNeeds.count(question.substr(8));
-            else if(question=="campaign_exhausted")
-                covered=allGroups && coveredNeeds.size()==backgroundRequest["routine_needs"].Vector().size();
-            const auto liveQuestion=unresolvedTurnQuestions.find(question);
-            if(liveQuestion!=unresolvedTurnQuestions.end() && liveQuestion->second.facts!=item["facts"].String()) covered=false;
-            if(covered)
-            {
-                StrategicSignal signal{question,item["facts"].String(),true,true,true,item["critical"].Bool()};
-                arbiter.resolved(signal);unresolvedTurnQuestions.erase(question);
-            }
-            else { StrategicSignal unresolved{question,item["facts"].String(),true,true,true,item["critical"].Bool()};unresolvedTurnQuestions.try_emplace(question,unresolved); }
-        }
+        auto coverage=preparationQuestionCoverage(backgroundRequest,groups,strategyFresh,campaign,intent,
+            persisted["strategy_metadata"],world,unresolvedTurnQuestions);
+        for(const auto & signal:coverage.resolved) arbiter.resolved(signal);
+        unresolvedTurnQuestions=std::move(coverage.pending);
         savePendingQuestions();recordCheckpointBaseline();ai.invalidatePathfinderData();ai.updateState();
     }
     trace["phase"].String()=accepted ? "admit" : "discard";trace["reason"].String()=reason;trace["groups"]=groups;

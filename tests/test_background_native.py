@@ -8,7 +8,7 @@ import unittest
 from test_background_controller import prepared,answer
 
 ROOT=Path(__file__).resolve().parents[1]
-DRIVER=ROOT/'.build/background-values/background-planning-driver'
+DRIVER=Path(os.environ.get('BACKGROUND_PLANNING_DRIVER',ROOT/'.build/background-values/background-planning-driver'))
 
 
 def fixture():
