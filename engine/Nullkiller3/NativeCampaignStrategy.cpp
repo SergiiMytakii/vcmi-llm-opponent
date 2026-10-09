@@ -47,11 +47,12 @@ void NativeCampaign::restoreArbiter()
     generation = boost::uuids::to_string(boost::uuids::random_generator()());
     const auto & saved = static_cast<const JsonNode &>(persisted)["request_arbiter"];
     if(saved.isNull()) return;
-    if(!saved.isStruct() || !boundedInteger(saved["version"],1,1) || !boundedInteger(saved["day"],-1,2147483647)
+    if(!saved.isStruct() || !boundedInteger(saved["version"],1,2) || !boundedInteger(saved["day"],-1,2147483647)
         || !boundedInteger(saved["requests"],0,2147483647)
         || !saved["addressed"].isStruct())
     { invalidBudget = true; logAi->warn("NK3 invalid saved request budget; native continuation only"); return; }
     ArbiterState restored;
+    restored.version=saved["version"].Integer();
     restored.day = saved["day"].Integer();
     restored.requests = saved["requests"].Integer();
     restored.remaining = {0,0,0};
@@ -63,7 +64,19 @@ void NativeCampaign::restoreArbiter()
         { invalidBudget = true; return; }
         restored.addressed[question] = facts.String();
     }
+    if(restored.version==2)
+    {
+        if(!saved["attempted"].isStruct()) { invalidBudget=true;return; }
+        for(const auto & [question,facts]:saved["attempted"].Struct())
+        {
+            if(question.empty() || question.size()>240 || !facts.isString() || facts.String().size()>8192)
+            { invalidBudget=true;return; }
+            restored.attempted[question]=facts.String();
+        }
+    }
     arbiter = RequestArbiter(restored);
+    reconcileQuestionCoverage(persisted["strategy_metadata"]["question_coverage"],arbiter,campaign,
+        persisted["strategic_intent"],persisted["strategy_metadata"]);
     if(saved.Struct().count("prepared_execution_day"))
     {
         if(boundedInteger(saved["prepared_execution_day"],1,2147483647)) preparedExecutionDay=saved["prepared_execution_day"].Integer();
@@ -83,9 +96,21 @@ void NativeCampaign::saveArbiter()
     saved["critical_reserve_ms"].Integer() = snapshot.remaining.criticalReserveMs;
     saved["addressed"].Struct();
     for(const auto & [question,facts] : snapshot.addressed) saved["addressed"][question].String() = facts;
+    saved["attempted"].Struct();
+    for(const auto & [question,facts]:snapshot.attempted) saved["attempted"][question].String()=facts;
     if(preparedExecutionDay>0) saved["prepared_execution_day"].Integer()=preparedExecutionDay;
     else if(invalidPreparationMarker) saved["prepared_execution_day"]=persisted["request_arbiter"]["prepared_execution_day"];
     persisted["request_arbiter"] = saved;
+}
+void NativeCampaign::savePendingQuestions()
+{
+    JsonNode pending;pending.Vector();
+    for(const auto & [question,signal]:unresolvedTurnQuestions)
+    {
+        JsonNode item;item["question"].String()=question;item["facts"].String()=signal.facts;
+        item["critical"].Bool()=signal.critical;pending.Vector().push_back(item);
+    }
+    persisted["pending_strategic_questions"]=pending;
 }
 void NativeCampaign::observeBuildingProgress()
 {
@@ -123,6 +148,10 @@ void NativeCampaign::recordCheckpointBaseline()
 }
 std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller & ai,bool includeIdle)
 {
+    reconcileQuestionCoverage(persisted["strategy_metadata"]["question_coverage"],arbiter,campaign,
+        persisted["strategic_intent"],persisted["strategy_metadata"]);
+    // Regained town ownership is a native resolution of the survival question.
+    if(!world["towns"].Vector().empty()) unresolvedTurnQuestions.erase("townless_survival");
     std::vector<StrategicSignal> result;
     bool actionable = !world["towns"].Vector().empty();
     for(const auto & hero : world["heroes"].Vector()) actionable |= hero["movement"].Integer() > 100;
@@ -175,6 +204,14 @@ std::vector<StrategicSignal> NativeCampaign::strategicSignals(NK2AI::Nullkiller 
         result.push_back({question,facts.toCompactString(),true,true,actionable,false});
     }
     const auto intentSignals=strategicIntentSignals(persisted["strategic_intent"],world,actionable);
+    for(const auto & signal:intentSignals)
+        if(signal.question.starts_with("strategy:no_progress:"))
+        {
+            bool covered=false;
+            for(const auto & item:persisted["strategy_metadata"]["question_coverage"].Vector())
+                covered |= item["question"].String()==signal.question && item["facts"].String()==signal.facts;
+            if(!covered) arbiter.reopen(signal.question);
+        }
     result.insert(result.end(),intentSignals.begin(),intentSignals.end());
     const auto checkpoint=allocationCheckpointSignals(campaign,world,persisted["checkpoint_baseline"],actionable);
     result.insert(result.end(),checkpoint.begin(),checkpoint.end());
@@ -314,7 +351,12 @@ void NativeCampaign::logBackgroundStart(const std::string & requestID) const
 void NativeCampaign::captureTurnQuestions(NK2AI::Nullkiller & ai)
 {
     if(unresolvedQuestionDay!=world["day"].Integer())
-    { unresolvedTurnQuestions.clear();unresolvedQuestionDay=world["day"].Integer(); }
+    {
+        unresolvedTurnQuestions.clear();unresolvedQuestionDay=world["day"].Integer();
+        for(const auto & item:persisted["pending_strategic_questions"].Vector())
+            unresolvedTurnQuestions.insert_or_assign(item["question"].String(),
+                StrategicSignal{item["question"].String(),item["facts"].String(),true,true,true,item["critical"].Bool()});
+    }
     arbiter.beginTurn(world["day"].Integer(),{0,strategicRequestTokens,0});
     const auto decision=arbiter.consider(strategicSignals(ai,false));
     for(const auto & signal:decision.signals) unresolvedTurnQuestions.insert_or_assign(signal.question,signal);
@@ -432,7 +474,20 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
         {
             JsonParsingSettings parser;parser.strict=true;parser.mode=JsonParsingSettings::JsonFormatMode::JSON;
             reply=JsonNode(response->reply.output.data(),response->reply.output.size(),parser,"NK3 background reply");
-            accepted=admitPreparation(reply,backgroundRequest,backgroundObservation,world,campaign,persisted["strategic_intent"],
+            const auto & proposal=static_cast<const JsonNode &>(reply);
+            const auto failure=controllerFailureFeedback(proposal,backgroundRequest);
+            if(!proposal["failure"].isNull())
+            {
+                reason=failure.isNull() ? "invalid_controller_failure" : failure["code"].String();
+                if(!failure.isNull() && backgroundRequest["execution_day"]==world["day"]
+                    && backgroundRequest["identity"]["revision"]==campaign.plan()["revision"]
+                    && backgroundRequest["intent_revision"]==persisted["strategic_intent"]["revision"])
+                {
+                    persisted["memory"]["decision_feedback"]["reason"]=failure["code"];
+                    persisted["memory"]["decision_feedback"]["failure"]=failure;
+                }
+            }
+            else accepted=admitPreparation(reply,backgroundRequest,backgroundObservation,world,campaign,persisted["strategic_intent"],
                 persisted["pending_native_task"],candidate,intent,derived,groups,reason);
         }
         else if(reason.empty()) reason="stale_background_epoch";
@@ -447,7 +502,9 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
         for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis"})
             persisted["strategy_metadata"][field]=derived[field];
         acceptedRevision=campaign.plan()["revision"].Integer();acceptedLossRatio=campaign.plan()["policy"]["max_loss_ratio"].Float();
-        const bool strategyCovered=backgroundRequest["strategic_review"].Bool() && preparationStrategyFresh(backgroundObservation,world);
+        const bool strategyFresh=backgroundRequest["strategic_review"].Bool() && preparationStrategyFresh(backgroundObservation,world);
+        persisted["strategy_metadata"]["question_coverage"]=acceptedQuestionCoverage(
+            backgroundRequest["signals"],persisted["strategy_metadata"],campaign,intent);
         bool allGroups=true;for(const auto & group:groups.Vector()) allGroups &= group["accepted"].Bool();
         std::set<std::string> coveredNeeds;
         for(const auto & need:backgroundRequest["routine_needs"].Vector())
@@ -456,7 +513,9 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
                     coveredNeeds.insert(need["ref"].String());
         for(const auto & item:backgroundRequest["signals"].Vector())
         {
-            const auto question=item["question"].String();bool covered=strategyCovered;
+            const auto question=item["question"].String();
+            StrategicSignal signal{question,item["facts"].String(),true,true,true,item["critical"].Bool()};
+            bool covered=strategyFresh && admittedQuestionCovered(signal,persisted["strategy_metadata"],campaign,intent,world);
             // Each routine question belongs to one participant. Rejection of
             // an independent group must not reopen already covered questions.
             if(question.starts_with("routine:")) covered=coveredNeeds.count(question.substr(8));
@@ -471,7 +530,7 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
             }
             else { StrategicSignal unresolved{question,item["facts"].String(),true,true,true,item["critical"].Bool()};unresolvedTurnQuestions.try_emplace(question,unresolved); }
         }
-        recordCheckpointBaseline();ai.invalidatePathfinderData();ai.updateState();
+        savePendingQuestions();recordCheckpointBaseline();ai.invalidatePathfinderData();ai.updateState();
     }
     trace["phase"].String()=accepted ? "admit" : "discard";trace["reason"].String()=reason;trace["groups"]=groups;
     trace["raw_reply"]=reply;trace["candidate"]=accepted ? derived : JsonNode();
@@ -479,7 +538,7 @@ void NativeCampaign::admitBackground(NK2AI::Nullkiller & ai)
     trace["usage"]=usage;
     // Background does not dispatch foreground or mark failed questions resolved.
     logAi->info("NK3_BACKGROUND %s",trace.toCompactString());
-    persist(ai);
+    savePendingQuestions();persist(ai);
     backgroundRequest=JsonNode();backgroundObservation=JsonNode();
 }
 bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
@@ -500,7 +559,23 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     auto signals=strategicSignals(ai,includeIdle);
     // A stabilization or newly installed routine reserve cannot erase a question
     // captured before it. The current view and original question are both sent.
-    for(const auto & [question,signal]:unresolvedTurnQuestions) signals.push_back(signal);
+    std::map<std::string,StrategicSignal> currentQuestions=unresolvedTurnQuestions;
+    for(const auto & signal:signals) currentQuestions.insert_or_assign(signal.question,signal);
+    signals.clear();
+    for(const auto & [question,signal]:currentQuestions)
+    {
+        if(question.starts_with("strategy:no_progress:"))
+        {
+            const auto milestone=question.substr(std::string("strategy:no_progress:").size());
+            if(intentMilestone(persisted["strategic_intent"],JsonNode(milestone)).isNull()
+                || persisted["strategic_intent"]["progress"][milestone]["state"].String()=="completed")
+            { unresolvedTurnQuestions.erase(question);continue; }
+        }
+        if((question=="initial_strategy" && !persisted["strategic_intent"].isNull())
+            || (question=="opening" && !campaign.plan().isNull()))
+        { unresolvedTurnQuestions.erase(question);continue; }
+        signals.push_back(signal);
+    }
     auto decision = arbiter.consider(signals);
     JsonNode trace;
     trace["day"] = world["day"];
@@ -517,7 +592,7 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     }
     if(!decision.request)
     {
-        persisted["pending_strategic_questions"] = trace["signals"];
+        savePendingQuestions();
         if(!decision.signals.empty()) logAi->info("NK3_STRATEGY %s",trace.toCompactString());
         return false;
     }
@@ -539,10 +614,10 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
     const auto & input = assembled.wire;
     exchangeCancelled = false; // Reset only inside the serialized current-turn worker under GS lock.
     arbiter.dispatched(decision);
-    for(const auto & signal:decision.signals) unresolvedTurnQuestions.erase(signal.question);
+    for(const auto & signal:decision.signals) unresolvedTurnQuestions.insert_or_assign(signal.question,signal);
     recordCheckpointBaseline(); // A timeout/invalid reply cannot repeat this same choice.
     persisted["request_sequence"].Integer() = sequence;
-    persisted["pending_strategic_questions"] = request["signals"];
+    savePendingQuestions();
     ai.invalidatePathfinderData();
     persist(ai); // Charge before waiting so a save cannot erase unknown costs.
     const auto started = std::chrono::steady_clock::now();
@@ -614,7 +689,12 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
             persisted["strategy_metadata"]=JsonNode();
             for(const auto * field:{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis"})
                 persisted["strategy_metadata"][field]=reply[field];
-            persisted["pending_strategic_questions"] = JsonNode();
+            persisted["strategy_metadata"]["question_coverage"]=acceptedQuestionCoverage(
+                request["signals"],persisted["strategy_metadata"],campaign,candidateIntent);
+            for(const auto & signal:decision.signals)
+                if(admittedQuestionCovered(signal,persisted["strategy_metadata"],campaign,candidateIntent,world))
+                { arbiter.resolved(signal);unresolvedTurnQuestions.erase(signal.question); }
+            savePendingQuestions();
             world["goal_statuses"] = campaign.review(world);
             // Model roles/reserves change path and hero analysis as well as
             // the goal list. Rebuild those owners before creating any command.
@@ -626,7 +706,8 @@ bool NativeCampaign::reviewStrategy(NK2AI::Nullkiller & ai,bool includeIdle)
             for(const auto & defense:request["observation"]["forecasts"]["defenses"].Vector())
                 if(defense["status"].String()=="unbounded_opposition"
                     || defense["status"].String()=="insufficient_current_force")
-                    arbiter.resolved(defenseSignal(defense,true));
+                    if(admittedQuestionCovered(defenseSignal(defense,true),persisted["strategy_metadata"],campaign,candidateIntent,world))
+                        arbiter.resolved(defenseSignal(defense,true));
             // Only a successfully admitted response releases the crossing barrier.
             persisted["passage_reviews"]=JsonNode();
             automaticSafetyReviews=JsonNode();

@@ -10,6 +10,7 @@ import uuid
 
 from codex import choose, validate_request, MODEL, reasoning_effort, TIMEOUT, LEGACY_TIMEOUT
 from experience import Experience
+from native_strategy import StrategicRejection, REJECTION_CODES
 
 
 def main():
@@ -62,10 +63,11 @@ def main():
         if request['protocol'] == 2:
             metadata['failure_kind'] = 'invalid_reply' if isinstance(error,(ValueError,TypeError)) else 'controller_error'
             if getattr(error,'usage',None) is not None:metadata['usage'] = error.usage
-            if (isinstance(error, ValueError) and str(error) == 'resource_commitments_exceed_available_funds'
-                    and hasattr(error, 'required') and hasattr(error, 'available')):
-                reply = dict(protocol=2, request_id=request['request_id'], identity=request['identity'],
-                             failure=dict(code=str(error), required=error.required, available=error.available))
+            if isinstance(error, StrategicRejection) and str(error) in REJECTION_CODES:
+                failure=dict(code=str(error))
+                if str(error)=='resource_commitments_exceed_available_funds':
+                    failure.update(required=error.required, available=error.available)
+                reply = dict(protocol=2, request_id=request['request_id'], identity=request['identity'], failure=failure)
     if experience:
         try:
             if reply is not None and 'failure' not in reply:
@@ -94,7 +96,7 @@ def main():
         raise SystemExit(1 if request['protocol']==2 and metadata.get('failure_kind') else 75)
     if request['protocol'] == 2:
         usage = metadata.get('usage')
-        known = metadata.get('usage_complete',True) and isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0 for k in ('input_tokens','output_tokens'))
+        known = metadata.get('usage_complete',True) and isinstance(usage,dict) and all(type(usage.get(k)) is int and 0<=usage[k]<=10**9 for k in ('input_tokens','output_tokens'))
         reply['usage'] = {k:usage[k] if known else 0 for k in ('input_tokens','output_tokens')}
         reply['usage']['known'] = known
     (Path(decision_dir) / 'reply.json').write_text(json.dumps(reply, ensure_ascii=False), encoding='utf-8')

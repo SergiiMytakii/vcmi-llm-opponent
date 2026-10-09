@@ -3,6 +3,7 @@
 #include "StrategicDecision.h"
 #include "StrategicCandidates.h"
 #include "Forecasts.h"
+#include "OffensivePreparation.h"
 #include "NativePersistence.h"
 #include "strategic_intent_fixture.h"
 #include "ResourceLedger.h"
@@ -23,6 +24,59 @@ int main(int argc,char ** argv)
 {
     try
     {
+        if(argc==2 && std::string(argv[1])=="--reinforcement-observation")
+        {
+            auto world=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            nullkiller3::CampaignState current;
+            world["forecasts"]["army_pools"]=nullkiller3::forecastCommitments(world,current)["army_pools"];
+            world["offensive_preparation"]=nullkiller3::offensivePreparation(current,world);
+            std::cout<<world.toCompactString()<<'\n';return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--signal-coverage")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            nullkiller3::CampaignState candidate;std::string reason;
+            require(candidate.accept(input["reply"]["plan"],input["world"],reason),reason.c_str());
+            candidate.review(input["world"]);
+            nullkiller3::StrategicSignal signal{input["question"].String(),input["facts"].String(),true,true,true,false};
+            JsonNode result;result["covered"].Bool()=nullkiller3::admittedQuestionCovered(signal,input["reply"],candidate,input["intent"],input["world"]);
+            std::cout<<result.toCompactString()<<'\n';return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--controller-feedback")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            const auto failure=nullkiller3::controllerFailureFeedback(input["reply"],input["request"]);
+            JsonNode saved;saved["object_ids"].Struct();saved["memory"]["schema"].Integer()=2;
+            if(!failure.isNull()) { saved["memory"]["decision_feedback"]["reason"]=failure["code"];saved["memory"]["decision_feedback"]["failure"]=failure; }
+            const auto restored=nullkiller3::restoreNativeNamespace(json(saved.toCompactString()));
+            auto next=input["request"];next["memory"]=restored["memory"];
+            next["observation"]["decision_feedback"]=restored["memory"]["decision_feedback"];
+            std::cout<<next.toCompactString()<<'\n';return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--question-coverage")
+        {
+            const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));
+            nullkiller3::CampaignState campaign;std::string reason;
+            require(campaign.accept(input["reply"]["plan"],input["world"],reason),reason.c_str());
+            campaign.review(input["world"]);
+            JsonNode metadata=input["reply"];
+            auto intent=input["reply"]["strategy_update"]["selected"];
+            intent["revision"].Integer()=1;
+            intent["progress"]["stage-1"]["state"].String()="pending";
+            auto coverage=nullkiller3::acceptedQuestionCoverage(input["request"]["signals"],metadata,campaign,intent);
+            auto world=input["world"];
+            if(input["end_goal"].isString())
+            {
+                world["towns"][0]["buildings"].Vector().emplace_back(0);
+                campaign.review(world,false);campaign.observeDecisionBasis(metadata["decision_basis"],world);
+            }
+            nullkiller3::RequestArbiter arbiter;arbiter.beginTurn(4,{0,120000,0});
+            for(const auto & item:coverage.Vector())
+                arbiter.resolved({item["question"].String(),item["facts"].String(),true,true,true,false});
+            JsonNode result;result["reopened"]=nullkiller3::reconcileQuestionCoverage(coverage,arbiter,campaign,intent,metadata);
+            result["coverage"]=coverage;
+            std::cout<<result.toCompactString()<<'\n';return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--decision")
         {
             const auto input=json(std::string(std::istreambuf_iterator<char>(std::cin),{}));

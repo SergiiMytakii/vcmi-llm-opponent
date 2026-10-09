@@ -84,7 +84,12 @@ keep/revise decision in this same reply. No second call completes a prepared rep
    matching card or an unavailable guide needs no consultation. campaign_exhausted
    with the main in an owned town requires reviewing town_choices before departure;
    a completed hold is not an active goal. strategy_stalls is a course review signal
-   for days without native progress on ready town-capture stages.
+   for days without native progress on ready town-capture stages. An unresolved
+   question may return after refusal/timeout. Cover strategy:no_progress:<id>
+   through actual live goals bound to that unfinished milestone in operation_focus;
+   a hold additionally supplies its decision_basis and observable exit. Binding
+   to an already completed stage or changing revision alone supplies no answer.
+   Native coverage ends when that commitment completes, fails or is replaced.
 3. If a decision depends on unclear mechanics, read the matching Game Rules cards.
    Each call accepts 1-3 IDs; additional unresolved mechanics may need another call.
    Consult both references only when both kinds of question matter.
@@ -134,7 +139,11 @@ Visible distances/connections establish no enemy movement, abilities or intent.
 # Admission: participants, dependencies, funds and forces
 actor_ref alone selects the executor. assignments contains hero_ref/role, never
 goal IDs: one consistent role per owned actor, at most one main. Every non-null
-actor needs a role. Use known targets, owned actors and supported capabilities.
+actor needs a role. A main weaker than the strongest owned army needs its own
+currently supported capture/interception/collection or a conditional delivery to
+that main: matching actor/target, fresh native quote, dependencies, deadline,
+loss authorization and retained floors. A role alone supplies no support. Strong
+heroes may defend without assigning an unsupported weaker main. Use known targets, owned actors and supported capabilities.
 Every depends_on ID names a goal in this returned plan; dependencies are acyclic.
 Completed old-plan goals are not implicit dependencies. Independent goals continue
 when others are blocked. Parallel goals cannot share an actor or reinforcement

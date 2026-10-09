@@ -94,6 +94,7 @@ class NativeCampaign
     JsonNode executionSnapshot(NK2AI::Nullkiller & ai);
     void restoreArbiter();
     void saveArbiter();
+    void savePendingQuestions();
     void traceCampaign() const;
     void observeBuildingProgress();
     void observeOperationProgress();

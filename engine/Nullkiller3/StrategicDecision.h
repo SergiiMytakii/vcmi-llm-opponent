@@ -66,6 +66,162 @@ inline StrategicSignal automaticSafetySignal(const JsonNode & review,int64_t day
     return {"automatic_safety:"+review["hero_ref"].String(),facts.toCompactString(),true,true,actionable,
         review["reason"].String()=="passage_crossing_requires_fresh_decision"};
 }
+// Match existing native source quotes; do not duplicate stack packing or
+// minimum-retained force forecasts in the controller's role contract.
+inline bool supportedMainDelivery(const JsonNode & goal,const CampaignState & campaign,
+    const JsonNode & world,const JsonNode & previous)
+{
+    const auto & actor=goal["actor_ref"], &source=goal["target_ref"];
+    int64_t recipient=0;for(const auto & hero:world["heroes"].Vector()) if(hero["ref"]==actor) recipient=hero["army_value"].Integer();
+    if(recipient>=goal["complete_when"]["value"].Integer()) return false;
+    const auto pool=CampaignState::armyPool(source.String(),world);
+    if(pool==actor.String()) return false;
+    std::set<std::string> aliases{pool,source.String()};bool townSource=false;
+    for(const auto & town:world["towns"].Vector())
+    {
+        townSource |= town["ref"]==source;
+        if(CampaignState::armyPool(town["ref"].String(),world)==pool) aliases.insert(town["ref"].String());
+    }
+    for(const auto & other:campaign.plan()["goals"].Vector())
+    {
+        if(other["id"]==goal["id"] || (!aliases.count(other["actor_ref"].String()) && !aliases.count(other["target_ref"].String()))) continue;
+        bool unchanged=false;
+        for(const auto & old:previous["goals"].Vector()) unchanged |= CampaignState::sameGoal(other,old);
+        if(!unchanged) return false;
+        JsonNode before,after;before.Vector();after.Vector();
+        for(const auto & reserve:previous["reserves"].Vector()) if(reserve["goal_id"]==other["id"]) before.Vector().push_back(reserve);
+        for(const auto & reserve:campaign.plan()["reserves"].Vector()) if(reserve["goal_id"]==other["id"]) after.Vector().push_back(reserve);
+        if(before!=after) return false;
+    }
+    for(const auto & commander:world["offensive_preparation"]["commander_options"].Vector())
+    {
+        if(commander["ref"]!=actor) continue;
+        for(const auto & quote:commander["reinforcement_sources"].Vector())
+        {
+            if(quote["source_ref"]!=source || quote["status"].String()!="conditional_meeting") continue;
+            const auto traveler=townSource ? actor.String() : pool, destination=townSource ? source.String() : actor.String();
+            const JsonNode * best=nullptr;
+            for(const auto & route:quote["meeting_routes"].Vector())
+                if(route["hero_ref"].String()==traveler && route["destination_ref"].String()==destination
+                    && (!best || route["day"].Integer()<(*best)["day"].Integer()
+                        || (route["day"]==(*best)["day"] && route["army_loss_estimate"].Integer()<(*best)["army_loss_estimate"].Integer()))) best=&route;
+            if(!best || !(*best)["day"].isNumber() || !(*best)["army_loss_estimate"].isNumber() || !quote["unpledged_army_value"].isNumber()) continue;
+            const auto arrival=(*best)["day"].Integer(),loss=(*best)["army_loss_estimate"].Integer();
+            int64_t force=0;for(const auto & hero:world["heroes"].Vector()) if(hero["ref"].String()==traveler) force=hero["army_value"].Integer();
+            if(arrival>=world["day"].Integer() && arrival<=goal["deadline_day"].Integer() && loss>=0
+                && loss<=force*campaign.plan()["policy"]["max_loss_ratio"].Float()
+                && recipient+quote["unpledged_army_value"].Integer()-loss>=goal["complete_when"]["value"].Integer()) return true;
+        }
+    }
+    return false;
+}
+// Coverage is derived from a freshly admitted operation, never from dispatch.
+inline JsonNode acceptedQuestionCoverage(const JsonNode & signals,const JsonNode & metadata,
+    const CampaignState & campaign,const JsonNode & intent)
+{
+    JsonNode result;result.Vector();
+    if(metadata["operation_focus"]["revision"]!=intent["revision"]) return result;
+    for(const auto & signal:signals.Vector())
+    {
+        const auto & question=signal["question"].String();
+        const std::string prefix="strategy:no_progress:";
+        if(!question.starts_with(prefix) || result.Vector().size()>=6) continue;
+        const auto milestoneID=question.substr(prefix.size());
+        if(intentMilestone(intent,JsonNode(milestoneID)).isNull()
+            || intent["progress"][milestoneID]["state"].String()=="completed") continue;
+        JsonNode ids;ids.Vector();
+        for(const auto & binding:metadata["operation_focus"]["bindings"].Vector())
+        {
+            if(binding["milestone_id"].String()!=milestoneID) continue;
+            for(const auto & goal:campaign.plan()["goals"].Vector())
+            {
+                if(goal["id"]!=binding["goal_id"] || !campaign.holdsCommitment(goal["id"].String())) continue;
+                const auto & status=campaign.statuses()[goal["id"].String()]["state"].String();
+                if(status!="ready" && status!="waiting") continue;
+                const bool hold=goal["kind"].String()=="preserve_force" || goal["kind"].String()=="defend_area";
+                bool hasBasis=!hold;
+                for(const auto & wait:metadata["decision_basis"]["waits"].Vector())
+                    if(wait["goal_id"]==goal["id"]) hasBasis=true;
+                if(hasBasis) ids.Vector().push_back(goal["id"]);
+            }
+        }
+        if(ids.Vector().empty()) continue;
+        JsonNode item;item["question"]=signal["question"];item["facts"]=signal["facts"];
+        item["milestone_id"].String()=milestoneID;item["campaign_revision"]=campaign.plan()["revision"];
+        item["goal_ids"]=ids;result.Vector().push_back(item);
+    }
+    return result;
+}
+inline JsonNode reconcileQuestionCoverage(JsonNode & coverage,RequestArbiter & arbiter,
+    const CampaignState & campaign,const JsonNode & intent,const JsonNode & metadata)
+{
+    JsonNode reopened;reopened.Vector();
+    std::erase_if(coverage.Vector(),[&](const auto & item) {
+        const auto & milestone=item["milestone_id"].String();
+        // Native-confirmed progress closes this question independently of goals.
+        if(!intentMilestone(intent,JsonNode(milestone)).isNull()
+            && intent["progress"][milestone]["state"].String()=="completed") return true;
+        JsonNode signal;signal["question"]=item["question"];signal["facts"]=item["facts"];
+        JsonNode signals;signals.Vector().push_back(signal);
+        const auto live=acceptedQuestionCoverage(signals,metadata,campaign,intent);
+        const bool valid=item["campaign_revision"]==campaign.plan()["revision"] && !live.Vector().empty()
+            && item["goal_ids"]==live[0]["goal_ids"];
+        if(valid) return false;
+        arbiter.reopen(item["question"].String());reopened.Vector().push_back(item["question"]);
+        return true;
+    });
+    return reopened;
+}
+inline bool admittedQuestionCovered(const StrategicSignal & signal,const JsonNode & metadata,
+    const CampaignState & campaign,const JsonNode & intent,const JsonNode & world=JsonNode())
+{
+    const auto & question=signal.question;
+    if(question.starts_with("strategy:no_progress:"))
+    {
+        JsonNode item;item["question"].String()=question;item["facts"].String()=signal.facts;
+        JsonNode signals;signals.Vector().push_back(item);
+        return !acceptedQuestionCoverage(signals,metadata,campaign,intent).Vector().empty();
+    }
+    if(question=="initial_strategy") return !intent.isNull();
+    if(question=="opening" || question=="horizon" || question=="campaign_exhausted"
+        || question.starts_with("checkpoint:")) return !campaign.plan().isNull();
+    if(question.starts_with("strategy:"))
+    {
+        const auto milestone=question.substr(question.find(':',9)+1);
+        for(const auto & binding:metadata["operation_focus"]["bindings"].Vector())
+            if(binding["milestone_id"].String()==milestone && campaign.holdsCommitment(binding["goal_id"].String())) return true;
+        return false;
+    }
+    if(question=="townless_survival")
+    {
+        if(!world["towns"].Vector().empty()) return true;
+        std::string reason;
+        return CampaignState::townlessCaptureDeadline(world).has_value() && campaign.validateTownlessRecovery(world,reason);
+    }
+    if(question.starts_with("decision_basis:"))
+    {
+        try
+        {
+            JsonParsingSettings parser;parser.strict=true;parser.mode=JsonParsingSettings::JsonFormatMode::JSON;
+            const JsonNode facts(signal.facts.data(),signal.facts.size(),parser,"ended decision basis");
+            if(!facts["actor_ref"].isString()) return false;
+            bool owned=false;for(const auto & hero:world["heroes"].Vector()) owned |= hero["ref"]==facts["actor_ref"];
+            if(world.isStruct() && !owned && facts["ended_reason"].String()=="executor_no_longer_owned") return true;
+            for(const auto & goal:campaign.plan()["goals"].Vector())
+                if(goal["actor_ref"]==facts["actor_ref"] && campaign.holdsCommitment(goal["id"].String())) return true;
+        }
+        catch(const std::exception &) { return false; }
+        return false;
+    }
+    const auto colon=question.find(':');
+    const auto subject=colon==std::string::npos ? question : question.substr(colon+1);
+    for(const auto & goal:campaign.plan()["goals"].Vector())
+        if(campaign.holdsCommitment(goal["id"].String())
+            && (goal["id"].String()==subject || goal["actor_ref"].String()==subject || goal["target_ref"].String()==subject)) return true;
+    for(const auto & choice:metadata["decision_basis"]["town_choices"].Vector())
+        if(question=="defense:"+choice["town_ref"].String()) return true;
+    return false;
+}
 inline JsonNode controllerFailureFeedback(const JsonNode & reply,const JsonNode & request)
 {
     auto shape=[](const JsonNode & value,std::initializer_list<const char *> keys) {
@@ -80,10 +236,15 @@ inline JsonNode controllerFailureFeedback(const JsonNode & reply,const JsonNode 
     for(const auto & [key,value]:request["identity"].Struct())
         if(reply["identity"][key].getType()!=value.getType()) return JsonNode();
     const auto & failure=reply["failure"], &usage=reply["usage"];
-    if(!shape(failure,{"code","required","available"}) || !failure["code"].isString()
-        || failure["code"].String()!="resource_commitments_exceed_available_funds"
+    if(!failure["code"].isString()
         || !shape(usage,{"known","input_tokens","output_tokens"}) || !usage["known"].isBool()
-        || !integer(usage["input_tokens"]) || !integer(usage["output_tokens"])) return JsonNode();
+        || !integer(usage["input_tokens"]) || !integer(usage["output_tokens"])
+        || usage["input_tokens"].Integer()>1000000000 || usage["output_tokens"].Integer()>1000000000) return JsonNode();
+    const std::set<std::string> semanticCodes{"weaker_main_without_supported_offense","invalid_strategic_operation_focus",
+        "unsupported_wait_purpose","unsupported_strategic_ownership_target","unsupported_strategic_action_target"};
+    if(semanticCodes.count(failure["code"].String())) return shape(failure,{"code"}) ? failure : JsonNode();
+    if(!shape(failure,{"code","required","available"})
+        || failure["code"].String()!="resource_commitments_exceed_available_funds") return JsonNode();
     if(!failure["required"].isVector() || !failure["available"].isVector()
         || failure["required"].Vector().size()!=7 || failure["available"].Vector().size()!=7
         || failure["available"]!=request["observation"]["resources"]) return JsonNode();
@@ -91,6 +252,7 @@ inline JsonNode controllerFailureFeedback(const JsonNode & reply,const JsonNode 
     for(int i=0;i<7;++i)
     {
         if(!integer(failure["required"][i]) || !integer(failure["available"][i])) return JsonNode();
+        if(failure["required"][i].Integer()>1000000000000LL || failure["available"][i].Integer()>1000000000000LL) return JsonNode();
         exceeded |= failure["required"][i].Integer()>failure["available"][i].Integer();
     }
     return exceeded ? failure : JsonNode();

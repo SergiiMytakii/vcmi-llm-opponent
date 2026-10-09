@@ -63,7 +63,9 @@ int main(int argc,char ** argv)
         const auto firstReview=stallArbiter.consider(captureSignals);require(firstReview.request,"stalled capture not admitted");
         stallArbiter.dispatched(firstReview);stallArbiter.finished(1000,1);
         stallArbiter.beginTurn(5,{280000,120000,0});
-        require(!stallArbiter.consider(nextSignals).request,"elapsed day repeated unchanged capture review");
+        require(stallArbiter.consider(nextSignals).request,"unanswered capture review vanished next day");
+        for(const auto & signal:nextSignals) stallArbiter.resolved(signal);
+        require(!stallArbiter.consider(nextSignals).request,"confirmed resolution repeated unchanged capture review");
         require(strategicStalls(stalledCourse,nextDay)[0]["days_without_progress"].Integer()==4,
             "model-facing delay did not advance independently of deduplication");
         auto premature=stalledWorld;premature["day"].Integer()=3;
@@ -180,6 +182,28 @@ int main(int argc,char ** argv)
         saved["strategy_metadata"]["decision_basis"]=reply["decision_basis"];
         restored=restoreNativeNamespace(saved);
         require(restored["strategy_metadata"]["decision_basis"]==reply["decision_basis"],"accepted decision basis discarded on restore");
+        auto coveredSave=saved;
+        auto & coverage=coveredSave["strategy_metadata"]["question_coverage"];
+        const auto & milestone=coveredSave["strategic_intent"]["milestones"][0]["id"];
+        JsonNode covered;covered["question"].String()="strategy:no_progress:"+milestone.String();
+        covered["facts"].String()="same native facts";covered["milestone_id"]=milestone;
+        covered["campaign_revision"]=coveredSave["native_campaign"]["plan"]["revision"];
+        // This fixture historically stored the raw plan. Use an actual saved
+        // campaign shape for the new optional coverage validation.
+        if(covered["campaign_revision"].isNull())
+        { coveredSave["native_campaign"]["plan"]=newPlan;covered["campaign_revision"]=newPlan["revision"]; }
+        covered["goal_ids"].Vector().push_back(newPlan["goals"][0]["id"]);
+        coverage.Vector().push_back(covered);
+        auto checkedCoverage=restoreNativeNamespace(coveredSave);
+        require(checkedCoverage["strategy_metadata"]["question_coverage"]==coverage,"valid optional question coverage was lost");
+        for(const auto * field:{"question","facts","milestone_id","campaign_revision","goal_ids"})
+        {
+            auto corrupt=coveredSave;corrupt["strategy_metadata"]["question_coverage"][0].Struct().erase(field);
+            auto checked=restoreNativeNamespace(corrupt);
+            require(checked["strategy_metadata"]["question_coverage"].isNull(),"incomplete coverage restored closure proof");
+            require(checked["strategic_intent"]==coveredSave["strategic_intent"]
+                && checked["native_campaign"]==coveredSave["native_campaign"],"bad optional coverage reset the namespace");
+        }
         saved["strategy_metadata"].Struct().erase("decision_basis");
         restored=restoreNativeNamespace(saved);
         require(restored["native_campaign"]==newPlan && restored["strategic_intent"]==saved["strategic_intent"],"legacy optional basis reset namespace/course");

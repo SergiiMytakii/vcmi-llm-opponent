@@ -164,7 +164,12 @@ class BackgroundIntegrationTest(unittest.TestCase):
         ordinary=[q for q in requests if q.get('mode')!='prepare_next_turn' and q['identity']['player']==0 and q['identity']['day']==2]
         if case!='ready':self.assertTrue(ordinary,str(output))
         else:
-            self.assertFalse(ordinary,str(output))
+            # An independent build covers its town need, not an unanswered
+            # reachable enemy target or an idle hero. Those still get review.
+            self.assertTrue(all(not any(s['question']=='routine:object:1' for s in q['signals'])
+                                for q in ordinary),str(output))
+            self.assertTrue(any(s['question'].startswith(('victory_target:','routine:'))
+                                for q in ordinary for s in q['signals']),str(output))
             self.assertTrue(any(r.get('phase')=='admit' and r.get('execution_day')==2 for r in records(run/'runtime.log','NK3_BACKGROUND')),str(output))
         if case=='late':
             traces=records(run/'runtime.log','NK3_BACKGROUND');request_id=background[0]['request_id']

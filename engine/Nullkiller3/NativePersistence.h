@@ -103,6 +103,29 @@ inline bool validPendingTask(const JsonNode & task)
     return action["kind"].isString() && kinds.count(action["kind"].String()) && action["goal_id"].isString()
         && action["goal_id"].String().size()<=120 && savedInteger(action["native_goal_type"],-1,100000);
 }
+inline bool validQuestionCoverage(const JsonNode & coverage,const JsonNode & campaign,const JsonNode & intent)
+{
+    if(!coverage.isVector() || coverage.Vector().size()>6) return false;
+    std::set<std::string> questions;
+    for(const auto & item:coverage.Vector())
+    {
+        if(!intentFields(item,{"question","facts","milestone_id","campaign_revision","goal_ids"})
+            || !intentText(item["question"],240) || !item["facts"].isString() || item["facts"].String().size()>8192
+            || !intentText(item["milestone_id"],120) || item["question"].String()!="strategy:no_progress:"+item["milestone_id"].String()
+            || !questions.insert(item["question"].String()).second || !savedInteger(item["campaign_revision"],1,2147483647)
+            || item["campaign_revision"]!=campaign["revision"] || intentMilestone(intent,item["milestone_id"]).isNull()
+            || !item["goal_ids"].isVector() || item["goal_ids"].Vector().empty() || item["goal_ids"].Vector().size()>12) return false;
+        std::set<std::string> ids;
+        for(const auto & id:item["goal_ids"].Vector())
+        {
+            if(!intentText(id,120) || !ids.insert(id.String()).second) return false;
+            bool found=false;
+            for(const auto & goal:campaign["goals"].Vector()) found |= goal["id"]==id;
+            if(!found) return false;
+        }
+    }
+    return true;
+}
 // Restore only a coherent object-label namespace. Resetting labels while
 // retaining their old intentions would silently redirect commands to new objects.
 // The request budget is independent and survives every intent reset.
@@ -284,9 +307,15 @@ inline JsonNode restoreNativeNamespace(const JsonNode & saved)
         result["request_arbiter"]["addressed"].Struct().erase("initial_strategy");
     if(result["strategy_metadata"].isStruct())
     {
-        const std::set<std::string> kept{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis"};
+        const std::set<std::string> kept{"decision","reason","victory_method","assignments","reconsider_when","defense_exit","operation_focus","decision_basis","question_coverage"};
         std::erase_if(result["strategy_metadata"].Struct(),[&](const auto & item) { return !kept.count(item.first); });
         if(result["strategic_intent"].isNull()) { result["strategy_metadata"].Struct().erase("operation_focus");result["strategy_metadata"].Struct().erase("decision_basis"); }
+    }
+    if(result["strategy_metadata"].isStruct())
+    {
+        const auto & coverage=static_cast<const JsonNode &>(result)["strategy_metadata"]["question_coverage"];
+        if(!coverage.isNull() && !validQuestionCoverage(coverage,result["native_campaign"]["plan"],result["strategic_intent"]))
+            result["strategy_metadata"].Struct().erase("question_coverage");
     }
     if(result["strategy_metadata"].isStruct())
         for(auto & assignment:result["strategy_metadata"]["assignments"].Vector())

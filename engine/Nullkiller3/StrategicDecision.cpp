@@ -399,12 +399,10 @@ bool validateStrategicDecision(const JsonNode & reply, const JsonNode & request,
                     && trial.statuses()[id]["state"].String()=="ready") supported=true;
             if(!supported)
             {
-                const auto preparation=forecastCommitments(freshWorld,trial);
                 for(const auto & [id,goal]:goals)
                     if((*goal)["actor_ref"]==assignment["hero_ref"] && (*goal)["kind"].String()=="reinforce_hero"
-                        && trial.statuses()[id]["state"].String()=="ready")
-                        for(const auto & delivery:preparation["deliveries"].Vector())
-                            if(delivery["goal_id"].String()==id && delivery["status"].String()=="conditional") supported=true;
+                        && trial.statuses()[id]["state"].String()=="ready"
+                        && supportedMainDelivery(*goal,trial,freshWorld,current.plan())) supported=true;
             }
             if(!supported) return reject("weaker_main_without_supported_offense");
         }

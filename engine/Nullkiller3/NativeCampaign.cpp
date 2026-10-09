@@ -1731,6 +1731,8 @@ void NativeCampaign::observeIntentProgress()
             || (!pending["action"]["goal"].isNull() && !CampaignState::sameGoal(binding["goal"],pending["action"]["goal"]));
     });
     world["strategic_progress"]=persisted["strategic_intent"]["progress"];
+    reconcileQuestionCoverage(persisted["strategy_metadata"]["question_coverage"],arbiter,campaign,
+        persisted["strategic_intent"],persisted["strategy_metadata"]);
 }
 void NativeCampaign::persist(NK2AI::Nullkiller & ai)
 {

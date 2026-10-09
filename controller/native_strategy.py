@@ -15,6 +15,19 @@ INTENT_PREDICATES = ('target_owned', 'building_present', 'army_at_least', 'site_
 INTENT_REASONS = ('target_lost', 'actor_lost', 'base_threat', 'route_blocked', 'no_progress', 'milestone_completed')
 
 
+# Only semantic validation failures may become a trusted protocol diagnostic.
+REJECTION_CODES = frozenset({
+    'weaker_main_without_supported_offense', 'invalid_strategic_operation_focus',
+    'unsupported_wait_purpose', 'unsupported_strategic_ownership_target',
+    'unsupported_strategic_action_target', 'resource_commitments_exceed_available_funds',
+})
+
+
+class StrategicRejection(ValueError):
+    pass
+
+
+
 def integer(low, high):
     return {'type': 'integer', 'minimum': low, 'maximum': high}
 
@@ -236,13 +249,13 @@ def validate_selected(request, selected, current=False):
             if not current:
                 kinds=('town','mine') if kind=='target_owned' else ('town',)
                 if target not in towns and objects.get(target,{}).get('kind') not in kinds:
-                    raise ValueError('unsupported strategic ownership target')
+                    raise StrategicRejection('unsupported_strategic_ownership_target')
         else:
             if target is None or actor is None or value != 0:raise ValueError('invalid strategic action predicate')
             if not current:
                 kind_expected=('subterranean_gate','portal') if kind=='passage_explored' else ('scholar','treasure_chest','obelisk','artifact','keymaster_tent','border_guard','border_gate')
                 if actor not in heroes or objects.get(target,{}).get('kind') not in kind_expected:
-                    raise ValueError('unsupported strategic action target')
+                    raise StrategicRejection('unsupported_strategic_action_target')
     if any(c['milestone_id'] not in milestones for c in selected['reconsider_when']):
         raise ValueError('unknown strategic reconsideration milestone')
     return milestones
@@ -494,7 +507,7 @@ def validate_decision_basis(request,reply,plan,milestones):
         elif not (purpose=='defend' and kinds & {'defend_area','prepare_garrison'}
                   or purpose=='intercept' and 'intercept_hero' in kinds
                   or purpose=='safety' and 'preserve_force' in kinds):
-            raise ValueError('unsupported_wait_purpose')
+            raise StrategicRejection('unsupported_wait_purpose')
     for name,goal in goals.items():
         old=next((g for g in (request.get('campaign') or {}).get('goals',[]) if g['id']==name),None)
         state=statuses.get(name,{}).get('state') if same_goal(old,goal) else None
@@ -531,22 +544,90 @@ def validate_rejection(request, reply):
                    for k, value in request['identity'].items())):
         raise ValueError('stale strategic rejection identity')
     failure = reply['failure']
-    if (not isinstance(failure, dict) or set(failure) != {'code', 'required', 'available'}
-            or failure['code'] != 'resource_commitments_exceed_available_funds'):
+    if not isinstance(failure, dict) or failure.get('code') not in REJECTION_CODES:
         raise ValueError('unsupported strategic rejection')
-    for name in ('required', 'available'):
-        values = failure[name]
-        if not isinstance(values, list) or len(values) != 7 or any(type(v) is not int or v < 0 for v in values):
+    if failure['code'] == 'resource_commitments_exceed_available_funds':
+        if set(failure) != {'code', 'required', 'available'}:
             raise ValueError('invalid strategic rejection resources')
-    if (failure['available'] != request['observation']['resources']
-            or not any(required > available for required, available in zip(failure['required'], failure['available']))):
-        raise ValueError('strategic rejection resources differ from request')
+        for name in ('required', 'available'):
+            values = failure[name]
+            if not isinstance(values, list) or len(values) != 7 or any(type(v) is not int or not 0 <= v <= 10**12 for v in values):
+                raise ValueError('invalid strategic rejection resources')
+        if (failure['available'] != request['observation']['resources']
+                or not any(required > available for required, available in zip(failure['required'], failure['available']))):
+            raise ValueError('strategic rejection resources differ from request')
+    elif set(failure) != {'code'}:
+        raise ValueError('unsupported strategic rejection fields')
     usage = reply['usage']
     if (not isinstance(usage, dict) or set(usage) != {'known', 'input_tokens', 'output_tokens'}
             or type(usage['known']) is not bool
-            or any(type(usage[k]) is not int or usage[k] < 0 for k in ('input_tokens', 'output_tokens'))):
+            or any(type(usage[k]) is not int or not 0 <= usage[k] <= 10**9 for k in ('input_tokens', 'output_tokens'))):
         raise ValueError('invalid strategic rejection usage')
     return reply
+
+
+def supported_main(request, plan, goal):
+    world=request['observation'];old={g['id']:g for g in (request.get('campaign') or {}).get('goals',[])}
+    statuses=world.get('goal_statuses') or {};goals={g['id']:g for g in plan['goals']}
+    day=request.get('execution_day',world['day'])
+    def completed(name):
+        return same_goal(old.get(name),goals[name]) and statuses.get(name,{}).get('state')=='completed'
+    if goal['deadline_day']<day or completed(goal['id']) or any(not completed(dep) for dep in goal['depends_on']):
+        return False
+    actor=goal['actor_ref'];heroes={h['ref']:h for h in world['heroes']}
+    if actor not in heroes:return False
+    if same_goal(old.get(goal['id']),goal) and statuses.get(goal['id'],{}).get('state') in ('cancelled','failed'):
+        return False
+    def floor(ref):
+        value=0
+        for g in plan['goals']:
+            if g['actor_ref']!=ref or completed(g['id']):continue
+            if g['kind'] in ('preserve_force','defend_area'):value=max(value,g['min_army_value'])
+            for reserve in plan['reserves']:
+                if reserve['goal_id']==g['id']:value=max(value,reserve['force_value'])
+            if g['kind']=='reinforce_hero':value=max(value,min(heroes.get(ref,{}).get('army_value',0),g['complete_when']['value']))
+        return value
+    if goal['kind'] in ('capture_target','intercept_hero','secure_resource'):
+        limit=(goal.get('risk') or {}).get('max_loss_ratio',plan['policy']['max_loss_ratio'])
+        for target in world.get('forecasts',{}).get('routes',[]):
+            if target['target_ref']!=goal['target_ref']:continue
+            for route in target.get('own_arrivals',[]):
+                army=route.get('army_value');loss=route.get('army_loss_estimate');arrival=route.get('day')
+                if (route.get('hero_ref')==actor and all(type(v) is int for v in (army,loss,arrival))
+                        and world['day']<=arrival<=goal['deadline_day'] and army>=goal['min_army_value']
+                        and army>0 and 0<=loss<army and loss<=army*limit and army-loss>=floor(actor)):
+                    return True
+    if goal['kind']=='reinforce_hero':
+        source=goal['target_ref'];required=goal['complete_when']['value'];recipient=heroes[actor].get('army_value',0)
+        if recipient>=required:return False
+        town=next((t for t in world['towns'] if t['ref']==source),None)
+        pool=town.get('army_holder_ref',source) if town else source
+        if pool==actor:return False
+        aliases={pool,source} | {t['ref'] for t in world['towns'] if t.get('army_holder_ref',t['ref'])==pool}
+        previous=request.get('campaign') or {}
+        # A native source quote includes packing and retained floors. New source
+        # obligations change its premises; a reply cannot invent a replacement quote.
+        for g in plan['goals']:
+            if g['id']==goal['id']:continue
+            if g['actor_ref'] in aliases or g['target_ref'] in aliases:
+                if not same_goal(old.get(g['id']),g):return False
+                before=[r for r in previous.get('reserves',[]) if r['goal_id']==g['id']]
+                after=[r for r in plan['reserves'] if r['goal_id']==g['id']]
+                if before!=after:return False
+        preparation=world.get('offensive_preparation') or {}
+        for commander in preparation.get('commander_options',[]):
+            if commander.get('ref')!=actor:continue
+            for quote in commander.get('reinforcement_sources',[]):
+                if quote.get('source_ref')!=source or quote.get('status')!='conditional_meeting':continue
+                traveler=actor if town else pool;destination=source if town else actor
+                routes=[r for r in quote.get('meeting_routes',[]) if r.get('hero_ref')==traveler and r.get('destination_ref')==destination]
+                if not routes:continue
+                route=min(routes,key=lambda r:(r.get('day',2**31),r.get('army_loss_estimate',2**31)))
+                loss=route.get('army_loss_estimate');arrival=route.get('day');available=quote.get('unpledged_army_value')
+                if not all(type(v) is int for v in (loss,arrival,available)):continue
+                if (world['day']<=arrival<=goal['deadline_day'] and 0<=loss<=heroes[traveler].get('army_value',0)*plan['policy']['max_loss_ratio']
+                        and recipient+available-loss>=required):return True
+    return False
 
 
 def validate_reply(request, reply, wire=False):
@@ -593,6 +674,12 @@ def validate_reply(request, reply, wire=False):
                        and same_goal(previous.get(goal.get('id')),goal))
             if not completed and goal['deadline_day']>survival_deadline:
                 raise ValueError('townless_goal_after_defeat')
+    update=shape_reply.get('strategy_update');focus=shape_reply.get('operation_focus')
+    if isinstance(update,dict) and isinstance(focus,dict) and type(focus.get('revision')) is int:
+        base=(request.get('strategic_intent') or {}).get('revision',0)
+        expected=base+1 if update.get('decision')=='revise' else base
+        if update.get('decision') in ('keep','revise') and focus['revision']!=expected:
+            raise StrategicRejection('invalid_strategic_operation_focus')
     _validate_shape(shape_reply, byte_schema)
     exposed = any(front.get('town_ref') in {t['ref'] for t in request['observation']['towns']}
                   and front.get('threats') and front.get('status') in
@@ -619,7 +706,7 @@ def validate_reply(request, reply, wire=False):
         milestones=validate_selected(request,update['selected'])
         intent_revision=base+1
     focus=reply['operation_focus']
-    if focus['revision'] != intent_revision:raise ValueError('stale operation focus revision')
+    if focus['revision'] != intent_revision:raise StrategicRejection('invalid_strategic_operation_focus')
     goal_ids={g['id'] for g in plan['goals']}
     bound=set()
     for binding in focus['bindings']:
@@ -712,13 +799,19 @@ def validate_reply(request, reply, wire=False):
                 raise ValueError('force_reserve_not_available')
             resource_totals = [a+b for a,b in zip(resource_totals, reserve['resources'])]
         if any(total > available for total, available in zip(resource_totals, request['observation']['resources'])):
-            error = ValueError('resource_commitments_exceed_available_funds')
+            error = StrategicRejection('resource_commitments_exceed_available_funds')
             error.required = resource_totals
             error.available = list(request['observation']['resources'])
             raise error
     assigned = {a['hero_ref']:a for a in reply['assignments']}
     if len(assigned) != len(reply['assignments']) or sum(a['role']=='main' for a in assigned.values())>1:
         raise ValueError('conflicting strategic roles')
+    heroes=request['observation']['heroes']
+    strongest=max(heroes,key=lambda h:h.get('army_value',0),default=None)
+    for assignment in assigned.values():
+        if strongest and assignment['role']=='main' and assignment['hero_ref']!=strongest['ref']:
+            if not any(g['actor_ref']==assignment['hero_ref'] and supported_main(request,plan,g) for g in goals.values()):
+                raise StrategicRejection('weaker_main_without_supported_offense')
     for goal in goals.values():
         actor = goal['actor_ref']
         if actor is not None and actor not in assigned:

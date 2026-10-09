@@ -861,7 +861,7 @@ JsonNode CampaignState::observeDecisionBasis(const JsonNode & basis,const JsonNo
         const auto & status=static_cast<const JsonNode &>(state)["statuses"][id];
         if(status["state"].String()=="completed" || status["state"].String()=="cancelled"
             || status["failure_reason"].String().starts_with("decision_basis:")) continue;
-        JsonNode item;item["goal_id"]=wait["goal_id"];item["purpose"]=wait["purpose"];
+        JsonNode item;item["goal_id"]=wait["goal_id"];item["purpose"]=wait["purpose"];item["actor_ref"]=goal["actor_ref"];
         std::string broken;
         bool completedPreparation=!wait["basis_goal_ids"].Vector().empty();
         for(const auto & ref:wait["basis_goal_ids"].Vector())

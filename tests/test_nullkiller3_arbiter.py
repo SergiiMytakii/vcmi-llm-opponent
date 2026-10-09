@@ -137,6 +137,35 @@ int main() {
 '''
         self.compile_and_run(source)
 
+    def test_failed_review_returns_after_restore_but_native_resolution_stays_closed(self):
+        self.compile_and_run(r'''
+#include "RequestArbiter.h"
+#include <cassert>
+using namespace nullkiller3;
+int main() {
+    const StrategicSignal stalled{"strategy:no_progress:capture", "unchanged", true,true,true,false};
+    RequestArbiter owner;owner.beginTurn(4,{90000,120000,0});
+    auto request=owner.consider({stalled});owner.dispatched(request);
+    RequestArbiter interrupted(owner.save()); // Save while exchanging/cancelled.
+    interrupted.beginTurn(4,{90000,120000,0});
+    assert(!interrupted.consider({stalled}).request);
+    assert(interrupted.requestsThisTurn()==1 && interrupted.remainingBudget().waitMs==10000);
+    owner.finished(30000,60000); // Rejection or timeout installs nothing.
+    assert(!owner.consider({stalled}).request);
+    RequestArbiter restored(owner.save());restored.beginTurn(5,{90000,120000,0});
+    assert(restored.consider({stalled}).request);
+    restored.resolved(stalled);
+    RequestArbiter accepted(restored.save());accepted.beginTurn(6,{90000,120000,0});
+    assert(!accepted.consider({stalled}).request);
+    auto changed=stalled;changed.facts="new enemy";
+    assert(accepted.consider({changed}).request);
+    ArbiterState legacy;legacy.day=4;legacy.requests=1;legacy.addressed[stalled.question]=stalled.facts;
+    RequestArbiter old(legacy);old.beginTurn(4,{90000,120000,0});
+    assert(!old.consider({stalled}).request);
+    old.beginTurn(5,{90000,120000,0});assert(old.consider({stalled}).request);
+}
+''')
+
     def compile_and_run(self, source):
         with tempfile.TemporaryDirectory() as directory:
             cpp = Path(directory) / 'proof.cpp'

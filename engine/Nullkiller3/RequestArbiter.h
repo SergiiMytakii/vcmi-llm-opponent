@@ -36,6 +36,7 @@ struct ArbiterState
     int requests = 0;
     RequestBudget remaining{};
     std::map<std::string, std::string> addressed;
+    std::map<std::string, std::string> attempted;
 };
 
 enum class RequestReason { Needed, NoNewDecision, InFlight };
@@ -48,8 +49,8 @@ struct RequestDecision
     std::vector<StrategicSignal> signals;
 };
 
-// One planner owns this object. Dispatch records the facts before transport,
-// so an invalid reply or timeout cannot turn the same blocker into a retry loop.
+// Dispatch suppresses the same facts for this turn; only fresh admission or
+// native resolution closes a question across turns.
 class RequestArbiter
 {
     int day = -1;
@@ -57,6 +58,7 @@ class RequestArbiter
     bool inFlight = false;
     RequestBudget budget{};
     std::map<std::string, std::string> addressed;
+    std::map<std::string, std::string> attempted;
     int64_t reservedWait = 0;
     int64_t reservedTokens = 0;
 
@@ -64,16 +66,17 @@ public:
     RequestArbiter() = default;
     explicit RequestArbiter(const ArbiterState & saved)
     {
-        if(saved.version != 1 || saved.day < -1 || saved.requests < 0
+        if((saved.version != 1 && saved.version != 2) || saved.day < -1 || saved.requests < 0
             || saved.remaining.waitMs < 0 || saved.remaining.tokens < 0
             || saved.remaining.criticalReserveMs < 0) return;
         day = saved.day;
         requests = saved.requests;
         budget = saved.remaining;
-        addressed = saved.addressed;
+        if(saved.version==1) attempted=saved.addressed; // Historical dispatch is not admission.
+        else { addressed=saved.addressed;attempted=saved.attempted; }
         // A restored in-flight request remains charged and is never replayed.
     }
-    ArbiterState save() const { return {1, day, requests, budget, addressed}; }
+    ArbiterState save() const { return {2, day, requests, budget, addressed, attempted}; }
 
     void beginTurn(int currentDay, RequestBudget limits)
     {
@@ -82,6 +85,7 @@ public:
         day = currentDay;
         budget = limits;
         requests = 0;
+        attempted.clear();
     }
 
     RequestDecision consider(const std::vector<StrategicSignal> & signals) const
@@ -101,6 +105,8 @@ public:
             const auto old = addressed.find(signal.question);
             if(old != addressed.end() && old->second == signal.facts)
                 continue;
+            const auto attempt=attempted.find(signal.question);
+            if(attempt!=attempted.end() && attempt->second==signal.facts) continue;
             questions.insert_or_assign(signal.question, signal);
         }
         for(const auto & [question, signal] : questions)
@@ -127,7 +133,7 @@ public:
         if(!decision.request || inFlight)
             return;
         for(const auto & signal : decision.signals)
-            addressed.insert_or_assign(signal.question, signal.facts);
+            attempted.insert_or_assign(signal.question, signal.facts);
         inFlight = true;
         reservedWait = std::min(budget.waitMs, decision.deadlineMs);
         reservedTokens = budget.tokens;
@@ -145,6 +151,8 @@ public:
         reservedWait = reservedTokens = 0;
         inFlight = false;
     }
+
+    void reopen(const std::string & question) { addressed.erase(question); }
 
     int requestsThisTurn() const { return requests; }
     const RequestBudget & remainingBudget() const { return budget; }
